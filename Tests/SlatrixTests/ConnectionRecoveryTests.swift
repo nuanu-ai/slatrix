@@ -1,5 +1,7 @@
 import AppKit
+import Foundation
 import MatrixRustSDK
+import Network
 import Testing
 
 @testable import Slatrix
@@ -13,12 +15,18 @@ private final class SendQueueClient: Client, @unchecked Sendable {
 
     /// A room whose queue the SDK stopped after a failed send.
     let stopped = StoppedQueueRoom()
-    private let errors = Recorder<SendQueueRoomErrorListener>()
-    func failSend(roomID: String) {
-        errors.all.last?.onError(roomId: roomID, error: .Generic(msg: "502", details: nil))
+    private let updates = Recorder<SendQueueRoomUpdateListener>()
+    func failSend(roomID: String, transactionID: String = "txn-1", recoverable: Bool = true) {
+        emitQueue(
+            roomID: roomID,
+            update: .sendError(
+                transactionId: transactionID, error: .genericApiError(msg: "502"), isRecoverable: recoverable))
     }
-    override func subscribeToSendQueueStatus(listener: SendQueueRoomErrorListener) -> TaskHandle {
-        errors.append(listener)
+    func emitQueue(roomID: String, update: RoomSendQueueUpdate) {
+        for listener in updates.all { listener.onUpdate(roomId: roomID, update: update) }
+    }
+    override func subscribeToSendQueueUpdates(listener: SendQueueRoomUpdateListener) async throws -> TaskHandle {
+        updates.append(listener)
         return FakeCancellableHandle(noHandle: .init())
     }
     override func getRoom(roomId: String) throws -> Room? { roomId == "!room" ? stopped : nil }
@@ -354,6 +362,250 @@ struct ConnectionRecoveryTests {
         await recovery.stop()
         network.continuation.finish()
     }
+
+    @Test("Unrecoverable send errors do not increment room backoff or schedule a queue resume")
+    func unrecoverableSendErrorSkipsBackoff() async throws {
+        var observedFailures: [Int] = []
+        let recovery = ConnectionRecovery(
+            networkChanges: { AsyncStream { $0.yield(wifiRoute) } }, wakeNotifications: NotificationCenter(),
+            waitToResumeSending: { observedFailures.append($0) })
+        let service = FakeSyncService(state: .running)
+        let client = SendQueueClient()
+        try await recovery.attach(service, client: client) { _ in }
+        try #require(await eventually { recovery.feedback.state == .running })
+
+        client.failSend(roomID: "!room", transactionID: "t1", recoverable: false)
+        client.failSend(roomID: "!room", transactionID: "t2", recoverable: false)
+        await drainMainActor()
+        #expect(observedFailures.isEmpty && client.stopped.enabled.all.isEmpty)
+
+        client.failSend(roomID: "!room", transactionID: "t3", recoverable: true)
+        #expect(await eventually { observedFailures == [0] && client.stopped.enabled.all == [true] })
+        await recovery.stop()
+    }
+
+    @Test("A sent event resets per-room send queue backoff")
+    func sentEventResetsBackoff() async throws {
+        var observedFailures: [Int] = []
+        let recovery = ConnectionRecovery(
+            networkChanges: { AsyncStream { $0.yield(wifiRoute) } }, wakeNotifications: NotificationCenter(),
+            waitToResumeSending: { observedFailures.append($0) })
+        let service = FakeSyncService(state: .running)
+        let client = SendQueueClient()
+        try await recovery.attach(service, client: client) { _ in }
+        try #require(await eventually { recovery.feedback.state == .running })
+
+        client.failSend(roomID: "!room", transactionID: "t1", recoverable: true)
+        #expect(await eventually { observedFailures == [0] })
+        client.stopped.enableSendQueue(enable: false)
+        client.failSend(roomID: "!room", transactionID: "t1", recoverable: true)
+        #expect(await eventually { observedFailures == [0, 1] })
+
+        client.emitQueue(roomID: "!room", update: .sentEvent(transactionId: "t1", eventId: "$sent"))
+        await drainMainActor()
+        client.stopped.enableSendQueue(enable: false)
+        client.failSend(roomID: "!room", transactionID: "t2", recoverable: true)
+        #expect(await eventually { observedFailures == [0, 1, 0] })
+        await recovery.stop()
+    }
+
+    @Test("Cancelling a failed local event cancels its backoff timer and immediately re-enables the room queue")
+    func cancelledEventResumesRoomImmediately() async throws {
+        var releaseTimer: CheckedContinuation<Void, Never>?
+        let recovery = ConnectionRecovery(
+            networkChanges: { AsyncStream { $0.yield(wifiRoute) } }, wakeNotifications: NotificationCenter(),
+            waitToResumeSending: { _ in await withCheckedContinuation { releaseTimer = $0 } })
+        let service = FakeSyncService(state: .running)
+        let client = SendQueueClient()
+        try await recovery.attach(service, client: client) { _ in }
+        try #require(await eventually { recovery.feedback.state == .running })
+
+        client.failSend(roomID: "!room", transactionID: "t1", recoverable: true)
+        try #require(await eventually { releaseTimer != nil })
+        client.emitQueue(roomID: "!room", update: .cancelledLocalEvent(transactionId: "t1"))
+        #expect(await eventually { client.stopped.enabled.all == [true] })
+        releaseTimer?.resume()
+        await recovery.stop()
+    }
+
+    @Test("Cancelling a follower message leaves an earlier failed message's backoff and paused queue intact")
+    func cancellingFollowerLeavesFailureBackoffIntact() async throws {
+        var timerCount = 0
+        var releaseTimer: CheckedContinuation<Void, Never>?
+        let recovery = ConnectionRecovery(
+            networkChanges: { AsyncStream { $0.yield(wifiRoute) } }, wakeNotifications: NotificationCenter(),
+            waitToResumeSending: { _ in
+                timerCount += 1
+                await withCheckedContinuation { releaseTimer = $0 }
+            })
+        let service = FakeSyncService(state: .running)
+        let client = SendQueueClient()
+        try await recovery.attach(service, client: client) { _ in }
+        try #require(await eventually { recovery.feedback.state == .running })
+
+        client.failSend(roomID: "!room", transactionID: "t1", recoverable: true)
+        try #require(await eventually { releaseTimer != nil })
+
+        // Follower t2 is cancelled while t1 is still failed: queue must stay paused and backoff intact.
+        client.emitQueue(roomID: "!room", update: .cancelledLocalEvent(transactionId: "t2"))
+        await drainMainActor()
+        #expect(client.stopped.enabled.all.isEmpty && timerCount == 1)
+
+        // Now cancelling the blocking failure t1 itself unblocks the room queue.
+        client.emitQueue(roomID: "!room", update: .cancelledLocalEvent(transactionId: "t1"))
+        #expect(await eventually { client.stopped.enabled.all == [true] })
+        releaseTimer?.resume()
+        await recovery.stop()
+    }
+
+    @Test("Health probe rejects reverse-proxy 502/503 responses and restarts sync")
+    func healthProbeRejectsHTTP502() async throws {
+        let url = URL(string: "http://127.0.0.1/versions")!
+        let ok = try #require(HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil))
+        let badGateway = try #require(HTTPURLResponse(url: url, statusCode: 502, httpVersion: nil, headerFields: nil))
+        let unavailable = try #require(HTTPURLResponse(url: url, statusCode: 503, httpVersion: nil, headerFields: nil))
+        #expect(ConnectionRecovery.isHealthyHTTPResponse(ok))
+        #expect(!ConnectionRecovery.isHealthyHTTPResponse(badGateway))
+        #expect(!ConnectionRecovery.isHealthyHTTPResponse(unavailable))
+
+        // Verify the real URLSession probe treats a loopback HTTP 502 server as unhealthy and restarts sync.
+        let listener = try NWListener(using: .tcp)
+        let queue = DispatchQueue(label: "HealthProbe502")
+        listener.newConnectionHandler = { connection in
+            connection.start(queue: queue)
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { _, _, _, _ in
+                let response = Data("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
+                connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
+            }
+        }
+        let port: UInt16 = try await withCheckedThrowingContinuation { continuation in
+            listener.stateUpdateHandler = { [listener] state in
+                switch state {
+                case .ready: continuation.resume(returning: listener.port!.rawValue)
+                case .failed(let error): continuation.resume(throwing: error)
+                default: break
+                }
+            }
+            listener.start(queue: queue)
+        }
+        defer { listener.cancel() }
+
+        let recovery = ConnectionRecovery(
+            networkChanges: { AsyncStream { $0.yield(wifiRoute) } }, wakeNotifications: NotificationCenter(),
+            waitToResumeSending: { _ in try await Task.sleep(for: .seconds(60)) },
+            healthCheckInterval: .zero)
+        let service = FakeSyncService(state: .running)
+        let client = SendQueueClient()
+        try await recovery.attach(service, client: client, homeserverURL: "http://127.0.0.1:\(port)") { _ in }
+        try #require(await eventually { recovery.feedback.state == .running })
+
+        client.failSend(roomID: "!room", transactionID: "t1", recoverable: true)
+        #expect(await eventually(timeout: .seconds(5)) { service.stopCount == 1 && service.startCount == 1 })
+        await recovery.stop()
+    }
+
+    @Test("System sleep stops sync cleanly without retrying until wake restarts it")
+    func sleepStopsAndWakeRestarts() async throws {
+        let notifications = NotificationCenter()
+        let recovery = onlineRecovery(wakeNotifications: notifications)
+        let service = FakeSyncService(state: .running)
+        try await recovery.attach(service) { _ in }
+        try #require(await eventually { recovery.feedback.state == .running })
+
+        notifications.post(name: NSWorkspace.willSleepNotification, object: nil)
+        #expect(await eventually { service.stopCount == 1 })
+        #expect(recovery.feedback.errorMessage == nil)
+        // A sync error while asleep must not restart sync before wake.
+        service.emit(.error)
+        await drainMainActor()
+        #expect(service.startCount == 0)
+
+        notifications.post(name: NSWorkspace.didWakeNotification, object: nil)
+        #expect(await eventually { service.startCount == 1 && recovery.feedback.state == .running })
+        await recovery.stop()
+    }
+
+    @Test("System sleep firing right after retry() starts never deadlocks recovery or teardown")
+    func sleepImmediatelyAfterRetryDoesNotDeadlock() async throws {
+        let notifications = NotificationCenter()
+        let recovery = onlineRecovery(wakeNotifications: notifications)
+        let service = FakeSyncService(state: .offline)
+        try await recovery.attach(service) { _ in }
+
+        // Queue retry() #1 and willSleep #2 on MainActor so pauseForSleep runs in the exact gap between
+        // retry() publishing `attempt` and its inner Task body starting (#3).
+        let retrying = Task { @MainActor in try? await recovery.retry() }
+        let sleeper = Task { @MainActor in
+            notifications.post(name: NSWorkspace.willSleepNotification, object: nil)
+        }
+        await sleeper.value
+
+        var stopped = false
+        let stopping = Task {
+            await recovery.stop()
+            stopped = true
+        }
+        let finished = await eventually(timeout: .seconds(2)) { stopped }
+        #expect(finished, "retry() and pauseForSleep() deadlocked waiting on each other")
+        if finished {
+            await retrying.value
+            await stopping.value
+        }
+    }
+
+    @Test("A brief offline blip during SDK start never leaves room sync responses unobserved")
+    func offlineDuringStartKeepsResponseObserver() async throws {
+        let network = AsyncStream<NetworkRoute>.makeStream()
+        network.continuation.yield(wifiRoute)
+        let recovery = ConnectionRecovery(networkChanges: { network.stream })
+        let service = FakeSyncService(state: .offline)
+        service.confirmsSync = false
+        service.startGate.arm()
+        try await recovery.attach(service) { _ in }
+
+        let starting = Task { try await recovery.retry() }
+        try #require(await eventually { service.startGate.isWaiting })
+        network.continuation.yield(.offline)
+        try #require(await eventually { recovery.feedback.state == .offline })
+        network.continuation.yield(wifiRoute)
+        await drainMainActor()
+        service.startGate.release()
+        try await starting.value
+        try #require(await eventually { !recovery.feedback.isRetrying })
+
+        service.roomSync.emit(.running)
+        #expect(await eventually { recovery.feedback.state == .running })
+        await recovery.stop()
+        network.continuation.finish()
+    }
+
+    @Test("A recoverable send failure on a blackholed socket triggers a rate-limited health check and restarts sync")
+    func blackholedSocketHealthCheckRestartsSync() async throws {
+        var probes = 0
+        var healthy = false
+        let recovery = ConnectionRecovery(
+            networkChanges: { AsyncStream { $0.yield(wifiRoute) } }, wakeNotifications: NotificationCenter(),
+            waitToResumeSending: { _ in try await Task.sleep(for: .seconds(60)) },
+            checkHealth: {
+                probes += 1
+                return healthy
+            }, healthCheckInterval: .seconds(60))
+        let service = FakeSyncService(state: .running)
+        let client = SendQueueClient()
+        try await recovery.attach(service, client: client) { _ in }
+        try #require(await eventually { recovery.feedback.state == .running })
+
+        client.failSend(roomID: "!room", transactionID: "t1", recoverable: true)
+        #expect(await eventually { probes == 1 && service.stopCount == 1 && service.startCount == 1 })
+        #expect(await eventually { recovery.feedback.state == .running })
+
+        // Rate-limited: a second failure immediately after does not re-probe or restart.
+        healthy = true
+        client.failSend(roomID: "!room", transactionID: "t2", recoverable: true)
+        await drainMainActor()
+        #expect(probes == 1 && service.stopCount == 1)
+        await recovery.stop()
+    }
 }
 
 @MainActor
@@ -432,5 +684,29 @@ struct ConnectionRecoveryOwnershipTests {
         try await recovery.retry()
         #expect(old.startCount == 0 && current.startCount == 1 && recovery.feedback.state == .running)
         await recovery.stop()
+    }
+
+    @Test("Concurrent stop waits for an in-flight SDK stop to finish before returning")
+    func concurrentStopWaitsForInFlightSDKStop() async throws {
+        let recovery = onlineRecovery()
+        let service = FakeSyncService(state: .running)
+        try await recovery.attach(service) { _ in }
+        service.stopGate.arm()
+
+        let first = Task { await recovery.stop() }
+        #expect(await eventually { service.stopGate.isWaiting })
+
+        var secondDone = false
+        let second = Task {
+            await recovery.stop()
+            secondDone = true
+        }
+        await drainMainActor()
+        #expect(!secondDone && service.stopCount == 0)
+
+        service.stopGate.release()
+        await first.value
+        await second.value
+        #expect(secondDone && service.stopCount == 1)
     }
 }

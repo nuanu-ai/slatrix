@@ -124,9 +124,14 @@ struct ChatMessage: Identifiable, Hashable {
     var threadRootID: String? = nil
     var isEdited = false
     var isRedacted = false
+    /// Whether an undecryptable (`m.room.encrypted`) message may still be unlocked by verifying or recovering keys.
+    var isUnlockable = true
     /// What stands in for a deleted message wherever it shows, quotes included, as Slack words it.
     static let deletedBody = "This message was deleted."
+    enum PendingChange: Hashable { case editing, deleting }
     var sendState = "sent"
+    /// Non-nil while an edit or redaction to this message is queued locally and not yet confirmed by the server.
+    var pendingChange: PendingChange? = nil
     /// Who has read up to this message, from their read receipts.
     var readBy: [String] = []
     var attachment: MessageAttachment? = nil

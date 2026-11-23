@@ -229,6 +229,16 @@ struct ReadStatePolicyTests {
         #expect(hold.blocks(Self.visible))
     }
 
+    @Test("Rolling back a failed Mark unread releases that visit without affecting a newer visit")
+    func rollbackMarkUnread() {
+        var hold = ReadStateHold()
+        hold.markUnread(Self.visible)
+        hold.rollbackMarkUnread(Self.changed { $0.timelineGeneration = UUID() })
+        #expect(hold.blocks(Self.visible))
+        hold.rollbackMarkUnread(Self.visible)
+        #expect(!hold.blocks(Self.visible))
+    }
+
     @Test(
         "A room shows as unread for notification counts, message counts or an explicit flag",
         arguments: [

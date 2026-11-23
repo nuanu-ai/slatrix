@@ -14,7 +14,7 @@ struct MediaViewer: View {
     var body: some View {
         ZStack {
             if let message = viewer.message {
-                MediaViewerPage(matrix: matrix, viewer: viewer, message: message, onForward: onForward)
+                MediaViewerPage(matrix: matrix, viewer: viewer, opened: message, onForward: onForward)
                     .transition(.opacity)
             }
         }
@@ -28,11 +28,14 @@ private struct MediaViewerPage: View {
     @EnvironmentObject private var appearance: AppearanceStore
     let matrix: MatrixService
     let viewer: MediaViewerState
-    let message: ChatMessage
+    let opened: ChatMessage
     let onForward: (MessageActionTarget) -> Void
     @State private var loaded: Loaded?
     @State private var downloading = false
     private var colors: AppColors { appearance.colors }
+    private var message: ChatMessage {
+        viewer.files == nil ? (messages.first { $0.id == opened.id } ?? opened) : opened
+    }
     private var attachment: MessageAttachment { message.attachment ?? MessageAttachment(name: "", url: "") }
     private var messages: [ChatMessage] {
         viewer.surface == .conversation ? matrix.messages : matrix.threadMessages
@@ -59,7 +62,9 @@ private struct MediaViewerPage: View {
         }
         .background(colors.mediaBackdrop)
         .accessibilityAddTraits(.isModal)
-        .task(id: message.eventID) { await load() }
+        .task(id: MediaViewerLoadKey(message: message, sourceRevision: matrix.attachmentSourceRevision(message))) {
+            await load()
+        }
     }
 
     private func content(_ loaded: Loaded?) -> MediaStageView.Content {
@@ -86,6 +91,20 @@ private struct MediaViewerPage: View {
             VStack(spacing: m.sp12) {
                 Text(error).font(m.font(.body)).foregroundStyle(colors.onMedia)
                 Button("Retry") { Task { await load() } }.buttonStyle(.secondary)
+            }
+        } else if message.sendState != "sent" {
+            if !message.isViewerMedia {
+                VStack(spacing: m.sp16) {
+                    FileTypeIcon(kind: attachment.fileKind, side: 96, glyph: .hero)
+                    Text(attachment.name).font(m.font(.title3, .semibold)).foregroundStyle(colors.onMedia)
+                    if let notice = MediaViewerState.pendingNotice(for: message, hasCachedStill: false) {
+                        Text(notice).font(m.font(.body)).foregroundStyle(colors.onMedia).opacity(0.75)
+                    }
+                }
+            } else if let notice = MediaViewerState.pendingNotice(
+                for: message, hasCachedStill: matrix.cachedMediaImage(message) != nil)
+            {
+                Text(notice).font(m.font(.body)).foregroundStyle(colors.onMedia).opacity(0.8)
             }
         } else if !message.isViewerMedia, loaded?.lease == nil {
             VStack(spacing: m.sp16) {
@@ -180,6 +199,7 @@ private struct MediaViewerPage: View {
     private func load() async {
         let eventID = message.eventID
         loaded = nil
+        guard message.sendState == "sent" else { return }
         do {
             if message.isViewerMedia && message.kind != "m.video" {
                 let image = try await matrix.loadFullImage(message)
@@ -190,7 +210,12 @@ private struct MediaViewerPage: View {
                 guard !Task.isCancelled, lease.isCurrent else { return }
                 loaded = Loaded(eventID: eventID, lease: lease)
             }
-        } catch is CancellationError {} catch {
+        } catch is CancellationError {
+            guard !Task.isCancelled else { return }
+            if !message.isViewerMedia || message.kind == "m.video" || matrix.cachedMediaImage(message) == nil {
+                loaded = Loaded(eventID: eventID, error: "This attachment isn’t available yet.")
+            }
+        } catch {
             guard !Task.isCancelled else { return }
             // An image keeps showing its thumbnail; the full picture is a nicety.
             if !message.isViewerMedia || message.kind == "m.video" || matrix.cachedMediaImage(message) == nil {

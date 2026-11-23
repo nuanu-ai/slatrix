@@ -51,6 +51,16 @@ struct SeenHeaderTests {
         #expect(SeenPolicy.headers(rows, me: "@me") == ["a": ["@anna"], "e": []])
     }
 
+    @Test("Sending a follow-up in the same group does not downgrade an earlier read message's ticks")
+    func groupHeadersKeepEarlierReadReceipt() {
+        let rows = TimelineLayout.rows(
+            [
+                message("a", "@me", at: 0, readBy: ["@anna"]),
+                message("b", "@me", at: 1),
+            ], unreadBoundaryEventID: nil, groups: true, now: .now, calendar: .current, locale: .current)
+        #expect(SeenPolicy.headers(rows, me: "@me") == ["a": ["@anna"]])
+    }
+
     @Test("Who has seen it, by name, the first two and how many more")
     func tooltip() {
         let names = ["@a:x": "Alice", "@b:x": "Bob", "@c:x": "Carol", "@d:x": "Dan"]

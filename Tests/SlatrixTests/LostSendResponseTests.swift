@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import MatrixRustSDK
 import Testing
@@ -238,6 +239,60 @@ struct LostSendResponseTests {
         #expect(
             await eventually(timeout: .seconds(15)) { server.bodies.contains("second") }, "Server has \(server.bodies)")
         await app.stopForChecks()
+    }
+
+    @Test(
+        "A revoked session tears down recovery cleanly (both early and mid-session) so wake/network cannot restart sync"
+    )
+    func revokedSessionStopsSync() async throws {
+        let onlineRoute = NetworkRoute.online(interface: 4, gateways: [])
+        // Case 1: Early revocation already active at startup (fires before/during connectionRecovery.attach).
+        let earlyServer = try await FakeHomeserver(room: "!room:localhost", messages: [], rejectsToken: true)
+        let earlyScratch = try TemporaryDirectory()
+        let earlyClient = try await signIn("me", to: earlyServer, in: earlyScratch)
+        let earlyWake = NotificationCenter()
+        let earlyNet = AsyncStream<NetworkRoute>.makeStream()
+        earlyNet.continuation.yield(onlineRoute)
+        let earlyRecovery = ConnectionRecovery(networkChanges: { earlyNet.stream }, wakeNotifications: earlyWake)
+        let earlyApp = MatrixService.scratch(connectionRecovery: earlyRecovery)
+        try await earlyApp.startForChecks(earlyClient)
+        #expect(await eventually(timeout: .seconds(15)) { earlyApp.sessionExpired && !earlyRecovery.isAttached })
+        #expect(earlyApp.connectionState == .stopped && !earlyApp.canRetryConnection && !earlyApp.isRetryingConnection)
+        #expect(earlyApp.user?.id == "@me:localhost")
+        await #expect(throws: MatrixServiceError.self) { try await earlyApp.retryConnection() }
+        let earlySyncs = earlyServer.syncRequests
+        earlyWake.post(name: NSWorkspace.didWakeNotification, object: nil)
+        earlyNet.continuation.yield(.offline)
+        earlyNet.continuation.yield(onlineRoute)
+        await drainMainActor()
+        #expect(!earlyRecovery.isAttached && earlyServer.syncRequests == earlySyncs)
+        await earlyApp.stopForChecks()
+        earlyNet.continuation.finish()
+
+        // Case 2: Mid-session revocation after recovery is attached must tear down recovery via connectionRecovery.stop().
+        let server = try await FakeHomeserver(room: "!room:localhost", messages: [], rejectsToken: false)
+        let scratch = try TemporaryDirectory()
+        let client = try await signIn("me", to: server, in: scratch)
+        let wake = NotificationCenter()
+        let net = AsyncStream<NetworkRoute>.makeStream()
+        net.continuation.yield(onlineRoute)
+        let recovery = ConnectionRecovery(networkChanges: { net.stream }, wakeNotifications: wake)
+        let app = MatrixService.scratch(connectionRecovery: recovery)
+        try await app.startForChecks(client)
+        try #require(await eventually(timeout: .seconds(15)) { recovery.isAttached })
+        server.revokeToken()
+        // Trigger an authenticated request so the server's 401 M_UNKNOWN_TOKEN fires the auth delegate.
+        _ = try? await client.displayName()
+        #expect(await eventually(timeout: .seconds(15)) { app.sessionExpired })
+        #expect(await eventually(timeout: .seconds(15)) { !recovery.isAttached })
+        let syncsAfterRevoke = server.syncRequests
+        wake.post(name: NSWorkspace.didWakeNotification, object: nil)
+        net.continuation.yield(.offline)
+        net.continuation.yield(onlineRoute)
+        await drainMainActor()
+        #expect(!recovery.isAttached && server.syncRequests == syncsAfterRevoke)
+        await app.stopForChecks()
+        net.continuation.finish()
     }
 
     /// The live timeline with thread replies in it.

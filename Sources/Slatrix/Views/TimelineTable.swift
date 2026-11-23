@@ -35,6 +35,7 @@ struct TimelineMessageEntry: Hashable {
     var pinned: Bool
     var highlighted: Bool
     var sendFailure: MessageSendFailure?
+    var sendWaitStatus: SendWaitStatus? = nil
     var sendBusy: Bool
     /// The readers a group's first row shows by its time; nil where it shows no ticks.
     var seenBy: [String]? = nil
@@ -1332,10 +1333,12 @@ struct TimelineRow: View, Equatable {
         case .message(let row):
             if let matrix = context.matrix {
                 let message = row.message
+                let own = message.senderID == matrix.user?.id
                 MessageRow(
                     message: message, grouped: row.grouped, isThread: context.isThread,
-                    own: message.senderID == matrix.user?.id, highlighted: row.highlighted, isSaved: row.saved,
-                    isPinned: row.pinned, sendFailure: row.sendFailure, sendBusy: row.sendBusy, hovered: hovered,
+                    own: own, highlighted: row.highlighted, isSaved: row.saved,
+                    isPinned: row.pinned, sendFailure: row.sendFailure, sendWaitStatus: row.sendWaitStatus,
+                    sendBusy: row.sendBusy, hovered: hovered,
                     timeLabel: row.time,
                     seen: row.seenBy.map { readers in
                         (
@@ -1361,6 +1364,7 @@ struct TimelineRow: View, Equatable {
                     attachment: message.attachment.map {
                         AttachmentView(
                             matrix: matrix, message: message, attachment: $0, collapsed: row.mediaCollapsed,
+                            pendingSend: own && message.sendState != "sent",
                             actions: context.rowAttachmentActions(for: message))
                     },
                     actions: context.rowActions(for: row),

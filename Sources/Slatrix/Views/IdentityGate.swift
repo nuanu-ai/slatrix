@@ -6,6 +6,10 @@ import SwiftUI
 struct IdentityGate<Content: View>: View {
     let verification: VerificationService
     let accountID: String?
+    var isOnline = true
+    /// Incremented on reconnect so a lookup that skipped or failed while offline retries once connected.
+    var retryToken = 0
+    var lookupRetryDelays: [Duration] = IdentityGatePolicy.retryDelays
     let hasIdentity: () async -> Bool?
     let onRecovery: () -> Void
     /// Whether the prompt lies over the content.
@@ -22,7 +26,7 @@ struct IdentityGate<Content: View>: View {
     private var prompting: Bool {
         IdentityGatePolicy.shouldPrompt(
             hasDevice: deviceKey != nil, isUnverified: verification.deviceStatus == .unverified,
-            identity: identity, skipped: skipped)
+            identity: identity, skipped: skipped, isOnline: isOnline)
     }
 
     var body: some View {
@@ -31,24 +35,26 @@ struct IdentityGate<Content: View>: View {
                 if prompting { ConfirmIdentityView(verification: verification, onRecovery: onRecovery, onSkip: skip) }
             }
             .onChange(of: prompting, initial: true) { _, prompting in onPrompting(prompting) }
-            .task(id: "\(deviceKey ?? "")|\(verification.deviceStatus)") {
+            .task(id: "\(deviceKey ?? "")|\(verification.deviceStatus)|\(isOnline)|\(retryToken)") {
                 identity = .unknown
                 skipped = deviceKey.map { Self.skippedDevices.contains($0) } ?? false
-                guard verification.deviceStatus == .unverified else { return }
+                guard isOnline, verification.deviceStatus == .unverified else { return }
                 guard deviceKey != nil else {
                     identity = .unavailable
                     return
                 }
-                let result = await hasIdentity()
+                let resolved = await IdentityGatePolicy.resolveIdentity(delays: lookupRetryDelays, lookup: hasIdentity)
                 guard !Task.isCancelled else { return }
-                identity = result.map { $0 ? .present : .absent } ?? .unavailable
+                identity = resolved
             }
     }
 
     private static var skippedDevices: [String] { UserDefaults.standard.stringArray(forKey: skippedKey) ?? [] }
     private func skip() {
         guard let deviceKey else { return }
-        UserDefaults.standard.set(Self.skippedDevices + [deviceKey], forKey: Self.skippedKey)
+        if IdentityGatePolicy.shouldPersistSkip(isOnline: isOnline, identity: identity) {
+            UserDefaults.standard.set(Self.skippedDevices + [deviceKey], forKey: Self.skippedKey)
+        }
         skipped = true
     }
 }

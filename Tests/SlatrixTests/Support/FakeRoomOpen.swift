@@ -191,6 +191,10 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     var focusedItems: [TimelineItem]?
     /// Why a timeline opened at an older message fails to load, as a lost connection would make it.
     var focusedError: Error?
+    /// Why building any timeline fails; when `buildFailuresRemaining` is set, only that many attempts fail.
+    var buildError: Error?
+    var buildFailuresRemaining: Int?
+    private let buildLock = NSLock()
     /// What a thread's timeline loads; the cache when nil.
     var threadItems: [TimelineItem]?
     /// Why building a thread's timeline fails, as a lost connection would make it.
@@ -220,6 +224,15 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     override func timelineWithConfiguration(configuration: TimelineConfiguration) async throws -> Timeline {
         focuses.append(configuration.focus)
         await buildGate.wait()
+        let nextBuildError: Error? = buildLock.withLock {
+            guard let buildError else { return nil }
+            if let remaining = buildFailuresRemaining {
+                guard remaining > 0 else { return nil }
+                buildFailuresRemaining = remaining - 1
+            }
+            return buildError
+        }
+        if let nextBuildError { throw nextBuildError }
         if case .event = configuration.focus {
             await eventGate.wait()
             if let focusedError { throw focusedError }
@@ -320,10 +333,19 @@ final class FakeMembers: RoomMembersIterator, @unchecked Sendable {
 
 /// Records each set of rooms the app asks sync to keep subscribed.
 final class FakeRoomListService: RoomListService, @unchecked Sendable {
+    private let lock = NSLock()
     let subscriptions = Recorder<[String]>()
+    private var failNext = false
+    var failsSubscriptions: Bool {
+        get { lock.withLock { failNext } }
+        set { lock.withLock { failNext = newValue } }
+    }
     init() { super.init(noHandle: .init()) }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
-    override func setRoomSubscriptions(roomIds: [String]) async throws { subscriptions.append(roomIds) }
+    override func setRoomSubscriptions(roomIds: [String]) async throws {
+        subscriptions.append(roomIds)
+        if failsSubscriptions { throw URLError(.notConnectedToInternet) }
+    }
 }
 
 /// A send's handle, carrying its transaction.

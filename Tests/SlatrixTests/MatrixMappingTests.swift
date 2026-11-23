@@ -105,6 +105,96 @@ struct MatrixMappingTests {
         #expect(html.formattedBody == "<b>Rich body</b>")
         #expect(unknown.formattedBody == nil && unknown.body == "Literal <tag>")
     }
+
+    @Test(
+        "Upload progress projects independently of ChatMessage, while pending edits and deletions project onto ChatMessage"
+    )
+    func uploadProgressAndPendingChanges() {
+        func makeItem(
+            local: EventSendState? = nil, edit: EventSendState? = nil, redaction: EventSendState? = nil
+        ) -> EventTimelineItem {
+            EventTimelineItem(
+                isRemote: local == nil,
+                eventOrTransactionId: local == nil ? .eventId(eventId: "$ev") : .transactionId(transactionId: "tx"),
+                sender: "@alice:example.org", senderProfile: .unavailable, forwarder: nil, forwarderProfile: nil,
+                isOwn: true, isEditable: true, content: .msgLike(content: content()), reactions: [],
+                eventTypeRaw: "m.room.message", timestamp: 0, localSendState: local, editSendState: edit,
+                redactionSendState: redaction, localCreatedAt: nil, readReceipts: [:], origin: nil,
+                canBeRepliedTo: true, lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
+        }
+        let halfState = EventSendState.notSentYet(
+            progress: MediaUploadProgress(index: 0, progress: AbstractProgress(current: 50, total: 100)))
+        let fullState = EventSendState.notSentYet(
+            progress: MediaUploadProgress(index: 0, progress: AbstractProgress(current: 90, total: 100)))
+        let zeroTotal = EventSendState.notSentYet(
+            progress: MediaUploadProgress(index: 0, progress: AbstractProgress(current: 10, total: 0)))
+        #expect(MatrixMapping.uploadProgress(from: halfState) == 0.5)
+        #expect(MatrixMapping.uploadProgress(from: zeroTotal) == nil)
+        // Progress ticks must NOT mutate ChatMessage so TimelineLayout and cached row heights stay untouched.
+        let m1 = MatrixMapping.message(makeItem(local: halfState), roomID: "!r", ownUserID: "@alice:example.org")
+        let m2 = MatrixMapping.message(makeItem(local: fullState), roomID: "!r", ownUserID: "@alice:example.org")
+        #expect(m1 == m2)
+
+        let editing = MatrixMapping.message(
+            makeItem(edit: .notSentYet(progress: nil)), roomID: "!r", ownUserID: "@alice:example.org")
+        #expect(editing?.pendingChange == .editing)
+
+        let edited = MatrixMapping.message(
+            makeItem(edit: .sent(eventId: "$edit")), roomID: "!r", ownUserID: "@alice:example.org")
+        #expect(edited?.pendingChange == nil)
+
+        let deleting = MatrixMapping.message(
+            makeItem(edit: .notSentYet(progress: nil), redaction: .notSentYet(progress: nil)),
+            roomID: "!r", ownUserID: "@alice:example.org")
+        #expect(deleting?.pendingChange == .deleting)
+    }
+
+    @Test("Undecryptable messages map UtdCause truthfully and only mark unlockable causes as unlockable")
+    func unableToDecryptMapsCause() {
+        func utd(_ encrypted: EncryptedMessage) -> ChatMessage {
+            project(
+                MsgLikeContent(
+                    kind: .unableToDecrypt(msg: encrypted), inReplyTo: nil, threadRoot: nil, threadSummary: nil))
+        }
+        let cases: [(EncryptedMessage, String, Bool)] = [
+            (.megolmV1AesSha2(sessionId: "s", cause: .sentBeforeWeJoined), "Sent before you joined", false),
+            (
+                .megolmV1AesSha2(sessionId: "s", cause: .historicalMessageAndBackupIsDisabled),
+                "History isn’t available on this device", false
+            ),
+            (
+                .megolmV1AesSha2(sessionId: "s", cause: .historicalMessageAndDeviceIsUnverified),
+                "Verify this device to read", true
+            ),
+            (
+                .megolmV1AesSha2(sessionId: "s", cause: .withheldForUnverifiedOrInsecureDevice),
+                "Verify this device to read", true
+            ),
+            (
+                .megolmV1AesSha2(sessionId: "s", cause: .withheldBySender),
+                "The sender didn’t share this message with this device", false
+            ),
+            (.megolmV1AesSha2(sessionId: "s", cause: .verificationViolation), "Sent by an unverified session", false),
+            (.megolmV1AesSha2(sessionId: "s", cause: .unsignedDevice), "Sent by an unverified device", false),
+            (.megolmV1AesSha2(sessionId: "s", cause: .unknownDevice), "Sent by an unknown device", false),
+            (.megolmV1AesSha2(sessionId: "s", cause: .unknown), "Waiting for keys…", true),
+            (.olmV1Curve25519AesSha2(senderKey: "k"), "Waiting for keys…", true),
+            (.unknown, "Waiting for keys…", true),
+        ]
+        for (encrypted, expectedBody, unlockable) in cases {
+            let mapped = utd(encrypted)
+            #expect(mapped.kind == "m.room.encrypted")
+            #expect(mapped.body == expectedBody)
+            #expect(mapped.isUnlockable == unlockable)
+        }
+        let reply = MatrixMapping.replyPreview(
+            eventID: "$quoted",
+            details: ready(
+                MsgLikeContent(
+                    kind: .unableToDecrypt(msg: .megolmV1AesSha2(sessionId: "s", cause: .sentBeforeWeJoined)),
+                    inReplyTo: nil, threadRoot: nil, threadSummary: nil)))
+        #expect(reply.body == "Sent before you joined")
+    }
 }
 
 struct ReplyPreviewMappingTests {

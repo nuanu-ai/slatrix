@@ -182,6 +182,18 @@ import Foundation
         publish(session)
     }
 
+    /// Reverts an upload that failed before handing the file to the SDK so the draft stays ready to send.
+    func didCancel(_ url: URL, at address: AttachmentDraftAddress) async {
+        guard let session = current, session.inFlight.remove(url) != nil else { return }
+        publish(session)
+        guard let access = session.access else { return }
+        let operation = enqueue(session) {
+            try await self.store.cancelSending(
+                url: url, address: address, access: access, revision: self.nextRevision(address, session))
+        }
+        _ = await operation.result
+    }
+
     /// SDK success stays success even when removal of the durable draft needs a retry.
     func didSend(_ url: URL, at address: AttachmentDraftAddress) async {
         guard let session = current, session.access != nil else { return }

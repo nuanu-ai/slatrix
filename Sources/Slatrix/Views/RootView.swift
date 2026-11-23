@@ -484,6 +484,17 @@ struct RootView: View {
             .onChange(of: navigationGeneration) { _, generation in
                 if let request = pendingMatrixLink, request.navigation != generation { cancelMatrixLink() }
             }
+            .onChange(of: matrix.connectionState) { previous, current in
+                if previous != .running, current == .running {
+                    if threadLoadError != nil, let root = threadRoot, openingThreadID == nil {
+                        openThread(root, room: root.roomID, openedWith: matrix.threadOpening?.openedWith)
+                    } else if threadOpenError != nil, let request = pendingThreadOpen, isCurrentThreadOpen(request) {
+                        openThread(request.message, openedWith: request.openedWith)
+                    } else if replyError != nil, !replyOpening, let target = replyTarget {
+                        prepareReply(target)
+                    }
+                }
+            }
     }
 
     private var roomObservedContent: some View {
@@ -708,10 +719,17 @@ struct RootView: View {
                     onCancel: logoutRecovery.cancel)
             }
             .modal(isPresented: $logoutConfirmation) {
+                let expiredWarning =
+                    matrix.sessionExpired
+                    ? SignOutWarning.forExpiredSession(
+                        queuedCount: matrix.queuedSendCount, hasFailedSends: !matrix.failedSendRoomIDs.isEmpty,
+                        isSoftLogout: matrix.sessionExpiredIsSoftLogout)
+                    : nil
                 ConfirmModal(
-                    title: "Sign out of Slatrix?",
-                    message: "You’ll need your recovery key to read encrypted messages when you sign back in.",
-                    action: "Sign out",
+                    title: expiredWarning?.title ?? "Sign out of Slatrix?",
+                    message: expiredWarning?.message
+                        ?? "You’ll need your recovery key to read encrypted messages when you sign back in.",
+                    action: expiredWarning?.action ?? "Sign out",
                     onConfirm: {
                         logoutConfirmation = false
                         if !logoutRecovery.isBusy { beginLogout() }
@@ -772,6 +790,7 @@ struct RootView: View {
             } else {
                 IdentityGate(
                     verification: matrix.verification, accountID: matrix.isPreview ? nil : matrix.user?.id,
+                    isOnline: matrix.connectionState == .running, retryToken: matrix.reconnectCount,
                     hasIdentity: { await matrix.accountHasIdentity() }, onRecovery: { showRecovery = true },
                     onPrompting: { identityPrompt = $0 }
                 ) {
@@ -870,6 +889,14 @@ struct RootView: View {
     /// cancelled, and errors.
     private var banners: some View {
         VStack(spacing: 0) {
+            if matrix.sessionExpired {
+                Banner(
+                    text: "Your session expired. Sign in again.", symbol: "exclamationmark.circle.fill",
+                    tone: .destructive
+                ) {
+                    Button("Sign in again", action: signOut)
+                }
+            }
             ConnectionBanner(matrix: matrix, onRetry: retryConnection)
             if pendingMatrixLink != nil {
                 Banner(text: "Opening…", tone: .neutral) {
@@ -1027,6 +1054,8 @@ struct RootView: View {
     private var automaticReadTarget: ReadReceiptTarget? { ReadStatePolicy.automaticTarget(readContext, hold: readHold) }
     private func markReadState(_ targetRoom: ChatRoom, unread: Bool) {
         guard !matrix.isPreview, targetRoom.membership == "join" else { return }
+        let rollbackContext =
+            unread && targetRoom.id == matrix.selectedRoomID && !readHold.blocks(readContext) ? readContext : nil
         if targetRoom.id == matrix.selectedRoomID {
             if unread { readHold.markUnread(readContext) } else { readHold.clearForExplicitRead(readContext) }
         }
@@ -1035,6 +1064,7 @@ struct RootView: View {
             guard matrix.notificationSessionID == account else { return }
             do { try await matrix.setMarkedUnread(targetRoom.id, value: unread) } catch {
                 guard matrix.notificationSessionID == account else { return }
+                if let rollbackContext { readHold.rollbackMarkUnread(rollbackContext) }
                 matrix.errorMessage = MatrixService.safeError(error)
             }
         }
@@ -1079,6 +1109,7 @@ struct RootView: View {
                 if let me = matrix.user { profilePane = ProfileSelection(id: me.id, fallback: me) }
             },
             onSignOut: signOut,
+            onReconnect: retryConnection,
             onMarkUnread: { markReadState($0, unread: true) },
             onMarkRead: { markReadState($0, unread: false) },
             onInviteWorkspace: { id in
@@ -1219,7 +1250,8 @@ struct RootView: View {
                                         guard isCurrentComposer(context) else { return }
                                         matrix.errorMessage = error
                                     },
-                                    allowsSend: attachmentDrafts.canSend(AttachmentDraftAddress(roomID: room.id))
+                                    allowsSend: !matrix.sessionExpired
+                                        && attachmentDrafts.canSend(AttachmentDraftAddress(roomID: room.id))
                                         && replyAllowsSend(roomID: room.id),
                                     onDiscardAttachments: attachmentDrafts.discard,
                                     requiresTextForSend: scopedReply(roomID: room.id) != nil,
@@ -1267,8 +1299,17 @@ struct RootView: View {
         } trailing: {
             // In the toolbar, so it never covers or moves a message.
             if matrix.hasLockedMessages {
-                Button("Unlock messages") { showRecovery = true }.buttonStyle(.secondary).controlSize(.small)
+                if matrix.verification.deviceStatus == .unverified {
+                    Menu("Verify device") {
+                        Button("Use another device") { Task { await matrix.verification.requestVerification() } }
+                        Button("Use recovery key…") { showRecovery = true }
+                    }
+                    .menuStyle(.button).buttonStyle(.secondary).controlSize(.small)
                     .disabled(matrix.isPreview)
+                } else {
+                    Button("Unlock messages") { showRecovery = true }.buttonStyle(.secondary).controlSize(.small)
+                        .disabled(matrix.isPreview)
+                }
             }
             ChannelHeader(
                 matrix: matrix, room: room, panel: Binding(get: { channelPanel }, set: openChannelPanel)
@@ -1381,8 +1422,9 @@ struct RootView: View {
                                 guard isCurrentComposer(context) else { return }
                                 matrix.errorMessage = error
                             },
-                            allowsSend: attachmentDrafts.canSend(
-                                AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID))
+                            allowsSend: !matrix.sessionExpired
+                                && attachmentDrafts.canSend(
+                                    AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID))
                                 && replyAllowsSend(roomID: room.id, threadID: root.eventID),
                             onDiscardAttachments: attachmentDrafts.discard,
                             requiresTextForSend: scopedReply(roomID: room.id, threadID: root.eventID) != nil,
@@ -1962,9 +2004,11 @@ struct RootView: View {
     }
     private func loadThread(
         _ thread: ChatMessage, generation: UUID, identity: ComposerIdentity, restoringReply: MessageReplyTarget?,
-        openedWith: Int?
+        openedWith: Int?, autoRetried: Bool = false
     ) async {
         let id = thread.roomID
+        let startedReconnect = matrix.reconnectCount
+        let startedOffline = matrix.connectionState != .running
         threadRoot = thread
         openingThreadID = thread.eventID
         do {
@@ -1982,6 +2026,14 @@ struct RootView: View {
         } catch {
             guard navigationGeneration == generation, composerIdentity == identity, matrix.selectedRoomID == id
             else { return }
+            if !autoRetried, matrix.connectionState == .running,
+                startedOffline || matrix.reconnectCount != startedReconnect
+            {
+                await loadThread(
+                    thread, generation: generation, identity: identity, restoringReply: restoringReply,
+                    openedWith: openedWith, autoRetried: true)
+                return
+            }
             openingThreadID = nil
             if let restoringReply, restoringReply.isCurrent(replyTarget, owner: replyOwner) {
                 replyOpening = false
@@ -2015,10 +2067,12 @@ struct RootView: View {
             openThread(message, openedWith: openedWith(message))
         }
     }
-    private func openThread(_ message: ChatMessage, openedWith: Int? = nil) {
+    private func openThread(_ message: ChatMessage, openedWith: Int? = nil, autoRetried: Bool = false) {
         guard pendingRoomID == nil, localReady,
             matrix.rooms.contains(where: { $0.id == message.roomID && $0.membership == "join" })
         else { return }
+        let startedReconnect = matrix.reconnectCount
+        let startedOffline = matrix.connectionState != .running
         let rootID = message.threadRootID ?? message.eventID
         let candidates = [message] + matrix.messages + matrix.threadMessages + matrix.threadFeed.roots
         if matrix.isPreview {
@@ -2058,6 +2112,12 @@ struct RootView: View {
             } catch {
                 guard isCurrentThreadOpen(request) else {
                     if pendingThreadOpen?.id == request.id { cancelThreadOpen() }
+                    return
+                }
+                if !autoRetried, matrix.connectionState == .running,
+                    startedOffline || matrix.reconnectCount != startedReconnect
+                {
+                    openThread(message, openedWith: openedWith, autoRetried: true)
                     return
                 }
                 threadOpenTask = nil
@@ -2343,7 +2403,7 @@ struct RootView: View {
                 onError: { error in
                     guard isCurrentEdit(target, context: context) else { return }
                     matrix.errorMessage = error
-                }, allowsSend: isCurrentEdit(target, context: context), isThread: isThread
+                }, allowsSend: !matrix.sessionExpired && isCurrentEdit(target, context: context), isThread: isThread
             )
         }
         .id("edit-\(composerGeneration)-\(target.id)").disabled(!isCurrentEdit(target, context: context))
@@ -2449,8 +2509,11 @@ struct RootView: View {
             try assertComposerContext(context)
             try assertComposerDestination(room: room, threadID: threadID)
             try await matrix.uploadFile(file, threadRootID: threadID, roomID: room.id)
-        } catch {
+        } catch let delivery as AttachmentDeliveryError {
             if isCurrentComposer(context) { await attachmentDrafts.didFail(file, at: address) }
+            throw delivery.underlying
+        } catch {
+            if isCurrentComposer(context) { await attachmentDrafts.didCancel(file, at: address) }
             throw error
         }
         if isCurrentComposer(context) { await attachmentDrafts.didSend(file, at: address) }
@@ -2653,7 +2716,20 @@ struct RootView: View {
     }
     /// Signing out asks first. The sample workspace has nothing to lose, so leaving it goes straight to sign-in.
     private func signOut() {
-        if matrix.isPreview { leavePreview() } else { logoutConfirmation = true }
+        if matrix.isPreview {
+            leavePreview()
+        } else if matrix.sessionExpired {
+            if SignOutWarning.forExpiredSession(
+                queuedCount: matrix.queuedSendCount, hasFailedSends: !matrix.failedSendRoomIDs.isEmpty,
+                isSoftLogout: matrix.sessionExpiredIsSoftLogout) != nil
+            {
+                logoutConfirmation = true
+            } else {
+                beginLogout()
+            }
+        } else {
+            logoutConfirmation = true
+        }
     }
     private func leavePreview() {
         matrix.exitPreview()
@@ -3020,6 +3096,12 @@ private struct SeenInputs: Equatable {
     }
 }
 
+/// Pairs a read target with the session's reconnect count so receipts that failed while disconnected re-attempt.
+private struct ReconnectReadKey<Target: Equatable>: Equatable {
+    let target: Target
+    let reconnect: Int
+}
+
 /// Marks what the reader can see as read. Apart from the window, so a new message reruns only these checks.
 private struct ReadTracking: View {
     let matrix: MatrixService
@@ -3030,10 +3112,19 @@ private struct ReadTracking: View {
     var body: some View {
         let context = inputs.readContext(matrix)
         let thread = inputs.threadReadContext(matrix)
+        let reconnect = matrix.reconnectCount
         Color.clear
             .onChange(of: context) { _, context in onReadContext(context) }
-            .task(id: ReadStatePolicy.automaticTarget(context, hold: inputs.readHold)) { await acknowledgeTimeline() }
-            .task(id: ThreadReadPolicy.target(thread)) { await acknowledgeThread() }
+            .task(
+                id: ReadStatePolicy.automaticTarget(context, hold: inputs.readHold).map {
+                    ReconnectReadKey(target: $0, reconnect: reconnect)
+                }
+            ) { await acknowledgeTimeline() }
+            .task(
+                id: ThreadReadPolicy.target(thread).map {
+                    ReconnectReadKey(target: $0, reconnect: reconnect)
+                }
+            ) { await acknowledgeThread() }
             // Activity takes what the reader has seen off its count, the messages that land in view too.
             .onChange(
                 of: SeenInputs(
@@ -3178,24 +3269,29 @@ private struct ToolbarGrid: Layout {
 private struct ConnectionBanner: View {
     let matrix: MatrixService
     let onRetry: () -> Void
+    @EnvironmentObject private var appearance: AppearanceStore
     @State private var shown = false
     var body: some View {
-        let message = matrix.connectionErrorMessage
+        let notice = matrix.connectionErrorMessage
+        let text = ConnectionHealth.bannerText(notice: notice, queuedCount: matrix.queuedSendCount)
         ZStack {
-            if shown, let message {
-                // While a retry runs the notice itself says so, so the button steps aside.
+            if shown, let text {
                 Banner(
-                    text: message,
-                    symbol: matrix.connectionSymbol
+                    text: text,
+                    symbol: matrix.isRetryingConnection ? nil : matrix.connectionSymbol
                 ) {
-                    if matrix.canRetryConnection { Button("Retry", action: onRetry) }
+                    if matrix.isRetryingConnection {
+                        Text("Retrying…").foregroundStyle(appearance.colors.textSecondary)
+                    } else if matrix.canRetryConnection {
+                        Button("Retry", action: onRetry)
+                    }
                 }.transition(.opacity)
             }
         }
         .animation(Motion.overlay, value: shown)
-        .task(id: message != nil) {
+        .task(id: notice != nil) {
             shown = false
-            guard message != nil else { return }
+            guard notice != nil else { return }
             let start = ContinuousClock.now
             try? await Task.sleep(for: LoadingPresentation.connectionNoticeDelay)
             guard !Task.isCancelled else { return }

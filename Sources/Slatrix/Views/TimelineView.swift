@@ -165,6 +165,14 @@ struct TimelineView: View {
                     .conversationRow(m, isThread: false).padding(.bottom, insets.bottom)
             }
         }
+        .overlay {
+            if !thread && messages.isEmpty && matrix.openState == .failed {
+                VStack(spacing: m.sp12) {
+                    Text("Couldn’t load messages.").font(m.font(.body)).foregroundStyle(colors.textSecondary)
+                    Button("Retry") { Task { await matrix.retryOpenRoom() } }.buttonStyle(.secondary)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
         .overlay(alignment: .top) {
             if thread && holdsThreadEntries {
                 SkeletonRows(count: 6).fixedSize(horizontal: false, vertical: true)
@@ -253,12 +261,12 @@ struct TimelineView: View {
         }
         .modal(isPresented: Binding(get: { cancelling != nil }, set: { if !$0 { cancelling = nil } })) {
             let failed =
-                cancelling.flatMap { matrix.sendFailure(for: $0)?.shown(offline: matrix.connectionState == .offline) }
-                != nil
+                cancelling.flatMap {
+                    matrix.displayedSendFailure(for: SendQueueMessageKey(roomID: $0.roomID, messageID: $0.eventID))
+                } != nil
+            let prompt = SendCancelPrompt.copy(failed: failed, offline: matrix.connectionState == .offline)
             ConfirmModal(
-                title: failed ? "Delete message?" : "Cancel sending this message?",
-                message: failed ? "This can’t be undone." : "It may already have been delivered.",
-                action: failed ? "Delete" : "Cancel sending", cancel: failed ? "Cancel" : "Keep sending",
+                title: prompt.title, message: prompt.message, action: prompt.action, cancel: prompt.cancel,
                 onConfirm: {
                     if let message = cancelling { cancelSend(message) }
                     cancelling = nil
@@ -282,19 +290,24 @@ struct TimelineView: View {
             unreadAnchor: unreadAnchor, me: matrix.user?.id,
             groups: appearance.density != .compact, threadRootEventID: thread ? threadRootID : nil,
             repliesLine: thread ? matrix.threadRepliesLine : nil)
-        let offline = matrix.connectionState == .offline
-        let failures = matrix.sendFailures.compactMapValues { $0.shown(offline: offline) }
+        let failures = matrix.displayedSendFailures()
+        let waitingToReconnect = matrix.suppressesRecoverableSendFailures
+        let externalFailure = matrix.hasExternalSendFailure(in: room.id, visibleIDs: Set(messages.map(\.eventID)))
         let showOlder = thread ? (hasOlder && showThreadOlder) : hasOlder
         let inputs = TimelineLayoutCache.EntryInputs(
             rows: rows, hasOlder: showOlder, reachedStart: reachedStart, reading: !thread && matrix.timelineLoading,
+            openFailed: !thread && matrix.openState == .failed,
             hasNewer: hasNewer,
             loadingHistory: loadingOlder, welcome: welcome,
             pinned: room.pinnedEventIDs,
             savedIDs: savedIDs, highlighted: highlighted,
-            sendFailures: failures, pendingSendActions: matrix.pendingSendActions, sendActions: sendActions,
+            sendFailures: failures, waitingToReconnect: waitingToReconnect, externalFailure: externalFailure,
+            pendingSendActions: matrix.pendingSendActions, sendActions: sendActions,
             collapsedMedia: matrix.collapsedMedia)
         return layout.entries(for: inputs) {
-            buildEntries(rows, showOlder: showOlder, failures: failures)
+            buildEntries(
+                rows, showOlder: showOlder, failures: failures, waitingToReconnect: waitingToReconnect,
+                externalFailure: externalFailure)
         }
     }
 
@@ -306,13 +319,15 @@ struct TimelineView: View {
 
     private func buildEntries(
         _ rows: [TimelineLayout.Row], showOlder: Bool,
-        failures: [SendQueueMessageKey: MessageSendFailure]
+        failures: [SendQueueMessageKey: MessageSendFailure], waitingToReconnect: Bool, externalFailure: Bool
     ) -> [TimelineEntry] {
         var entries: [TimelineEntry] = []
         entries.reserveCapacity(rows.count + 2)
         // A thread's older replies load under its root and the line counting them.
         var olderAt = 0
-        if !showOlder && !thread && (reachedStart || rows.isEmpty && !matrix.timelineLoading) {
+        if !showOlder && !thread && matrix.openState != .failed
+            && (reachedStart || rows.isEmpty && !matrix.timelineLoading)
+        {
             entries.append(
                 TimelineEntry(
                     id: "welcome",
@@ -323,6 +338,7 @@ struct TimelineView: View {
         let pending = matrix.pendingSendActions
         let collapsed = matrix.collapsedMedia
         let seen = matrix.user.map { SeenPolicy.headers(rows, me: $0.id) } ?? [:]
+        var sawFailureInPane = false
         for row in rows {
             switch row.kind {
             case .day(let label): entries.append(TimelineEntry(id: row.id, kind: .day(label)))
@@ -333,6 +349,15 @@ struct TimelineView: View {
             case .message(let message, let grouped, let time):
                 if message.eventID == threadRootID { olderAt = entries.count + 1 }
                 let key = SendQueueMessageKey(roomID: message.roomID, messageID: message.eventID)
+                let failure = failures.isEmpty ? nil : failures[key]
+                let own = message.senderID == matrix.user?.id
+                let pendingSend = own && message.sendState != "sent"
+                let waitStatus = SendWaitStatus.resolve(
+                    pendingSend: pendingSend, sendFailure: failure,
+                    pendingChange: own ? message.pendingChange : nil,
+                    waitingToReconnect: waitingToReconnect,
+                    blockedByEarlierFailure: sawFailureInPane || externalFailure)
+                if failure != nil { sawFailureInPane = true }
                 entries.append(
                     TimelineEntry(
                         id: row.id,
@@ -344,7 +369,8 @@ struct TimelineView: View {
                                         SavedMessageReference(roomID: message.roomID, eventID: message.eventID).id),
                                 pinned: pinned.contains(message.eventID),
                                 highlighted: highlighted == message.eventID,
-                                sendFailure: failures.isEmpty ? nil : failures[key],
+                                sendFailure: failure,
+                                sendWaitStatus: waitStatus,
                                 sendBusy: !pending.isEmpty && pending.contains(key) || sendActions.contains(message.id),
                                 seenBy: seen[row.id],
                                 mediaCollapsed: !collapsed.isEmpty && collapsed.contains(message.eventID)))))
@@ -509,6 +535,7 @@ struct TimelineView: View {
         var hasOlder: Bool
         var reachedStart: Bool
         var reading: Bool
+        var openFailed: Bool
         var hasNewer: Bool
         var loadingHistory: Bool
         var welcome: TimelineWelcome
@@ -516,6 +543,8 @@ struct TimelineView: View {
         var savedIDs: Set<String>
         var highlighted: String?
         var sendFailures: [SendQueueMessageKey: MessageSendFailure]
+        var waitingToReconnect: Bool
+        var externalFailure: Bool
         var pendingSendActions: Set<SendQueueMessageKey>
         var sendActions: Set<String>
         var collapsedMedia: Set<String>
@@ -611,6 +640,7 @@ struct MessageRow: View {
     var isSaved = false
     var isPinned = false
     var sendFailure: MessageSendFailure? = nil
+    var sendWaitStatus: SendWaitStatus? = nil
     var sendBusy = false
     /// The timeline tracks the pointer for all rows, so hover never resets when a row's values change.
     var hovered = false
@@ -631,6 +661,15 @@ struct MessageRow: View {
     private var colors: AppColors { appearance.colors }
     private var pendingSend: Bool { own && message.sendState != "sent" }
     private var sending: Bool { pendingSend && sendFailure == nil }
+    private var pendingMutation: Bool { own && !pendingSend && message.pendingChange != nil }
+    private var effectiveWaitStatus: SendWaitStatus? {
+        if let sendWaitStatus { return sendWaitStatus }
+        if sending { return .sending }
+        if pendingMutation {
+            return message.pendingChange == .deleting ? .deleting : .savingEdit
+        }
+        return nil
+    }
     private var compact: Bool { appearance.density == .compact }
     private var time: String { timeLabel ?? message.timestamp.formatted(.dateTime.hour().minute()) }
     private var gutterTime: String {
@@ -682,7 +721,11 @@ struct MessageRow: View {
                     Text(hovered ? gutterTime : "").font(m.font(.subheadline)).monospacedDigit().lineLimit(1)
                         .fixedSize()
                         .foregroundStyle(colors.textSecondary).frame(width: m.avatar, alignment: .trailing)
-                        .overlay(alignment: .trailing) { if grouped && sending && !hovered { clock } }
+                        .overlay(alignment: .trailing) {
+                            if grouped, !hovered, let status = effectiveWaitStatus {
+                                SendingClock(since: message.timestamp, status: status)
+                            }
+                        }
                         .padding(.top, m.sp2)
                 } else {
                     Button {
@@ -717,14 +760,15 @@ struct MessageRow: View {
                         if isSaved {
                             Image(systemName: "bookmark.fill").font(m.font(.subheadline)).foregroundStyle(colors.accent)
                         }
-                    }.overlay(alignment: .trailing) {
-                        if sending { clock.padding(.leading, m.sp8).frame(width: 0, alignment: .leading) }
+                        if let status = effectiveWaitStatus {
+                            SendingClock(since: message.timestamp, status: status, showsBlockedLabel: true)
+                        }
                     }
                 }
                 if message.isRedacted {
                     Text(ChatMessage.deletedBody).italic().font(m.font(.reading)).foregroundStyle(
                         colors.textSecondary
-                    )
+                    ).opacity(pendingMutation ? 0.5 : 1)
                 } else {
                     // State of its own per message, so a reused cell never names another copy's thread.
                     if let replyPreview { replyPreview.id(message.id) }
@@ -737,7 +781,7 @@ struct MessageRow: View {
                         NativeMessageBody(
                             body: message.body, formattedBody: message.formattedBody, edited: message.isEdited,
                             menuCommands: actions.menu
-                        ).opacity(pendingSend ? 0.5 : 1)
+                        ).opacity(pendingSend || pendingMutation ? 0.5 : 1)
                     }
                     if message.isEdited && (!message.showsMessageBody || message.kind == "m.room.encrypted") {
                         Text("(edited)").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
@@ -775,7 +819,6 @@ struct MessageRow: View {
             }.frame(maxWidth: .infinity, alignment: .leading)
         }
     }
-    private var clock: some View { SendingClock(since: message.timestamp) }
 
     private var reactions: some View {
         WrappingRow(spacing: m.sp4) {
@@ -816,17 +859,22 @@ struct MessageRow: View {
     }
 }
 
-/// Slack's clock for a send still going after a few seconds. It always takes its space, so the row never moves for it.
+/// Slack's clock for a send still going after a few seconds. Lives inline on the header or gutter so a wait-status
+/// transition never changes the row's height.
 private struct SendingClock: View {
     let since: Date
+    let status: SendWaitStatus
+    var showsBlockedLabel = false
     @State private var shown: Bool
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
 
-    init(since: Date) {
+    init(since: Date, status: SendWaitStatus, showsBlockedLabel: Bool = false) {
         self.since = since
-        // A message that has been sending a while shows its clock in its first frame.
-        _shown = State(initialValue: Self.shows(since))
+        self.status = status
+        self.showsBlockedLabel = showsBlockedLabel
+        // A message that has been sending a while, or is waiting on reconnect or an earlier failure, shows at once.
+        _shown = State(initialValue: status.showsImmediately || Self.shows(since))
     }
 
     private static func shows(_ since: Date) -> Bool {
@@ -834,15 +882,24 @@ private struct SendingClock: View {
     }
 
     var body: some View {
-        Image(systemName: "clock").font(m.font(.subheadline)).foregroundStyle(appearance.colors.textSecondary)
-            .opacity(shown ? 1 : 0).accessibilityHidden(!shown).accessibilityLabel("Sending")
-            .task(id: since) {
-                shown = Self.shows(since)
-                guard !shown else { return }
-                let left = LoadingPresentation.sendingClockDelay - .seconds(Date().timeIntervalSince(since))
-                try? await Task.sleep(for: left)
-                if !Task.isCancelled { shown = Self.shows(since) }
+        let visible = status.showsImmediately || shown
+        let iconColor = status == .blockedByEarlierFailure ? appearance.colors.warning : appearance.colors.textSecondary
+        HStack(alignment: .firstTextBaseline, spacing: m.sp4) {
+            Image(systemName: "clock").foregroundStyle(iconColor)
+            if showsBlockedLabel && status == .blockedByEarlierFailure {
+                Text(status.label).foregroundStyle(appearance.colors.textSecondary).lineLimit(1).truncationMode(.tail)
             }
+        }
+        .font(m.font(.subheadline))
+        .opacity(visible ? 1 : 0).help(status.label).accessibilityHidden(!visible)
+        .accessibilityElement(children: .ignore).accessibilityLabel(status.label)
+        .task(id: "\(since.timeIntervalSinceReferenceDate)|\(status.showsImmediately)") {
+            shown = status.showsImmediately || Self.shows(since)
+            guard !shown else { return }
+            let left = LoadingPresentation.sendingClockDelay - .seconds(Date().timeIntervalSince(since))
+            try? await Task.sleep(for: left)
+            if !Task.isCancelled { shown = status.showsImmediately || Self.shows(since) }
+        }
     }
 }
 

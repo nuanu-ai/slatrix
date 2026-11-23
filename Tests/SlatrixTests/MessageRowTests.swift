@@ -137,4 +137,36 @@ struct MessageRowTests {
         #expect(await eventually { host.sizeThatFits(in: offered).height > 0 })
         #expect(host.sizeThatFits(in: offered).width <= offered.width)
     }
+
+    @Test("Wait-status transitions (sending, reconnecting, blocked, pending edit) never change a row's height")
+    func waitStatusesKeepRowHeightStable() {
+        let sentHeight = height(message([]), width: 400)
+        var sending = message([])
+        sending.sendState = "sending"
+        for status: SendWaitStatus in [.sending, .waitingToReconnect, .blockedByEarlierFailure] {
+            let rowHeight = NSHostingView(
+                rootView: MessageRow(message: sending, own: true, sendWaitStatus: status).frame(width: 400)
+                    .environmentObject(AppearanceStore()).environment(\.metrics, m)
+            ).fittingSize.height
+            #expect(rowHeight == sentHeight, "Row height shifted for \(status)")
+        }
+
+        let groupedSent = NSHostingView(
+            rootView: MessageRow(message: message([]), grouped: true, own: true).frame(width: 400)
+                .environmentObject(AppearanceStore()).environment(\.metrics, m)
+        ).fittingSize.height
+        let groupedBlocked = NSHostingView(
+            rootView: MessageRow(message: sending, grouped: true, own: true, sendWaitStatus: .blockedByEarlierFailure)
+                .frame(width: 400).environmentObject(AppearanceStore()).environment(\.metrics, m)
+        ).fittingSize.height
+        #expect(groupedBlocked == groupedSent)
+
+        var editing = message([])
+        editing.pendingChange = .editing
+        let editingHeight = NSHostingView(
+            rootView: MessageRow(message: editing, own: true, sendWaitStatus: .savingEdit).frame(width: 400)
+                .environmentObject(AppearanceStore()).environment(\.metrics, m)
+        ).fittingSize.height
+        #expect(editingHeight == sentHeight)
+    }
 }

@@ -113,6 +113,56 @@ struct MatrixObservationTests {
         #expect(!changes.all.isEmpty && service.threadMessages.first?.body == "Edited start")
     }
 
+    @Test("hasLockedMessages checks thread messages too and ignores permanent non-unlockable UTDs")
+    func lockedMessagesIncludeThreadsAndRespectUnlockability() {
+        let service = MatrixService.scratch()
+        var permanent = ChatMessage(
+            id: "$prejoin", roomID: "!open:example.org", senderID: "@ana:example.org", senderName: "Ana",
+            body: "Sent before you joined", timestamp: .now)
+        permanent.kind = "m.room.encrypted"
+        permanent.isUnlockable = false
+        service.messages = [permanent]
+        #expect(!service.hasLockedMessages)
+
+        var threadLocked = ChatMessage(
+            id: "$reply", roomID: "!open:example.org", senderID: "@ana:example.org", senderName: "Ana",
+            body: "Verify this device to read", timestamp: .now)
+        threadLocked.kind = "m.room.encrypted"
+        threadLocked.isUnlockable = true
+        service.threadMessages = [threadLocked]
+        #expect(service.hasLockedMessages)
+
+        service.threadMessages = []
+        #expect(!service.hasLockedMessages)
+    }
+
+    @Test("Upload progress ticks update UploadProgressStore without invalidating timeline messages")
+    func uploadProgressDoesNotInvalidateMessages() {
+        let service = MatrixService.scratch()
+        var pending = ChatMessage(
+            id: "tx-1", roomID: "!open:example.org", senderID: "@me:example.org", senderName: "Me",
+            body: "photo.png", timestamp: .now)
+        pending.sendState = "sending"
+        service.messages = [pending]
+
+        let messageChanges = Recorder<Void>()
+        withObservationTracking {
+            _ = service.messages
+        } onChange: {
+            messageChanges.append(())
+        }
+        service.handleSendQueueUpdate(
+            roomID: "!open:example.org",
+            update: .mediaUpload(
+                relatedTo: "tx-1", file: nil, index: 0, progress: AbstractProgress(current: 40, total: 100)))
+        #expect(messageChanges.all.isEmpty)
+        #expect(service.uploadProgress.progress(roomID: "!open:example.org", messageID: "tx-1") == 0.4)
+
+        service.handleSendQueueUpdate(
+            roomID: "!open:example.org", update: .sentEvent(transactionId: "tx-1", eventId: "$sent"))
+        #expect(service.uploadProgress.progress(roomID: "!open:example.org", messageID: "tx-1") == nil)
+    }
+
     @Test("Unchanged member reloads and identical timeline projections do not emit observation notifications")
     func unchangedWritesDoNotNotify() async throws {
         let room = FakeOpenRoom(
