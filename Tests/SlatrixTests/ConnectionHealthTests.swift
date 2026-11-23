@@ -51,4 +51,44 @@ struct ConnectionHealthTests {
             MatrixConnectionFeedback(state: .running, isRetrying: false, canRetry: false, errorMessage: nil))
         #expect(!matrix.connectionLost)
     }
+
+    @MainActor @Test("Avatar dot is never falsely green before connecting or while reconnecting")
+    func honestOwnPresence() {
+        let matrix = MatrixService.scratch()
+        #expect(matrix.ownPresence(downLongEnough: false) == nil)
+        #expect(matrix.ownPresence(downLongEnough: true) == .away)
+
+        matrix.applyConnection(
+            MatrixConnectionFeedback(
+                state: .connecting, isRetrying: false, canRetry: false,
+                errorMessage: ConnectionHealth.connecting.label))
+        #expect(matrix.ownPresence(downLongEnough: false) == nil)
+        #expect(matrix.ownPresence(downLongEnough: true) == .away)
+        #expect(matrix.connectionStatusLabel == "Connecting…")
+
+        matrix.applyConnection(
+            MatrixConnectionFeedback(
+                state: .connecting, isRetrying: true, canRetry: false,
+                errorMessage: ConnectionHealth.reconnecting.label))
+        #expect(matrix.connectionLost)
+        #expect(matrix.ownPresence(downLongEnough: false) == .away)
+        #expect(matrix.connectionStatusLabel == "Reconnecting…")
+
+        matrix.applyConnection(
+            MatrixConnectionFeedback(state: .running, isRetrying: false, canRetry: false, errorMessage: nil))
+        #expect(matrix.ownPresence(downLongEnough: false) == .active)
+        #expect(matrix.connectionStatusLabel == "Connected")
+    }
+
+    @Test("Connection banner reassures the user when messages are queued offline")
+    func bannerTextWithQueuedMessages() {
+        #expect(ConnectionHealth.bannerText(notice: nil, queuedCount: 2) == nil)
+        #expect(ConnectionHealth.bannerText(notice: "You’re offline", queuedCount: 0) == "You’re offline")
+        #expect(
+            ConnectionHealth.bannerText(notice: "You’re offline", queuedCount: 1)
+                == "You’re offline · 1 message will send when you reconnect")
+        #expect(
+            ConnectionHealth.bannerText(notice: "You’re offline", queuedCount: 2)
+                == "You’re offline · 2 messages will send when you reconnect")
+    }
 }

@@ -25,6 +25,7 @@ struct FilterChip: View {
     let title: String
     let active: Bool
     var menu = true
+    @State private var hovering = false
     @Environment(\.metrics) private var m
     @ThemeColors private var colors
 
@@ -36,8 +37,10 @@ struct FilterChip: View {
         }
         .lineLimit(1).foregroundStyle(colors.textPrimary).padding(.horizontal, m.sp12).frame(height: m.controlSmall)
         .background(active ? colors.accentTint : colors.control, in: shape)
+        .overlay { if hovering { shape.fill(colors.hover) } }
         .overlay(shape.strokeBorder(active ? colors.accentLine : colors.borderStrong, lineWidth: 0.5))
         .contentShape(shape)
+        .onHover { hovering = $0 }
     }
 }
 

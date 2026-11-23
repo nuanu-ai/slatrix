@@ -13,8 +13,12 @@ struct ReplyPreviewView: View {
     @State private var thread: (root: ChatMessage, preview: String)?
     /// A message that only looked like a copy: its quote isn't in a thread.
     @State private var notInThread = false
+    @State private var hovering = false
 
     var body: some View {
+        let interactive =
+            (message.repliedToThread && !notInThread && thread != nil && onOpenThread != nil)
+            || (!(message.repliedToThread && !notInThread) && preview.state == .ready && onOpen != nil)
         HStack(spacing: m.sp8) {
             RoundedRectangle(cornerRadius: m(2)).fill(appearance.colors.textSecondary.opacity(0.4)).frame(width: m(3))
             // Every state takes the loaded preview's two lines, so the row keeps its height when the original lands; one
@@ -27,16 +31,20 @@ struct ReplyPreviewView: View {
                         if let thread { onOpenThread?(thread.root) }
                     } label: {
                         VStack(alignment: .leading, spacing: m.sp4) {
-                            Text("replied to a thread:").font(m.font(.subheadline))
+                            Text("replied to a thread:").font(m.font(.caption))
                                 .foregroundStyle(appearance.colors.textSecondary)
                             if let thread {
-                                Text(thread.preview).font(m.font(.subheadline, .medium))
+                                Text(thread.preview).font(m.font(.caption, .medium))
                                     .foregroundStyle(appearance.colors.accent)
                             } else {
-                                SkeletonLines(widths: [240])
+                                // Over the reserve rather than beside it so the label stays on line 1 before the bars
+                                // appear and at every zoom.
+                                Text(" ").font(m.font(.subheadline, .medium)).hidden()
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .overlay(alignment: .leading) { SkeletonLines(widths: [240]) }
                             }
                         }.lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                    }.buttonStyle(.row).disabled(thread == nil || onOpenThread == nil).help("View thread")
+                    }.buttonStyle(.row).disabled(thread == nil || onOpenThread == nil).linkCursor().help("View thread")
                 } else if preview.state == .ready {
                     Button {
                         onOpen?(preview.eventID)
@@ -44,15 +52,15 @@ struct ReplyPreviewView: View {
                         lines(sender: preview.senderName, body: preview.body, deleted: preview.isRedacted).frame(
                             maxWidth: .infinity, alignment: .leading
                         ).contentShape(Rectangle())
-                    }.buttonStyle(.row).disabled(onOpen == nil).help("Show original message")
+                    }.buttonStyle(.row).disabled(onOpen == nil).linkCursor().help("Show original message")
                 } else if preview.state == .failed {
                     HStack(spacing: m.sp8) {
-                        Text("Original message unavailable").font(m.font(.subheadline))
+                        Text("Original message unavailable").font(m.font(.caption))
                             .foregroundStyle(appearance.colors.textSecondary)
                         Button("Retry") { [target = origin] in
                             guard let target else { return }
                             Task { await matrix.loadReplyPreview(for: target) }
-                        }.buttonStyle(.textLink).font(m.font(.subheadline)).disabled(origin == nil)
+                        }.buttonStyle(.textLink).font(m.font(.caption)).disabled(origin == nil)
                     }
                 } else {
                     // Over the reserve rather than beside it: at some zooms two bars stand taller than two lines.
@@ -61,7 +69,13 @@ struct ReplyPreviewView: View {
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
                 .loadingInterval(.replyLoading, while: preview.state == .pending)
-        }.padding(.vertical, m.sp4).padding(.bottom, m.sp4).fixedSize(horizontal: false, vertical: true)
+        }.padding(.vertical, m.sp4).padding(.horizontal, m.sp4)
+            .background(
+                hovering && interactive ? appearance.colors.hover : .clear,
+                in: RoundedRectangle(cornerRadius: m.radiusSmall)
+            )
+            .padding(.horizontal, -m.sp4).padding(.bottom, m.sp4).fixedSize(horizontal: false, vertical: true)
+            .onHover { hovering = $0 }
             .task(id: origin?.replyPreviewIdentity) { [target = origin] in
                 guard !Task.isCancelled, preview.state == .unavailable, let target else { return }
                 // SDK Pending replaces the row identity and cancels this view
@@ -80,9 +94,9 @@ struct ReplyPreviewView: View {
 
     private func lines(sender: String, body: String, deleted: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: m.sp4) {
-            Text(sender).font(m.font(.subheadline, .semibold)).lineLimit(1)
+            Text(sender).font(m.font(.caption, .semibold)).lineLimit(1)
             if !body.isEmpty {
-                Text(body).italic(deleted).font(m.font(.subheadline)).foregroundStyle(appearance.colors.textSecondary)
+                Text(body).italic(deleted).font(m.font(.caption)).foregroundStyle(appearance.colors.textSecondary)
                     .lineLimit(1)
             }
         }

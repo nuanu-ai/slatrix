@@ -64,9 +64,7 @@ struct PreferencesView: View {
                                     height: m.control
                                 )
                                 .foregroundStyle(tab == item ? colors.textPrimary : colors.textSecondary)
-                                .background(
-                                    tab == item ? colors.selection : .clear,
-                                    in: RoundedRectangle(cornerRadius: m.radius))
+                                .modifier(SidebarRowFill(selected: tab == item))
                         }.buttonStyle(.row).accessibilityAddTraits(tab == item ? .isSelected : [])
                     }
                     Spacer()
@@ -320,19 +318,8 @@ struct PreferencesView: View {
     private func choiceTile<Preview: View>(
         label: String, selected: Bool, action: @escaping () -> Void, @ViewBuilder preview: () -> Preview
     ) -> some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: m.sp8) {
-                preview().frame(height: m(Self.miniatureHeight)).clipShape(RoundedRectangle(cornerRadius: m.radius))
-                    .padding(m.sp4).overlay(
-                        RoundedRectangle(cornerRadius: m.radiusLarge).stroke(
-                            selected ? colors.accent : colors.border, lineWidth: selected ? 2 : 1))
-                HStack(spacing: m.sp4) {
-                    Image(systemName: selected ? "checkmark.circle.fill" : "circle").foregroundStyle(
-                        selected ? colors.accent : colors.textSecondary)
-                    Text(label).foregroundStyle(colors.textBody)
-                }.font(m.font(.subheadline, selected ? .semibold : .regular))
-            }.frame(maxWidth: .infinity)
-        }.buttonStyle(.row).accessibilityLabel(label).accessibilityAddTraits(selected ? .isSelected : [])
+        PreferenceChoiceTile(
+            label: label, selected: selected, miniatureHeight: Self.miniatureHeight, action: action, preview: preview())
     }
 
     private func changeNotifications(_ enabled: Bool) {
@@ -366,6 +353,42 @@ struct PreferencesView: View {
             requestingNotifications = false
             await refreshNotificationStatus()
         }
+    }
+}
+
+/// A Preferences mode or theme choice card with hover feedback.
+private struct PreferenceChoiceTile<Preview: View>: View {
+    let label: String
+    let selected: Bool
+    let miniatureHeight: CGFloat
+    let action: () -> Void
+    let preview: Preview
+    @State private var hovering = false
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+
+    var body: some View {
+        let colors = appearance.colors
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: m.sp8) {
+                preview.frame(height: m(miniatureHeight)).clipShape(RoundedRectangle(cornerRadius: m.radius))
+                    .padding(m.sp4)
+                    .background(
+                        hovering && !selected ? colors.hover : .clear,
+                        in: RoundedRectangle(cornerRadius: m.radiusLarge)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: m.radiusLarge).stroke(
+                            selected ? colors.accent : hovering ? colors.borderStrong : colors.border,
+                            lineWidth: selected ? 2 : 1))
+                HStack(spacing: m.sp4) {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle").foregroundStyle(
+                        selected ? colors.accent : colors.textSecondary)
+                    Text(label).foregroundStyle(colors.textBody)
+                }.font(m.font(.subheadline, selected ? .semibold : .regular))
+            }.frame(maxWidth: .infinity)
+        }.buttonStyle(.row).onHover { hovering = $0 }.accessibilityLabel(label)
+            .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

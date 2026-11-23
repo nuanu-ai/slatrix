@@ -311,6 +311,24 @@ actor AttachmentDraftStore {
         try commit(manifest, record: &record, accountID: access.accountID)
     }
 
+    /// Reverts a file that failed pre-SDK validation back to `.ready` so it is not restored as interrupted.
+    func cancelSending(url: URL, address: AttachmentDraftAddress, access: AttachmentDraftAccess, revision: UInt64)
+        throws
+    {
+        try Task.checkCancellation()
+        var record = try current(access)
+        try checkRevision(revision, address: address, record: record)
+        guard var queue = record.manifest.queues[address.id],
+            let index = queue.files.firstIndex(where: { record.urls[$0.id] == url })
+        else { return }
+        queue.files[index].phase = .ready
+        queue.revision = revision
+        var manifest = record.manifest
+        manifest.queues[address.id] = queue
+        try Task.checkCancellation()
+        try commit(manifest, record: &record, accountID: access.accountID)
+    }
+
     func confirmSent(url: URL, address: AttachmentDraftAddress, access: AttachmentDraftAccess, revision: UInt64) throws
     {
         var record = try current(access)

@@ -115,6 +115,22 @@ final class AttachmentDraftControllerTests {
         #expect(names(controller).isEmpty)
     }
 
+    @Test("A send cancelled before handing off to the SDK stays ready without needing review")
+    func preSDKCancelKeepsDraftReady() async throws {
+        let controller = controller()
+        await controller.open(accountID: account)
+        let pending = try file("draft.txt")
+        controller.set([pending], at: address)
+        try await controller.prepareSend(pending, at: address)
+        await controller.didCancel(pending, at: address)
+        #expect(!controller.needsReview(address) && controller.canSend(address))
+        #expect(controller.files[address]?.first?.phase == .ready)
+        await controller.close()
+        await controller.open(accountID: account)
+        #expect(!controller.needsReview(address) && controller.canSend(address))
+        #expect(names(controller) == ["draft.txt"])
+    }
+
     @Test("A sent file whose local cleanup failed stays out of the queue while the cleanup is retried")
     func failedCleanupNeverResends() async throws {
         let fault = SaveFault()

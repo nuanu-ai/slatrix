@@ -9,8 +9,12 @@ struct DelayedProgress: View {
     var offline = false
     /// Logs the whole wait, shown or not.
     var interval: Performance.Name? = nil
+    /// True when the caller already waited out the loading delay before inserting this view.
+    var immediate = false
     var body: some View {
-        AfterLoadingDelay(active: active, hasContent: hasContent, offline: offline, interval: interval) {
+        AfterLoadingDelay(
+            active: active, hasContent: hasContent, offline: offline, interval: interval, immediate: immediate
+        ) {
             ProgressView().controlSize(.small)
         }
     }
@@ -64,19 +68,42 @@ private struct SkeletonBars: View {
     }
 }
 
-private struct AfterLoadingDelay<Content: View>: View {
+struct AfterLoadingDelay<Content: View>: View {
     let active: Bool
     let hasContent: Bool
     let offline: Bool
     let interval: Performance.Name?
+    let immediate: Bool
     @ViewBuilder let content: Content
-    @State private var shown = false
+    @State private var shown: Bool
+
+    init(
+        active: Bool, hasContent: Bool, offline: Bool, interval: Performance.Name?, immediate: Bool = false,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.active = active
+        self.hasContent = hasContent
+        self.offline = offline
+        self.interval = interval
+        self.immediate = immediate
+        self.content = content()
+        _shown = State(initialValue: immediate && active && !hasContent && !offline)
+    }
+
     var body: some View {
-        ZStack { if shown { content } }
+        ZStack { if shown { content.transition(.opacity) } }
+            .animation(Motion.overlay, value: shown)
             .loadingInterval(interval, while: active && !hasContent)
-            .task(id: [active && !hasContent, offline]) {
+            .task(id: [active && !hasContent, offline, immediate]) {
+                guard active, !hasContent else {
+                    shown = false
+                    return
+                }
+                if immediate {
+                    shown = !offline
+                    return
+                }
                 shown = false
-                guard active, !hasContent else { return }
                 let start = ContinuousClock.now
                 try? await Task.sleep(for: LoadingPresentation.indicatorDelay)
                 guard !Task.isCancelled else { return }

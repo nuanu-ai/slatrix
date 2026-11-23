@@ -20,6 +20,13 @@ enum MatrixServiceError: LocalizedError {
     }
 }
 
+/// An upload failure thrown after the SDK accepted the file for queueing, so the attachment may have sent.
+struct AttachmentDeliveryError: LocalizedError {
+    let underlying: Error
+    let message: String
+    var errorDescription: String? { message }
+}
+
 // Read-only links remain useful for deleted remote events. Keep their target
 // separate from mutation targets, whose eligibility intentionally excludes them.
 struct MessagePermalinkTarget: Identifiable {
@@ -39,6 +46,294 @@ struct Conversation: Hashable {
 struct SendQueueMessageKey: Hashable {
     let roomID: String
     let messageID: String
+}
+
+/// Tracks queued and failed local echoes across all rooms so background rooms and the offline banner stay truthful.
+private struct SendQueueTracker {
+    private var pending: [String: Set<String>] = [:]
+    /// Failed transactions by room, storing whether the failure is recoverable.
+    private(set) var failures: [String: [String: Bool]] = [:]
+    /// Local transactions observed in a room's thread timeline so main-timeline reconciliation keeps them.
+    private var threadTransactions: [String: Set<String>] = [:]
+    private var replayingInitial = false
+    private var initialReplaySeen: [String: Set<String>] = [:]
+
+    mutating func loadPersisted(_ saved: [String: [String: Bool]]) {
+        failures = saved
+        pending = [:]
+        for (roomID, roomFailures) in saved {
+            for (txID, isRecoverable) in roomFailures where isRecoverable {
+                pending[roomID, default: []].insert(txID)
+            }
+        }
+    }
+
+    mutating func beginInitialReplay() {
+        replayingInitial = true
+        initialReplaySeen = [:]
+    }
+
+    mutating func finishInitialReplay() {
+        guard replayingInitial else { return }
+        replayingInitial = false
+        let seen = initialReplaySeen
+        initialReplaySeen = [:]
+        for (roomID, roomFailures) in failures {
+            let surviving = seen[roomID] ?? []
+            let filtered = roomFailures.filter { surviving.contains($0.key) }
+            failures[roomID] = filtered.isEmpty ? nil : filtered
+        }
+        for (roomID, ids) in pending {
+            let surviving = seen[roomID] ?? []
+            let filtered = ids.intersection(surviving)
+            pending[roomID] = filtered.isEmpty ? nil : filtered
+        }
+    }
+
+    mutating func apply(roomID: String, update: RoomSendQueueUpdate) {
+        switch update {
+        case .newLocalEvent(let id):
+            if replayingInitial { initialReplaySeen[roomID, default: []].insert(id) }
+            // Never clear a known failure on .newLocalEvent (e.g., startup replay of persisted local echoes);
+            // permanently failed items stay out of `pending` so the offline banner won't promise auto-send.
+            if let isRecoverable = failures[roomID]?[id] {
+                if isRecoverable { pending[roomID, default: []].insert(id) }
+            } else {
+                pending[roomID, default: []].insert(id)
+            }
+        case .replacedLocalEvent(let id):
+            if failures[roomID]?[id] != false { pending[roomID, default: []].insert(id) }
+        case .retryEvent(let id):
+            pending[roomID, default: []].insert(id)
+            removeFailure(roomID: roomID, transactionID: id)
+        case .sendError(let id, _, let isRecoverable):
+            if replayingInitial { initialReplaySeen[roomID, default: []].insert(id) }
+            failures[roomID, default: [:]][id] = isRecoverable
+            if isRecoverable {
+                pending[roomID, default: []].insert(id)
+            } else {
+                removePending(roomID: roomID, transactionID: id)
+            }
+        case .sentEvent(let id, _), .cancelledLocalEvent(let id):
+            removePending(roomID: roomID, transactionID: id)
+            removeFailure(roomID: roomID, transactionID: id)
+            removeThreadTransaction(roomID: roomID, transactionID: id)
+        case .mediaUpload:
+            break
+        }
+    }
+
+    mutating func markThreadTransaction(roomID: String, transactionID: String) {
+        threadTransactions[roomID, default: []].insert(transactionID)
+    }
+
+    func hasEntries(in roomID: String) -> Bool {
+        !(pending[roomID]?.isEmpty ?? true) || !(failures[roomID]?.isEmpty ?? true)
+    }
+
+    /// Prunes entries for `roomID` whose transaction IDs are no longer active local echoes in its live timeline.
+    mutating func reconcile(roomID: String, activeLocalTransactionIDs: Set<String>) -> (
+        changed: Bool, failuresChanged: Bool
+    ) {
+        let kept = activeLocalTransactionIDs.union(threadTransactions[roomID] ?? [])
+        var changed = false
+        var failuresChanged = false
+        if let existingPending = pending[roomID] {
+            let filtered = existingPending.intersection(kept)
+            if filtered != existingPending {
+                pending[roomID] = filtered.isEmpty ? nil : filtered
+                changed = true
+            }
+        }
+        if let existingFailures = failures[roomID] {
+            let filtered = existingFailures.filter { kept.contains($0.key) }
+            if filtered != existingFailures {
+                failures[roomID] = filtered.isEmpty ? nil : filtered
+                changed = true
+                failuresChanged = true
+            }
+        }
+        return (changed, failuresChanged)
+    }
+
+    mutating func remove(roomID: String, transactionID: String) {
+        removePending(roomID: roomID, transactionID: transactionID)
+        removeFailure(roomID: roomID, transactionID: transactionID)
+        removeThreadTransaction(roomID: roomID, transactionID: transactionID)
+    }
+
+    mutating func reset() {
+        pending = [:]
+        failures = [:]
+        threadTransactions = [:]
+        replayingInitial = false
+        initialReplaySeen = [:]
+    }
+
+    func isFailed(roomID: String, transactionID: String) -> Bool {
+        failures[roomID]?[transactionID] != nil
+    }
+
+    var queuedCount: Int { pending.values.reduce(0) { $0 + $1.count } }
+
+    func failedRoomIDs(
+        suppressingRecoverable: Bool, excluding retryingKeys: Set<SendQueueMessageKey> = []
+    ) -> Set<String> {
+        var rooms = Set<String>()
+        for (roomID, roomFailures) in failures {
+            if roomFailures.contains(where: { id, isRecoverable in
+                !retryingKeys.contains(SendQueueMessageKey(roomID: roomID, messageID: id))
+                    && (!suppressingRecoverable || !isRecoverable)
+            }) {
+                rooms.insert(roomID)
+            }
+        }
+        return rooms
+    }
+
+    func hasFailure(
+        in roomID: String, excluding excludedIDs: Set<String> = [],
+        retryingKeys: Set<SendQueueMessageKey> = [], suppressingRecoverable: Bool
+    ) -> Bool {
+        guard let roomFailures = failures[roomID] else { return false }
+        return roomFailures.contains { id, isRecoverable in
+            !excludedIDs.contains(id)
+                && !retryingKeys.contains(SendQueueMessageKey(roomID: roomID, messageID: id))
+                && (!suppressingRecoverable || !isRecoverable)
+        }
+    }
+
+    private mutating func removePending(roomID: String, transactionID: String) {
+        guard var set = pending[roomID] else { return }
+        set.remove(transactionID)
+        pending[roomID] = set.isEmpty ? nil : set
+    }
+
+    private mutating func removeFailure(roomID: String, transactionID: String) {
+        guard var map = failures[roomID] else { return }
+        map.removeValue(forKey: transactionID)
+        failures[roomID] = map.isEmpty ? nil : map
+    }
+
+    private mutating func removeThreadTransaction(roomID: String, transactionID: String) {
+        guard var ids = threadTransactions[roomID] else { return }
+        ids.remove(transactionID)
+        threadTransactions[roomID] = ids.isEmpty ? nil : ids
+    }
+}
+
+/// Tracks fractional upload progress (0...1) per local media transaction outside `ChatMessage`, so progress ticks
+/// redraw only the attachment's overlay bar without diffing `messages` or invalidating timeline row heights.
+@MainActor @Observable final class UploadProgressStore {
+    private var values: [SendQueueMessageKey: Double] = [:]
+
+    func progress(roomID: String, messageID: String) -> Double? {
+        values[SendQueueMessageKey(roomID: roomID, messageID: messageID)]
+    }
+
+    func set(_ progress: Double?, roomID: String, messageID: String) {
+        let key = SendQueueMessageKey(roomID: roomID, messageID: messageID)
+        let clamped = progress.map { min(1, max(0, $0)) }
+        if values[key] != clamped { values[key] = clamped }
+    }
+
+    func clear(roomID: String, messageID: String) {
+        set(nil, roomID: roomID, messageID: messageID)
+    }
+
+    func reset() {
+        if !values.isEmpty { values = [:] }
+    }
+}
+
+struct SignOutWarning: Equatable {
+    let title: String
+    let message: String
+    let action: String
+
+    static func forExpiredSession(queuedCount: Int, hasFailedSends: Bool, isSoftLogout: Bool) -> Self? {
+        let hasUnsent = queuedCount > 0 || hasFailedSends
+        guard hasUnsent || isSoftLogout else { return nil }
+        let unsentText: String =
+            if queuedCount > 0 {
+                "\(queuedCount) unsent \(queuedCount == 1 ? "message" : "messages")"
+            } else {
+                "unsent messages"
+            }
+        let message: String =
+            if hasUnsent && isSoftLogout {
+                "Signing in again clears this device’s local session and \(unsentText). Copy anything unsent first, and have another device or your recovery key ready."
+            } else if hasUnsent {
+                "Signing in again clears \(unsentText) that haven’t reached the server. Copy anything you want to keep first."
+            } else {
+                "Your server ended this session softly. Signing in again starts a fresh device session; you’ll need another device or your recovery key to read encrypted history."
+            }
+        return Self(title: "Sign in again?", message: message, action: "Sign in again")
+    }
+}
+
+struct SendCancelPrompt: Equatable {
+    let title: String
+    let message: String
+    let action: String
+    let cancel: String
+
+    static func copy(failed: Bool, offline: Bool) -> Self {
+        if failed {
+            return Self(title: "Delete message?", message: "This can’t be undone.", action: "Delete", cancel: "Cancel")
+        }
+        if offline {
+            return Self(
+                title: "Cancel sending this message?",
+                message:
+                    "You’re offline. If it didn’t reach the server earlier, cancelling stops it from sending when you reconnect.",
+                action: "Cancel sending", cancel: "Keep sending")
+        }
+        return Self(
+            title: "Cancel sending this message?",
+            message: "It may already have been delivered.",
+            action: "Cancel sending", cancel: "Keep sending")
+    }
+}
+
+enum SendWaitStatus: Hashable {
+    case sending
+    case waitingToReconnect
+    case blockedByEarlierFailure
+    case savingEdit
+    case deleting
+
+    var label: String {
+        switch self {
+        case .sending: "Sending…"
+        case .waitingToReconnect: "Waiting to reconnect"
+        case .blockedByEarlierFailure: "Waiting on an earlier message"
+        case .savingEdit: "Saving edit…"
+        case .deleting: "Deleting…"
+        }
+    }
+
+    var showsImmediately: Bool {
+        self == .waitingToReconnect || self == .blockedByEarlierFailure
+    }
+
+    static func resolve(
+        pendingSend: Bool, sendFailure: MessageSendFailure?, pendingChange: ChatMessage.PendingChange?,
+        waitingToReconnect: Bool, blockedByEarlierFailure: Bool
+    ) -> Self? {
+        if pendingSend {
+            guard sendFailure == nil else { return nil }
+            if waitingToReconnect { return .waitingToReconnect }
+            if blockedByEarlierFailure { return .blockedByEarlierFailure }
+            return .sending
+        }
+        guard let pendingChange else { return nil }
+        if waitingToReconnect { return .waitingToReconnect }
+        switch pendingChange {
+        case .editing: return .savingEdit
+        case .deleting: return .deleting
+        }
+    }
 }
 
 struct MessageSendFailure: Hashable {
@@ -103,11 +398,17 @@ enum SendQueueActions {
         return try await timeline.retrySend(itemId: itemID, target: .event)
     }
 
-    static func cancel(itemID: EventOrTransactionId, timeline: Timeline) async throws -> Bool {
+    static func cancel(
+        itemID: EventOrTransactionId, room: Room? = nil, timeline: Timeline, resumeQueue: Bool = false
+    ) async throws -> Bool {
         guard case .transactionId = itemID else { return false }
         // The SDK may queue a compensating redaction if sending was already in
         // flight and succeeds. A remote event ID is never accepted here.
-        return try await timeline.abortSend(itemId: itemID, target: .event)
+        let cancelled = try await timeline.abortSend(itemId: itemID, target: .event)
+        if cancelled, resumeQueue, let room, !room.isSendQueueEnabled() {
+            room.enableSendQueue(enable: true)
+        }
+        return cancelled
     }
 }
 
@@ -208,7 +509,7 @@ enum MatrixMapping {
             case .sticker(let text, _, _): body = text
             case .poll(let question, _, _, _, _, _, _): body = question
             case .redacted: body = ChatMessage.deletedBody
-            case .unableToDecrypt: body = "Waiting for this message"
+            case .unableToDecrypt(let encrypted): body = unableToDecrypt(encrypted).body
             case .liveLocation, .other: body = nil
             }
         }
@@ -253,8 +554,8 @@ enum MatrixMapping {
                 preview.body = ChatMessage.deletedBody
                 preview.kind = "m.room.message"
                 preview.isRedacted = true
-            case .unableToDecrypt:
-                preview.body = "Waiting for this message"
+            case .unableToDecrypt(let encrypted):
+                preview.body = unableToDecrypt(encrypted).body
                 preview.kind = "m.room.encrypted"
             case .sticker(let body, _, _):
                 preview.body = body
@@ -343,9 +644,11 @@ enum MatrixMapping {
         case .redacted:
             message.body = ChatMessage.deletedBody
             message.isRedacted = true
-        case .unableToDecrypt:
-            message.body = "Waiting for this message"
+        case .unableToDecrypt(let encrypted):
+            let mapped = unableToDecrypt(encrypted)
+            message.body = mapped.body
             message.kind = "m.room.encrypted"
+            message.isUnlockable = mapped.unlockable
         case .sticker(let body, _, _):
             message.body = body
             message.kind = "m.sticker"
@@ -386,7 +689,50 @@ enum MatrixMapping {
             case .sent: result.sendState = "sent"
             }
         }
+        result.pendingChange = pendingChange(edit: item.editSendState, redaction: item.redactionSendState)
         return result
+    }
+
+    static func uploadProgress(from state: EventSendState?) -> Double? {
+        guard case .notSentYet(let progress?) = state, progress.progress.total > 0 else { return nil }
+        return min(1, max(0, Double(progress.progress.current) / Double(progress.progress.total)))
+    }
+
+    private static func pendingChange(edit: EventSendState?, redaction: EventSendState?) -> ChatMessage.PendingChange? {
+        if let redaction, !isSent(redaction) { return .deleting }
+        if let edit, !isSent(edit) { return .editing }
+        return nil
+    }
+
+    private static func isSent(_ state: EventSendState) -> Bool {
+        if case .sent = state { return true }
+        return false
+    }
+
+    static func unableToDecrypt(_ encrypted: EncryptedMessage) -> (body: String, unlockable: Bool) {
+        switch encrypted {
+        case .megolmV1AesSha2(_, let cause):
+            switch cause {
+            case .sentBeforeWeJoined:
+                return ("Sent before you joined", false)
+            case .historicalMessageAndBackupIsDisabled:
+                return ("History isn’t available on this device", false)
+            case .historicalMessageAndDeviceIsUnverified, .withheldForUnverifiedOrInsecureDevice:
+                return ("Verify this device to read", true)
+            case .withheldBySender:
+                return ("The sender didn’t share this message with this device", false)
+            case .verificationViolation:
+                return ("Sent by an unverified session", false)
+            case .unsignedDevice:
+                return ("Sent by an unverified device", false)
+            case .unknownDevice:
+                return ("Sent by an unknown device", false)
+            case .unknown:
+                return ("Waiting for keys…", true)
+            }
+        case .olmV1Curve25519AesSha2, .unknown:
+            return ("Waiting for keys…", true)
+        }
     }
 
     static func searchMessages(_ results: [SearchServiceResult], roomID: String?) -> [ChatMessage] {
@@ -507,6 +853,13 @@ private final class NotificationsObserver: SyncNotificationListener, @unchecked 
     func onNotification(notification: NotificationItem, roomId: String) { callback(notification, roomId) }
 }
 
+private final class SessionAuthObserver: ClientDelegate, @unchecked Sendable {
+    let onAuthError: @Sendable (Bool) -> Void
+    init(_ onAuthError: @escaping @Sendable (Bool) -> Void) { self.onAuthError = onAuthError }
+    func didReceiveAuthError(isSoftLogout: Bool) { onAuthError(isSoftLogout) }
+    func onBackgroundTaskErrorReport(taskName: String, error: BackgroundTaskFailureReason) {}
+}
+
 private final class SearchResultsObserver: SearchServiceResultsListener, @unchecked Sendable {
     private let lock = NSLock()
     private var results: [SearchServiceResult] = []
@@ -545,9 +898,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// Where the SDK stores of the sessions those credentials name live.
     @ObservationIgnored private let storeRoots: [URL]
     convenience init() { self.init(credentials: .shared, storeRoots: SessionStores.roots) }
-    init(credentials: SecureSessionStore, storeRoots: [URL]) {
+    init(
+        credentials: SecureSessionStore, storeRoots: [URL],
+        connectionRecovery: ConnectionRecovery? = nil
+    ) {
         self.credentials = credentials
         self.storeRoots = storeRoots
+        self.connectionRecovery = connectionRecovery ?? ConnectionRecovery()
     }
     let verification = VerificationService()
     let threadFeed = ThreadFeedService()
@@ -558,6 +915,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     let presence = PresenceService()
     let sharedFiles = SharedFilesService()
     let avatarImages = AvatarImageCache()
+    let uploadProgress = UploadProgressStore()
     /// Decoded inline images and posters by event and source, so a row that comes back draws its picture at once.
     let mediaImages: NSCache<NSString, CGImage> = {
         let cache = NSCache<NSString, CGImage>()
@@ -575,17 +933,60 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     var status: ConnectionStatus = .signedOut
     private(set) var connectionErrorMessage: String?
     private(set) var connectionState = MatrixConnectionState.idle
-    /// Your own dot goes hollow: the connection dropped, as opposed to still being made.
-    var connectionLost: Bool { [.offline, .stopped, .failed].contains(connectionState) }
+    /// Your own dot goes hollow: the connection dropped or is reconnecting, as opposed to first connecting.
+    var connectionLost: Bool {
+        sessionExpired || [.offline, .stopped, .failed].contains(connectionState)
+            || (connectionState == .connecting && connectionErrorMessage == ConnectionHealth.reconnecting.label)
+    }
+    /// Your own presence dot on the sidebar avatar: green only when live (or in preview), hollow once lost or stuck
+    /// connecting, and absent during the brief initial handshake so it never claims Connected before sync is live.
+    func ownPresence(downLongEnough: Bool = false) -> Presence? {
+        if isPreview || connectionState == .running { return .active }
+        if connectionLost || downLongEnough { return .away }
+        return nil
+    }
+    /// Human-readable channel state shown in the profile menu and avatar tooltip.
+    var connectionStatusLabel: String {
+        if isPreview { return "Preview" }
+        if sessionExpired { return "Session expired" }
+        if connectionState == .running { return ConnectionHealth.connected.label }
+        if let notice = connectionErrorMessage { return notice }
+        switch connectionState {
+        case .idle, .connecting: return ConnectionHealth.connecting.label
+        case .offline: return ConnectionHealth.offline.label
+        case .stopped: return ConnectionHealth.paused.label
+        case .failed: return ConnectionHealth.reconnecting.label
+        case .running: return ConnectionHealth.connected.label
+        }
+    }
+    /// The homeserver host for inspection in the profile menu.
+    var homeserverHost: String? {
+        guard let raw = homeserverURL, !raw.isEmpty else { return nil }
+        return URL(string: raw)?.host ?? raw
+    }
+    /// Suppress red recoverable failures while offline or reconnecting, since those messages will retry automatically.
+    var suppressesRecoverableSendFailures: Bool { !sessionExpired && connectionState != .running }
     /// A crossed-out Wi-Fi only when the network itself is gone; reaching the server again turns an arrow.
     var connectionSymbol: String {
         connectionErrorMessage == ConnectionHealth.offline.label ? "wifi.slash" : "arrow.clockwise"
     }
     private(set) var isRetryingConnection = false
     private(set) var canRetryConnection = false
-    private let connectionRecovery = ConnectionRecovery()
+    private(set) var sessionExpired = false
+    private(set) var sessionExpiredIsSoftLogout = false
+    /// Increments each time sync transitions back to `.running`, so views can retry failed reads and gates.
+    private(set) var reconnectCount = 0
+    private var clientDelegateHandle: TaskHandle?
+    private let connectionRecovery: ConnectionRecovery
+    private static let sessionExpiredError = MatrixServiceError.request("Your session expired. Sign in again.")
+    private func assertActiveSession() throws {
+        if sessionExpired { throw Self.sessionExpiredError }
+    }
     private var refusedChanges: RefusedChanges?
     private var profileLoadTask: Task<Void, Never>?
+    private var needsInitialProfileLoad = false
+    private var failedSubscriptionRoomID: String?
+    private var failedOpen: (roomID: String, eventID: String?)?
     private var profileRevision: UInt64 = 0
     private var avatarRevision: UInt64 = 0
     private var roomDetailsSaves = Set<String>()
@@ -607,23 +1008,44 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     var roomsLoaded = false
     var messages: [ChatMessage] = [] {
         didSet {
-            let locked = messages.contains { $0.kind == "m.room.encrypted" }
-            if locked != hasLockedMessages { hasLockedMessages = locked }
+            updateLockedMessages()
             if messages.first?.id != oldValue.first?.id { blankPages = 0 }
-            if let root = conversationRoot(), root != threadMessages.first { threadMessages[0] = root }
+            if let root = conversationRoot(), let shown = threadMessages.first,
+                root != Self.threadRootCopy(shown, id: root.id)
+            {
+                threadMessages[0] = root
+            }
             countThreadReplies()
         }
     }
-    /// Whether the open conversation shows messages this device can't decrypt yet; apart from `messages`, so its
-    /// readers aren't redrawn by every message.
+    /// Whether the open conversation or open thread shows undecryptable messages this device can unlock; apart from
+    /// `messages`, so its readers aren't redrawn by every message.
     private(set) var hasLockedMessages = false
-    private(set) var sendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
+    private func updateLockedMessages() {
+        let locked =
+            messages.contains { $0.kind == "m.room.encrypted" && $0.isUnlockable }
+            || threadMessages.contains { $0.kind == "m.room.encrypted" && $0.isUnlockable }
+        if locked != hasLockedMessages { hasLockedMessages = locked }
+    }
+    private(set) var sendFailures: [SendQueueMessageKey: MessageSendFailure] = [:] {
+        didSet { publishGlobalSendQueue() }
+    }
+    private(set) var failedSendRoomIDs = Set<String>()
+    private(set) var queuedSendCount = 0
     private(set) var pendingSendActions = Set<SendQueueMessageKey>()
+    /// Failed messages currently retrying so the row immediately transitions out of red "Not delivered".
+    private(set) var retryingSendKeys = Set<SendQueueMessageKey>()
     /// Messages and files sent from this device so far, by the room and the thread they went to.
     private(set) var sends: [Conversation: Int] = [:]
     private var mainSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
     private var threadSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
-    var threadMessages: [ChatMessage] = [] { didSet { countThreadReplies() } }
+    private var globalSendQueue = SendQueueTracker()
+    var threadMessages: [ChatMessage] = [] {
+        didSet {
+            updateLockedMessages()
+            countThreadReplies()
+        }
+    }
     /// The open thread's root, and the reply count its opener showed, which stays while the thread shows; nil while no
     /// thread pane shows.
     var threadOpening: (rootID: String, openedWith: Int?)? {
@@ -633,7 +1055,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
     }
     /// Whether the open thread's own timeline holds its root, which the SDK adds only with the thread's start.
-    private var threadHoldsRoot = false
+    private var threadHoldsRoot = false {
+        didSet { if threadHoldsRoot != oldValue { countThreadReplies() } }
+    }
     /// The line under the open thread's root that counts its replies; nil for none.
     private(set) var threadRepliesLine: Int?
     /// Nothing but the shared rule decides the line, from what the thread and its conversation hold now.
@@ -658,12 +1082,16 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var firstUnreadEventID: String?
     private var forwardLoadID: UUID?
     private(set) var hasMoreThreadHistory = true { didSet { countThreadReplies() } }
+    /// False until the thread's timeline opens, so the pane never asks for older replies before it can load them.
+    var loadsMoreThreadHistory: Bool { threadTimeline != nil && loadedThreadRootID != nil && hasMoreThreadHistory }
     /// Why the open thread's last page failed, nil once one loads, and gone with the pane. The pane says so, and asks
     /// again only after the reader retries or the connection comes back.
     private(set) var threadPageError: String?
     /// The reader, or the connection coming back, asks for the thread's failed page again, wherever the pane is.
     func retryThreadPage() {
         guard let rootID = threadOpening?.rootID else { return }
+        threadRevealedSelection = threadSelection
+        threadAnchorSearchDoneSelection = threadSelection
         threadPageError = nil
         Task { _ = try? await loadMoreThread(rootID: rootID) }
     }
@@ -679,7 +1107,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var recentEmoji: [String] = []
     var selectedRoomID: String? { didSet { updateSelectedRoom() } }
     /// The open conversation's entry in `rooms`, apart so its readers are not redrawn by changes to other rooms.
-    /// Without its unread state, which changes with every message in it; the sidebar shows that from `rooms`.
+    /// Without its unread state or latest-message preview, which change with every message in it; the sidebar shows
+    /// those from `rooms`.
     private(set) var selectedRoom: ChatRoom?
     private func updateSelectedRoom() {
         var room = rooms.first { $0.id == selectedRoomID }
@@ -692,6 +1121,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         room?.isMarkedUnread = false
         room?.mentions = 0
         room?.fullyReadEventID = nil
+        room?.latest = nil
         if room != selectedRoom { selectedRoom = room }
     }
     var typingUsers: [String] = []
@@ -723,6 +1153,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private var roomList: RoomListEntriesWithDynamicAdaptersResult?
     private var handles: [TaskHandle] = []
     private var timeline: Timeline?
+    private var timelineObserver: TimelineObserver?
     private var timelineHandle: TaskHandle?
     /// The open conversation's live timeline; nil while it shows one opened at an older message.
     private var liveTimeline: KeptTimeline?
@@ -763,8 +1194,58 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private var threadHandle: TaskHandle?
     private var timelineRevision = 0
     private var threadRevision = 0
-    private var threadSelection = UUID()
+    private(set) var threadSelection = UUID()
     private var loadedThreadRootID: String?
+    /// Thread selection whose `timelineWithConfiguration` threw, so the pane stops holding back the cached root.
+    private var threadBuildFailedSelection: UUID?
+    /// Thread selection whose pane already showed its root (e.g. after first-page error or ready), so retrying a
+    /// failed page never re-hides an already-visible root.
+    private var threadRevealedSelection: UUID?
+    /// Thread selection whose bounded search for a remembered reply beyond page 1 has finished.
+    private(set) var threadAnchorSearchDoneSelection: UUID?
+    /// Thread selection currently awaiting older pages or a concurrent end-of-history diff for a remembered/jumped
+    /// target, keeping the pane from opening prematurely when `endReached` beats the listener diff.
+    private(set) var searchingThreadTargetSelection: UUID?
+    @ObservationIgnored private var threadAnchorSearchTask: Task<Void, Never>?
+    @ObservationIgnored private var threadDiffWaiters: [UUID: () -> Void] = [:]
+    /// True once the open thread's SDK timeline is loaded for `rootID`, so actions on thread rows are live.
+    func hasThreadTimeline(for rootID: String?) -> Bool {
+        guard let rootID else { return false }
+        return threadTimeline != nil && loadedThreadRootID == rootID
+    }
+    /// Brief settle window when an empty-cache room reports `endReached == true` before any messages arrive, so a
+    /// concurrent SDK diff listener callback lands before `hasMoreHistory` clears.
+    var emptyEndReachedSettle: Duration = .milliseconds(120)
+    /// True during the brief empty-cache `endReached` settle window so the pane neither flashes `welcome` nor asks for
+    /// redundant older pages while waiting for a concurrent diff callback.
+    private(set) var settlingEndReached = false
+    @ObservationIgnored private var pendingEndReached: (timeline: ObjectIdentifier, roomID: String)?
+    @ObservationIgnored private var pendingEndReachedTask: Task<Void, Never>?
+    /// True while the open thread is still building its SDK timeline before reading cached replies.
+    var isBuildingThreadTimeline: Bool {
+        guard !isPreview, let opening = threadOpening, threadBuildFailedSelection != threadSelection else {
+            return false
+        }
+        return threadTimeline == nil || loadedThreadRootID != opening.rootID
+    }
+    /// True while the open thread is building its timeline or awaiting its first page with no replies shown yet.
+    var isOpeningThread: Bool {
+        guard !isPreview, let opening = threadOpening, threadBuildFailedSelection != threadSelection,
+            threadRevealedSelection != threadSelection
+        else { return false }
+        if isBuildingThreadTimeline { return true }
+        let hasReplies = threadMessages.contains { $0.eventID != opening.rootID }
+        return !hasReplies && readyThreadReadSelection != threadSelection && threadPageError == nil
+    }
+    /// True when the open thread is already known to have replies before its own timeline loads them.
+    var threadExpectsReplies: Bool {
+        guard let opening = threadOpening else { return false }
+        if let openedWith = opening.openedWith, openedWith > 0 { return true }
+        if let summary = messages.first(where: { $0.eventID == opening.rootID })?.replyCount, summary > 0 {
+            return true
+        }
+        return false
+    }
     /// The open thread's listener, whose snapshot holds what its timeline does, shown or not.
     private var threadSnapshot: TimelineObserver?
     private(set) var reach: Task<Void, Never>?
@@ -818,6 +1299,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         reach?.cancel()
         reach = rootID.map { root in Task { [weak self] in await self?.reachJump(inThread: root) } }
     }
+    /// Whether a signed-in client is active and not stopping.
+    var isAuthenticated: Bool { client != nil && connectionStopTask == nil }
     var messageActionContext: MessageActionTarget.Context {
         MessageActionTarget.Context(
             sessionID: sessionGeneration, userID: user?.id, roomID: selectedRoomID,
@@ -979,11 +1462,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private var mainForwardMedia: [String: ForwardMediaRevision] = [:]
     private var threadForwardMedia: [String: ForwardMediaRevision] = [:]
     /// Remote, undeleted attachments each open timeline shows, by event ID.
-    private struct ShownMedia {
+    private struct ShownMedia: Equatable {
         let source: MediaSource
         let attachment: MessageAttachment
         /// The full source, encryption key included; an edit can keep the URL and change the key.
         let identity: String
+        static func == (a: Self, b: Self) -> Bool { a.attachment == b.attachment && a.identity == b.identity }
     }
     private var mainMedia: [String: ShownMedia] = [:]
     /// A live timeline with what its conversation last showed, so coming back to it rebuilds nothing.
@@ -1185,7 +1669,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         pinnedMessages.attach(newClient)
         sharedFiles.attach(newClient)
         homeserverURL = try newClient.session().homeserverUrl
+        newClient.enableSendQueueUploadProgress(enable: true)
         let generation = sessionGeneration
+        clientDelegateHandle = try? newClient.setDelegate(
+            delegate: SessionAuthObserver { [weak self] isSoftLogout in
+                Task { @MainActor [weak self] in
+                    self?.handleAuthError(isSoftLogout: isSoftLogout, generation: generation)
+                }
+            })
         let id = try newClient.userId()
         user = ChatUser(id: id, name: id)
         savedMessages.attach(newClient, accountID: id)
@@ -1222,21 +1713,45 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 }
             })
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
+        guard !sessionExpired else { return }
         let service = try await newClient.syncService().withOfflineMode().finish()
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
+        guard !sessionExpired else { return }
         roomSubscriptions.attach(service.roomListService())
+        loadPersistedSendFailures(accountID: id)
+        beginInitialSendQueueReplay()
         try await connectionRecovery.attach(
-            service, client: newClient,
+            service, client: newClient, homeserverURL: homeserverURL,
             onSendingResumed: { [weak self] in self?.refusedChanges?.cancel() },
+            onSendQueueUpdate: { [weak self] roomID, update in
+                guard let self, self.sessionGeneration == generation, self.connectionStopTask == nil else { return }
+                self.handleSendQueueUpdate(roomID: roomID, update: update)
+            },
             onUpdate: { [weak self] feedback in
                 guard let self, self.sessionGeneration == generation, self.connectionStopTask == nil else { return }
                 self.applyConnection(feedback)
             })
+        Task { @MainActor [weak self] in
+            guard let self, self.sessionGeneration == generation else { return }
+            self.finishInitialSendQueueReplay()
+        }
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
+        if sessionExpired {
+            await connectionRecovery.stop()
+            return
+        }
         try await watchRefusedChanges(newClient)
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
+        if sessionExpired {
+            await connectionRecovery.stop()
+            return
+        }
         let allRooms = try await service.roomListService().allRooms()
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
+        if sessionExpired {
+            await connectionRecovery.stop()
+            return
+        }
         roomList = Self.observeAllRooms(
             allRooms,
             listener: RoomsObserver { [weak self] updates in
@@ -1249,24 +1764,49 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard roomList != nil else {
             throw MatrixServiceError.request("Couldn’t load your conversations. Sign in again.")
         }
-        try await connectionRecovery.retry()
+        if sessionExpired {
+            await connectionRecovery.stop()
+            return
+        }
+        do {
+            try await connectionRecovery.retry()
+        } catch {
+            if sessionExpired {
+                await connectionRecovery.stop()
+                return
+            }
+            throw error
+        }
         guard sessionGeneration == generation else { throw CancellationError() }
+        if sessionExpired {
+            await connectionRecovery.stop()
+            return
+        }
         requestRefresh()
         // Cached rooms and sync can become usable without waiting on profile
         // HTTP requests. A late profile response belongs only to this account.
+        Task { [weak self] in await self?.loadRecentEmoji() }
+        needsInitialProfileLoad = true
+        loadInitialProfile()
+    }
+
+    private func loadInitialProfile() {
+        guard needsInitialProfileLoad, profileLoadTask == nil, let activeClient = client else { return }
+        let generation = sessionGeneration
         let loadedProfileRevision = profileRevision
         let loadedAvatarRevision = avatarRevision
-        Task { [weak self] in await self?.loadRecentEmoji() }
         profileLoadTask = Task { [weak self] in
+            defer { if let self, self.sessionGeneration == generation { self.profileLoadTask = nil } }
             do {
-                let name = try await newClient.displayName()
-                let avatar = try await newClient.avatarUrl()
+                let name = try await activeClient.displayName()
+                let avatar = try await activeClient.avatarUrl()
                 guard let self, self.sessionGeneration == generation, !Task.isCancelled else { return }
+                self.needsInitialProfileLoad = false
                 if self.profileRevision == loadedProfileRevision { self.user?.name = name }
                 if self.avatarRevision == loadedAvatarRevision { self.user?.avatarURL = avatar }
             } catch {
                 guard let self, self.sessionGeneration == generation, !Task.isCancelled else { return }
-                if self.errorMessage == nil {
+                if self.connectionState == .running, self.errorMessage == nil {
                     self.errorMessage = "Couldn’t load your profile."
                 }
             }
@@ -1275,6 +1815,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     func retryConnection() async throws {
         guard connectionStopTask == nil else { throw CancellationError() }
+        if sessionExpired { throw MatrixServiceError.request("Your session expired. Sign in again.") }
         _ = try requireClient()
         let generation = sessionGeneration
         do {
@@ -1341,10 +1882,18 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         notificationRetries.reset()
         profileLoadTask?.cancel()
         profileLoadTask = nil
+        needsInitialProfileLoad = false
+        failedSubscriptionRoomID = nil
+        failedOpen = nil
+        reconnectCount = 0
         connectionErrorMessage = nil
         connectionState = .idle
         isRetryingConnection = false
         canRetryConnection = false
+        sessionExpired = false
+        sessionExpiredIsSoftLogout = false
+        clientDelegateHandle?.cancel()
+        clientDelegateHandle = nil
         readDelivery.reset()
         lastAutomaticReceipt = nil
         readyThreadReadSelection = nil
@@ -1361,10 +1910,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         await connectionRecovery.stop()
         refusedChanges?.stop()
         refusedChanges = nil
+        globalSendQueue.reset()
         mainSendFailures = [:]
         threadSendFailures = [:]
         sendFailures = [:]
+        failedSendRoomIDs = []
+        queuedSendCount = 0
         pendingSendActions = []
+        retryingSendKeys = []
+        uploadProgress.reset()
         let oldPersistence = persistence
         persistence = nil
         await Task.detached(priority: .userInitiated) { oldPersistence?.deactivate() }.value
@@ -1376,8 +1930,17 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         dropPrepared()
         dropPreparedThread()
         liveTimeline = nil
+        clearPendingEndReached()
+        threadAnchorSearchTask?.cancel()
+        threadAnchorSearchTask = nil
+        threadBuildFailedSelection = nil
+        threadRevealedSelection = nil
+        threadAnchorSearchDoneSelection = nil
+        searchingThreadTargetSelection = nil
+        wakeThreadDiffWaiters()
         mainProjections = [:]
         threadProjections = [:]
+        projectedLiveRoomID = nil
         timelineHandle = nil
         typingHandle = nil
         threadHandle = nil
@@ -1412,7 +1975,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let owner = logoutOwner
         defer { authOperation = nil }
         // The sample workspace never signed in, so whatever client a failed start left belongs to no one here.
-        if !owner.isPreview, let originalClient = client {
+        if !owner.isPreview, !sessionExpired, let originalClient = client {
             do { try await originalClient.logout() } catch {
                 try validateLogout(owner)
                 if error is CancellationError { throw error }
@@ -1447,6 +2010,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             }
             // While Keychain still holds the session it can restore into this store, so keep it.
             if deletionError == nil, let storeID { SessionStores.remove(storeID, roots: storeRoots) }
+            if deletionError == nil, let accountID = owner.userID { clearPersistedSendFailures(accountID: accountID) }
         }
         try validateLogout(stoppedOwner)
         sessionCleanupPending = deletionError != nil
@@ -1655,8 +2219,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         showConversation(id, eventID: nil, token: kept.token)
         liveTimeline = kept
         timeline = kept.timeline
+        timelineObserver = kept.observer
         timelineHandle = kept.listener
         openState = .ready
+        failedOpen = nil
         messages = kept.messages
         members = kept.members
         canMentionRoom = false
@@ -1671,8 +2237,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         sendFailures = kept.sendFailures
         mainProjections = kept.projections
         timelineRevision = kept.revision
+        projectedLiveRoomID = id
         // What arrived while the reader was away.
         showTimeline(kept.observer.snapshot, roomID: id)
+        if connectionState == .running { reconcileLiveTimelineSendQueue(roomID: id) }
         if !messages.isEmpty { Performance.finish(.roomTimeline, ["messages": messages.count]) }
         updateSubscriptions(id)
         if let room = try? client?.getRoom(roomId: id) { watchTyping(room, token: kept.token) }
@@ -1730,9 +2298,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     /// False, without showing the room, when its live timeline does not hold `anchor`.
     @discardableResult
-    private func setupRoom(_ id: String, focus: TimelineFocus, eventID: String?, containing anchor: String? = nil)
+    private func setupRoom(
+        _ id: String, focus: TimelineFocus, eventID: String?, containing anchor: String? = nil,
+        autoRetried: Bool = false
+    )
         async -> Bool
     {
+        let startedReconnect = reconnectCount
+        let startedOffline = connectionState != .running
         let ahead: (token: UUID, task: Task<PreparedRoom?, Never>)?
         if case .live = focus, eventID == nil, let prepared, prepared.roomID == id {
             ahead = (prepared.token, prepared.task)
@@ -1786,11 +2359,25 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 eventID: eventID, token: token)
         } catch {
             guard selection == token else { return true }
+            if !autoRetried, connectionState == .running, startedOffline || reconnectCount != startedReconnect {
+                return await setupRoom(id, focus: focus, eventID: eventID, containing: anchor, autoRetried: true)
+            }
             showConversation(id, eventID: eventID, token: token)
             openState = .failed
+            failedOpen = (id, eventID)
             errorMessage = Self.safeError(error)
         }
         return true
+    }
+
+    func retryOpenRoom() async {
+        guard openState == .failed, let failed = failedOpen, selectedRoomID == failed.roomID else { return }
+        failedOpen = nil
+        if let eventID = failed.eventID {
+            await open(failed.roomID, at: eventID)
+        } else {
+            await selectRoom(failed.roomID)
+        }
     }
 
     /// A timeline of `room` and its listener, whose updates show once `token` is on screen; nil, with nothing left
@@ -1818,8 +2405,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let id = room.id()
         showConversation(id, eventID: eventID, token: token)
         timeline = next
+        timelineObserver = observer
         timelineHandle = listener
         openState = .ready
+        failedOpen = nil
         hasMoreForwardHistory = eventID != nil
         if eventID == nil {
             liveTimeline = KeptTimeline(
@@ -1838,7 +2427,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         Task { [weak self] in
             do {
                 let endReached = try await page.value
-                self?.reached(endReached, in: next, roomID: id)
+                // Project any items the page just delivered before flipping hasMoreHistory so the timeline never
+                // flashes TimelineWelcomeRow alone for a frame while messages are still queued on the main actor.
+                if let self, self.timeline === next { self.showTimeline(observer.snapshot, roomID: id) }
+                self?.finishEndReached(endReached, in: next, roomID: id)
             } catch {
                 guard let self, self.timeline === next else { return }
                 self.errorMessage = Self.safeError(error)
@@ -1894,8 +2486,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         // Loaded back to its start, the conversation keeps its intro if the live timeline holds its first message.
         hasMoreHistory = hasMoreHistory || !holds(messages.first?.eventID)
         timelineHandle?.cancel()
+        clearPendingEndReached()
         focusedEventID = nil
         timeline = next
+        timelineObserver = observer
         timelineHandle = listener
         liveTimeline = KeptTimeline(roomID: id, token: token, timeline: next, observer: observer, listener: listener)
         timelineRevision = 0
@@ -1905,8 +2499,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private func showTimeline(_ snapshot: (items: [TimelineItem], revision: Int), roomID: String) {
         guard snapshot.revision > timelineRevision else { return }
         timelineRevision = snapshot.revision
-        messages = Performance.measure(.timelineProject, ["items": snapshot.items.count]) {
+        let projected = Performance.measure(.timelineProject, ["items": snapshot.items.count]) {
             project(snapshot.items, roomID: roomID)
+        }
+        if projected != messages { messages = projected }
+        if !messages.isEmpty, let pending = pendingEndReached, let current = timeline,
+            ObjectIdentifier(current) == pending.timeline
+        {
+            clearPendingEndReached()
+            reached(true, in: current, roomID: pending.roomID)
         }
         if !messages.isEmpty { Performance.finish(.roomTimeline, ["messages": messages.count]) }
     }
@@ -1928,11 +2529,22 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// Recent conversations stay subscribed: sync keeps their timelines whole, and their member lists stay loaded.
     private func updateSubscriptions(_ id: String) {
         let recent = recentTimelines.roomIDs + (liveTimeline.map { [$0.roomID] } ?? [])
+        let startedReconnect = reconnectCount
+        if failedSubscriptionRoomID == id { failedSubscriptionRoomID = nil }
         Task { [weak self] in
-            do { try await self?.roomSubscriptions.setActiveRoom(id, recent: recent) } catch is CancellationError {
+            do {
+                try await self?.roomSubscriptions.setActiveRoom(id, recent: recent)
+                guard let self, self.failedSubscriptionRoomID == id else { return }
+                self.failedSubscriptionRoomID = nil
+            } catch is CancellationError {
             } catch {
                 guard let self, self.selectedRoomID == id else { return }
-                self.errorMessage = Self.safeError(error)
+                if self.connectionState == .running, self.reconnectCount != startedReconnect {
+                    self.updateSubscriptions(id)
+                    return
+                }
+                self.failedSubscriptionRoomID = id
+                if self.connectionState == .running { self.errorMessage = Self.safeError(error) }
             }
         }
     }
@@ -1943,12 +2555,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard selection == token, shownSelection != token else { return }
         shownSelection = token
         openState = .opening
+        failedOpen = nil
         if selectedRoomID != id || !messages.isEmpty { shownTimelineID = token }
         if let live = liveTimeline {
             live.revision = timelineRevision
             live.messages = messages
             live.members = members
-            live.hasMoreHistory = hasMoreHistory
+            live.hasMoreHistory =
+                pendingEndReached?.timeline == ObjectIdentifier(live.timeline) ? false : hasMoreHistory
             live.firstUnreadEventID = firstUnreadEventID
             live.eventIDs = eventIDs
             live.mediaSources = mediaSources
@@ -1962,11 +2576,20 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             timelineHandle?.cancel()
         }
         liveTimeline = nil
+        clearPendingEndReached()
+        threadAnchorSearchTask?.cancel()
+        threadAnchorSearchTask = nil
+        threadBuildFailedSelection = nil
+        threadRevealedSelection = nil
+        threadAnchorSearchDoneSelection = nil
+        searchingThreadTargetSelection = nil
+        wakeThreadDiffWaiters()
         mainProjections = [:]
         threadProjections = [:]
+        projectedLiveRoomID = nil
         mediaFiles.removeAll()
-        mainMedia = [:]
-        threadMedia = [:]
+        if !mainMedia.isEmpty { mainMedia = [:] }
+        if !threadMedia.isEmpty { threadMedia = [:] }
         mainForwardMedia = [:]
         threadForwardMedia = [:]
         replyPreviewLoads.removeAll()
@@ -1976,20 +2599,20 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         thumbnailSources.removeAll()
         mainSendFailures = [:]
         threadSendFailures = [:]
-        sendFailures = [:]
+        if !sendFailures.isEmpty { sendFailures = [:] }
         selectedRoomID = id
         focusedEventID = eventID
-        messages = []
-        threadMessages = []
+        if !messages.isEmpty { messages = [] }
+        if !threadMessages.isEmpty { threadMessages = [] }
         threadOpening = nil
-        members = []
-        canMentionRoom = false
-        typingUsers = []
+        if !members.isEmpty { members = [] }
+        if canMentionRoom { canMentionRoom = false }
+        if !typingUsers.isEmpty { typingUsers = [] }
         errorMessage = nil
         hasMoreHistory = true
         blankPages = 0
         hasMoreThreadHistory = true
-        firstUnreadEventID = nil
+        if firstUnreadEventID != nil { firstUnreadEventID = nil }
         lastAutomaticReceipt = nil
         readyThreadReadSelection = nil
         lastThreadReceipt = nil
@@ -2002,6 +2625,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         typingHandle?.cancel()
         threadHandle?.cancel()
         timeline = nil
+        timelineObserver = nil
         threadTimeline = nil
         loadedThreadRootID = nil
     }
@@ -2021,7 +2645,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         var id: String?
         var eventOrTransactionId: EventOrTransactionId?
         var isRemote = false
+        var hasPendingDependentChange = false
         var failure: MessageSendFailure?
+        var uploadProgress: Double?
         var forwardMedia: ForwardMediaRevision?
         var media: MediaSource?
         /// Images, files and videos say whether they have a thumbnail; other kinds leave the lookup alone.
@@ -2031,6 +2657,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private typealias Projections = [ObjectIdentifier: ItemProjection]
     private var mainProjections: Projections = [:]
     private var threadProjections: Projections = [:]
+    @ObservationIgnored private var projectedLiveRoomID: String?
+    @ObservationIgnored var prepareVideo: @Sendable (URL, String, UInt64) async -> (VideoInfo, URL?) = {
+        await VideoUpload.prepare($0, mimetype: $1, size: $2)
+    }
 
     private func projection(of item: TimelineItem, roomID: String) -> ItemProjection {
         var result = ItemProjection(item: item)
@@ -2043,7 +2673,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         result.id = id
         result.eventOrTransactionId = event.eventOrTransactionId
         result.isRemote = event.isRemote
+        result.hasPendingDependentChange = event.editSendState != nil || event.redactionSendState != nil
         result.failure = MessageSendFailure.failure(event.localSendState)
+        result.uploadProgress = MatrixMapping.uploadProgress(from: event.localSendState)
         if case .msgLike(let content) = event.content, case .message(let message) = content.kind {
             result.forwardMedia = (try? ForwardMessageContent(message))?.mediaRevision
             switch message.msgType {
@@ -2093,6 +2725,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             eventIDs[id] = eventOrTransactionId
             if let failure = projection.failure {
                 failures[SendQueueMessageKey(roomID: roomID, messageID: id)] = failure
+                uploadProgress.clear(roomID: roomID, messageID: id)
+            } else if let progress = projection.uploadProgress {
+                uploadProgress.set(progress, roomID: roomID, messageID: id)
+            } else if projection.isRemote {
+                uploadProgress.clear(roomID: roomID, messageID: id)
             }
             forwardMedia[id] = projection.forwardMedia
             if let media = projection.media { mediaSources[id] = media }
@@ -2107,18 +2744,64 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
         if inThread {
             threadProjections = projections
-            threadMedia = shownMedia
+            if shownMedia != threadMedia { threadMedia = shownMedia }
             threadForwardMedia = forwardMedia
             threadSendFailures = failures
+            for projection in projections.values {
+                if !projection.isRemote, case .transactionId(let txID) = projection.eventOrTransactionId,
+                    projection.message?.sendState != "sent"
+                {
+                    globalSendQueue.markThreadTransaction(roomID: roomID, transactionID: txID)
+                }
+            }
         } else {
             mainProjections = projections
-            mainMedia = shownMedia
+            if shownMedia != mainMedia { mainMedia = shownMedia }
             mainForwardMedia = forwardMedia
             mainSendFailures = failures
-            firstUnreadEventID = UnreadMapping.firstUnreadEventID(in: marks)
+            let unread = UnreadMapping.firstUnreadEventID(in: marks)
+            if unread != firstUnreadEventID { firstUnreadEventID = unread }
+            if focusedEventID == nil {
+                projectedLiveRoomID = roomID
+                if connectionState == .running { reconcileLiveTimelineSendQueue(roomID: roomID) }
+            }
         }
-        sendFailures = mainSendFailures.merging(threadSendFailures) { _, latest in latest }
+        let mergedFailures = mainSendFailures.merging(threadSendFailures) { _, latest in latest }
+        if mergedFailures != sendFailures { sendFailures = mergedFailures }
+        if !retryingSendKeys.isEmpty {
+            let remaining = retryingSendKeys.filter { $0.roomID != roomID || sendFailures[$0] != nil }
+            if remaining != retryingSendKeys {
+                retryingSendKeys = remaining
+                publishGlobalSendQueue()
+            }
+        }
         return projected
+    }
+
+    private func reconcileLiveTimelineSendQueue(roomID: String) {
+        guard globalSendQueue.hasEntries(in: roomID) else { return }
+        var activeLocalTxIDs = Set<String>()
+        for projection in mainProjections.values {
+            // Dependent edits/redactions travel through the send queue without exposing their transaction IDs here.
+            if projection.hasPendingDependentChange { return }
+            if !projection.isRemote, case .transactionId(let txID) = projection.eventOrTransactionId,
+                projection.message?.sendState != "sent"
+            {
+                activeLocalTxIDs.insert(txID)
+            }
+        }
+        if loadedThreadRootID != nil {
+            for projection in threadProjections.values {
+                if !projection.isRemote, case .transactionId(let txID) = projection.eventOrTransactionId,
+                    projection.message?.sendState != "sent"
+                {
+                    activeLocalTxIDs.insert(txID)
+                }
+            }
+        }
+        let outcome = globalSendQueue.reconcile(roomID: roomID, activeLocalTransactionIDs: activeLocalTxIDs)
+        if outcome.failuresChanged { persistSendQueueFailures() }
+        if outcome.changed { publishGlobalSendQueue() }
     }
 
     /// As Slack keeps a message it couldn't delete or edit: it goes back to how the server has it, and you hear why
@@ -2149,6 +2832,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         _ draft: String, threadRootID: String? = nil, replyToID: String? = nil, roomID: String? = nil,
         alsoToChannel: Bool = false
     ) async throws {
+        try assertActiveSession()
         try assertDestination(roomID)
         let destination = roomID ?? selectedRoomID
         let message = ComposerFormat.message(draft: draft)
@@ -2172,6 +2856,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         // Thread timelines infer their own relation. Extra JSON cannot override
         // that fallback relation, so an explicit quote must use sendReply.
         do {
+            try assertActiveSession()
             let handle =
                 if let reply = replyToID {
                     try await target.sendReply(msg: content, eventId: reply)
@@ -2244,21 +2929,60 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let target = try requireTimeline()
         let id = selectedRoomID
         let endReached = try await readOlder(target).value
-        reached(endReached, in: target, roomID: id)
+        if timeline === target, let id, let observer = timelineObserver { showTimeline(observer.snapshot, roomID: id) }
+        finishEndReached(endReached, in: target, roomID: id)
         return endReached
+    }
+
+    private func clearPendingEndReached() {
+        pendingEndReachedTask?.cancel()
+        pendingEndReachedTask = nil
+        pendingEndReached = nil
+        if settlingEndReached { settlingEndReached = false }
+    }
+
+    /// Defers clearing `hasMoreHistory` briefly when an empty-cache room reports `endReached == true` with no messages
+    /// yet, so a concurrent SDK diff listener callback lands before `TimelineWelcomeRow` can flash alone.
+    private func finishEndReached(_ endReached: Bool, in target: Timeline, roomID: String?) {
+        if endReached, target === timeline, messages.isEmpty, let roomID {
+            let key = ObjectIdentifier(target)
+            guard pendingEndReached?.timeline != key else { return }
+            pendingEndReached = (key, roomID)
+            if !settlingEndReached { settlingEndReached = true }
+            pendingEndReachedTask?.cancel()
+            let token = selection
+            let delay = emptyEndReachedSettle
+            pendingEndReachedTask = Task { [weak self] in
+                try? await Task.sleep(for: delay)
+                guard let self, !Task.isCancelled, self.selection == token, self.timeline === target,
+                    self.pendingEndReached?.timeline == key
+                else { return }
+                if let observer = self.timelineObserver { self.showTimeline(observer.snapshot, roomID: roomID) }
+                guard self.pendingEndReached?.timeline == key else { return }
+                self.clearPendingEndReached()
+                self.reached(true, in: target, roomID: roomID)
+            }
+            return
+        }
+        if target === timeline, pendingEndReached?.timeline == ObjectIdentifier(target) {
+            clearPendingEndReached()
+        }
+        reached(endReached, in: target, roomID: roomID)
     }
 
     /// The timeline asks for older history as the reader nears the top, possibly while the room's first page is still
     /// loading; a request then joins the page in flight instead of starting a second one.
     private func readOlder(_ target: Timeline) -> Task<Bool, Error> {
         let key = ObjectIdentifier(target)
+        if pendingEndReached?.timeline == key { return Task { true } }
         if let current = olderPages[key] { return current }
         let task = Task { [weak self] in
             defer { self?.olderPages[key] = nil }
-            return try await target.paginateBackwards(numEvents: 100)
+            let endReached = try await target.paginateBackwards(numEvents: 100)
+            if let self, target === self.timeline { self.blankPages += 1 }
+            return endReached
         }
         olderPages[key] = task
-        if target === timeline { blankPages += 1 }
         return task
     }
     /// Older pages on their way, by timeline.
@@ -2363,7 +3087,50 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 else { return }
                 self.threadRevision = revision
                 self.showThread(items, root: root)
+                self.wakeThreadDiffWaiters()
             }
+        }
+    }
+
+    private func wakeThreadDiffWaiters() {
+        guard !threadDiffWaiters.isEmpty else { return }
+        let waiters = Array(threadDiffWaiters.values)
+        for wake in waiters { wake() }
+    }
+
+    /// Waits briefly for a concurrent SDK thread listener diff to advance past `revision`, waking immediately
+    /// when `threadObserver` delivers an update or after `emptyEndReachedSettle` if none arrives.
+    private func waitForThreadDiff(after revision: Int, token: UUID, rootID: String) async {
+        guard !Task.isCancelled, threadSelection == token, loadedThreadRootID == rootID,
+            (threadSnapshot?.snapshot.revision ?? threadRevision) <= revision
+        else { return }
+        let waiterID = UUID()
+        let delay = emptyEndReachedSettle
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                var resumed = false
+                @MainActor func finish() {
+                    guard !resumed else { return }
+                    resumed = true
+                    self.threadDiffWaiters[waiterID] = nil
+                    continuation.resume()
+                }
+                self.threadDiffWaiters[waiterID] = finish
+                if (self.threadSnapshot?.snapshot.revision ?? self.threadRevision) > revision {
+                    finish()
+                    return
+                }
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: delay)
+                    if let self {
+                        self.threadDiffWaiters[waiterID]?()
+                    } else {
+                        finish()
+                    }
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.threadDiffWaiters[waiterID]?() }
         }
     }
     /// The pane's rows: its root, then the replies the thread's own timeline holds. The root shows the conversation's
@@ -2372,20 +3139,30 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         var replies = Performance.measure(.timelineProject, ["items": items.count]) {
             project(items, roomID: root.roomID, inThread: true)
         }
-        var own = replies.last { $0.eventID == root.eventID }
-        own?.id = root.eventID
+        let own = replies.last { $0.eventID == root.eventID }.map { Self.threadRootCopy($0, id: root.eventID) }
         replies.removeAll { $0.eventID == root.eventID }
         threadHoldsRoot = own != nil
-        let shown = threadMessages.first { $0.eventID == root.eventID } ?? root
-        threadMessages = [conversationRoot() ?? own ?? shown] + replies
+        let shown =
+            threadMessages.first { $0.eventID == root.eventID }.map { Self.threadRootCopy($0, id: root.eventID) }
+            ?? Self.threadRootCopy(root, id: root.eventID)
+        let next = [conversationRoot() ?? own ?? shown] + replies
+        if next != threadMessages { threadMessages = next }
+    }
+    /// A thread pane never renders the channel's replies bar, so reply-summary churn on the channel copy must not
+    /// rewrite `threadMessages[0]` or invalidate the thread pane.
+    private static func threadRootCopy(_ message: ChatMessage, id: String) -> ChatMessage {
+        var copy = message
+        copy.id = id
+        copy.replyCount = nil
+        copy.lastReply = nil
+        return copy
     }
     /// The open thread's root as the conversation shows it, while the conversation holds it.
     private func conversationRoot() -> ChatMessage? {
         guard let rootID = threadOpening?.rootID, let shown = threadMessages.first,
-            var root = messages.last(where: { $0.eventID == rootID && $0.roomID == shown.roomID })
+            let root = messages.last(where: { $0.eventID == rootID && $0.roomID == shown.roomID })
         else { return nil }
-        root.id = rootID
-        return root
+        return Self.threadRootCopy(root, id: rootID)
     }
 
     func loadMoreThread(rootID: String) async throws -> Bool {
@@ -2401,12 +3178,22 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         do {
             endReached = try await page.value
         } catch {
-            if current(), !(error is CancellationError) { threadPageError = Self.safeError(error) }
+            if current(), !(error is CancellationError) {
+                threadRevealedSelection = token
+                threadPageError = Self.safeError(error)
+            }
             throw error
         }
         if current() {
+            if let snapshot = threadSnapshot?.snapshot, snapshot.revision > threadRevision,
+                let root = threadMessages.first
+            {
+                threadRevision = snapshot.revision
+                showThread(snapshot.items, root: root)
+            }
             hasMoreThreadHistory = !endReached
             threadPageError = nil
+            threadRevealedSelection = token
             readyThreadReadSelection = token
             if asked { threadPagesLanded += 1 }
         }
@@ -2415,21 +3202,28 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     func loadThread(_ root: ChatMessage, openedWith: Int? = nil) async throws {
         try assertDestination(root.roomID)
         threadProjections = [:]
-        threadMedia = [:]
+        if !threadMedia.isEmpty { threadMedia = [:] }
         threadForwardMedia = [:]
         readyThreadReadSelection = nil
         lastThreadReceipt = nil
         threadHandle?.cancel()
         // The root keeps one identity in the pane from the moment it opens, whichever timeline it came from.
-        var opening = root
-        opening.id = root.eventID
+        let opening = Self.threadRootCopy(root, id: root.eventID)
         threadHoldsRoot = false
         threadOpening = (root.eventID, openedWith)
-        threadMessages = [conversationRoot() ?? opening]
+        let initialThread = [conversationRoot() ?? opening]
+        if initialThread != threadMessages { threadMessages = initialThread }
         threadRevision = 0
         threadTimeline = nil
         threadSnapshot = nil
         loadedThreadRootID = nil
+        threadBuildFailedSelection = nil
+        threadRevealedSelection = nil
+        threadAnchorSearchDoneSelection = nil
+        searchingThreadTargetSelection = nil
+        threadAnchorSearchTask?.cancel()
+        threadAnchorSearchTask = nil
+        wakeThreadDiffWaiters()
         hasMoreThreadHistory = true
         let token = selection
         var ahead: Task<PreparedTimeline?, Never>?
@@ -2443,7 +3237,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
         let threadToken = threadSelection
         threadSendFailures = [:]
-        sendFailures = mainSendFailures
+        if mainSendFailures != sendFailures { sendFailures = mainSendFailures }
         if let ready = await ahead?.value {
             guard token == selection, threadToken == threadSelection else { return ready.listener.cancel() }
             threadTimeline = ready.timeline
@@ -2453,8 +3247,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             switch ready.page {
             case .success(let endReached):
                 hasMoreThreadHistory = !endReached
+                threadRevealedSelection = threadToken
                 readyThreadReadSelection = threadToken
-            case .failure(let error): threadPageError = Self.safeError(error)
+            case .failure(let error):
+                threadRevealedSelection = threadToken
+                threadAnchorSearchDoneSelection = threadToken
+                threadPageError = Self.safeError(error)
             }
             // Updates that came before the pane opened were dropped; its snapshot holds them.
             let snapshot = ready.observer.snapshot
@@ -2462,8 +3260,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             showThread(snapshot.items, root: root)
             return
         }
-        let next = try await requireRoom(root.roomID).timelineWithConfiguration(
-            configuration: Self.timelineConfiguration(.thread(rootEventId: root.eventID)))
+        let next: Timeline
+        do {
+            next = try await requireRoom(root.roomID).timelineWithConfiguration(
+                configuration: Self.timelineConfiguration(.thread(rootEventId: root.eventID)))
+        } catch {
+            if token == selection, threadToken == threadSelection { threadBuildFailedSelection = threadToken }
+            throw error
+        }
         guard token == selection, threadToken == threadSelection else { return }
         threadTimeline = next
         loadedThreadRootID = root.eventID
@@ -2475,8 +3279,35 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             return
         }
         threadHandle = listenerHandle
+        let snapshot = observer.snapshot
+        if snapshot.revision > threadRevision {
+            threadRevision = snapshot.revision
+            showThread(snapshot.items, root: root)
+        }
         // The pane shows what the SDK has cached now; the first page arrives whenever the network allows.
         Task { _ = try? await loadMoreThread(rootID: root.eventID) }
+    }
+
+    /// Fetches one older thread page and, if `endReached` returns before the listener diff advances the snapshot,
+    /// waits briefly so a late final-page diff containing the target is never missed.
+    private func loadThreadPageForTarget(
+        inThread rootID: String, token: UUID, holds: @MainActor () -> Bool
+    ) async -> Bool? {
+        let beforeRevision = threadSnapshot?.snapshot.revision ?? threadRevision
+        guard let endReached = try? await loadMoreThread(rootID: rootID) else { return nil }
+        if endReached, threadSelection == token, loadedThreadRootID == rootID, !holds(),
+            (threadSnapshot?.snapshot.revision ?? threadRevision) <= beforeRevision
+        {
+            await waitForThreadDiff(after: beforeRevision, token: token, rootID: rootID)
+            if threadSelection == token, loadedThreadRootID == rootID,
+                let snapshot = threadSnapshot?.snapshot, snapshot.revision > threadRevision,
+                let root = threadMessages.first
+            {
+                threadRevision = snapshot.revision
+                showThread(snapshot.items, root: root)
+            }
+        }
+        return endReached
     }
 
     /// A jump to a reply beyond its thread's first page reads back to it while the thread's pane shows, ten pages past
@@ -2486,16 +3317,66 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             let observer = threadSnapshot
         else { return }
         let token = threadSelection
-        func current() -> Bool { !Task.isCancelled && threadSelection == token && jump?.id == jumpID }
+        searchingThreadTargetSelection = token
+        defer { if searchingThreadTargetSelection == token { searchingThreadTargetSelection = nil } }
+        @MainActor func current() -> Bool { !Task.isCancelled && threadSelection == token && jump?.id == jumpID }
         // What the timeline holds, whether or not the pane has shown it yet.
-        func holds() -> Bool { Self.contains(observer.snapshot.items, target) }
+        @MainActor func holds() -> Bool {
+            threadMessages.contains { $0.eventID == target } || Self.contains(observer.snapshot.items, target)
+        }
         // The first page, which the thread asks for as it opens.
-        if readyThreadReadSelection != token { _ = try? await loadMoreThread(rootID: rootID) }
-        for _ in 0..<10 where current() && !holds() && hasMoreThreadHistory {
-            guard (try? await loadMoreThread(rootID: rootID)) == false else { break }
+        if readyThreadReadSelection != token, threadPageError == nil {
+            _ = await loadThreadPageForTarget(inThread: rootID, token: token, holds: holds)
+        }
+        for _ in 0..<10 where current() && !holds() && hasMoreThreadHistory && threadPageError == nil {
+            guard await loadThreadPageForTarget(inThread: rootID, token: token, holds: holds) == false else { break }
         }
         guard current(), !holds() else { return }
         jump?.landed.insert(rootID)
+    }
+
+    /// Reads back up to `maxPages` older pages past the first in the open thread until `eventID` lands, history ends,
+    /// or a page fails, so reopening a tall thread restores a remembered position beyond page 1.
+    func reachThreadAnchor(_ eventID: String, inThread rootID: String, maxPages: Int = 5) {
+        guard !isPreview, let opening = threadOpening, opening.rootID == rootID,
+            loadedThreadRootID == rootID, threadTimeline != nil, threadPageError == nil,
+            threadAnchorSearchDoneSelection != threadSelection
+        else { return }
+        let token = threadSelection
+        if threadMessages.contains(where: { $0.eventID == eventID }) {
+            threadAnchorSearchDoneSelection = token
+            return
+        }
+        threadAnchorSearchTask?.cancel()
+        searchingThreadTargetSelection = token
+        threadAnchorSearchTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { if self.searchingThreadTargetSelection == token { self.searchingThreadTargetSelection = nil } }
+            @MainActor func current() -> Bool {
+                !Task.isCancelled && self.threadSelection == token && self.loadedThreadRootID == rootID
+            }
+            @MainActor func holds() -> Bool {
+                self.threadMessages.contains { $0.eventID == eventID }
+                    || self.threadSnapshot.map { Self.contains($0.snapshot.items, eventID) } == true
+            }
+            if readyThreadReadSelection != token, threadPageError == nil {
+                _ = await loadThreadPageForTarget(inThread: rootID, token: token, holds: holds)
+            }
+            for _ in 0..<maxPages where current() && !holds() && hasMoreThreadHistory && threadPageError == nil {
+                guard await loadThreadPageForTarget(inThread: rootID, token: token, holds: holds) == false else {
+                    break
+                }
+            }
+            if current() {
+                if let snapshot = threadSnapshot?.snapshot, snapshot.revision > threadRevision,
+                    let root = threadMessages.first
+                {
+                    threadRevision = snapshot.revision
+                    showThread(snapshot.items, root: root)
+                }
+                threadAnchorSearchDoneSelection = token
+            }
+        }
     }
 
     /// The pane showing `thread`, or the conversation's for nil, landed on the jump, which has nowhere left to go there.
@@ -2552,6 +3433,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
     }
     func saveMediaCaption(_ snapshot: MediaCaptionSnapshot, caption: String?) async throws -> MediaCaptionSavedResult {
+        try assertActiveSession()
         try validateMessageAction(snapshot.target)
         guard captionSaves.insert(snapshot.id).inserted else { throw MediaCaptionError.busy }
         defer { captionSaves.remove(snapshot.id) }
@@ -2631,6 +3513,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
     }
     func forwardMessage(_ review: ForwardMessageReview, to roomID: String) async throws -> ForwardMessageQueuedResult {
+        try assertActiveSession()
         try validateMessageAction(review.target)
         guard forwardingReviews.insert(review.id).inserted else { throw ForwardMessageError.busy }
         defer { forwardingReviews.remove(review.id) }
@@ -2725,6 +3608,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
 
     func editMessage(_ target: MessageActionTarget, body: String) async throws {
+        try assertActiveSession()
         let (timeline, current) = try actionTimeline(target)
         guard current.supportsTextEditing, current.senderID == user?.id else {
             throw MatrixServiceError.request("This message can’t be edited.")
@@ -2740,6 +3624,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
     }
     func deleteMessage(_ target: MessageActionTarget) async throws {
+        try assertActiveSession()
         let (timeline, current) = try actionTimeline(target)
         guard current.senderID == user?.id else {
             throw MatrixServiceError.request("You can only delete your own messages.")
@@ -2753,6 +3638,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
     }
     func toggleReaction(_ target: MessageActionTarget, key: String) async throws {
+        try assertActiveSession()
         let (timeline, current) = try actionTimeline(target)
         do {
             _ = try await timeline.toggleReaction(itemId: .eventId(eventId: target.message.eventID), key: key)
@@ -2780,6 +3666,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
 
     func uploadFile(_ url: URL, threadRootID: String? = nil, roomID: String? = nil) async throws {
+        try assertActiveSession()
         try assertDestination(roomID)
         let destination = roomID ?? selectedRoomID
         let token = selection
@@ -2802,8 +3689,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         var posterFile: URL?
         defer { if let posterFile { try? FileManager.default.removeItem(at: posterFile) } }
         if mime.hasPrefix("video/") {
-            let (info, poster) = await VideoUpload.prepare(url, mimetype: mime, size: UInt64(values.fileSize ?? 0))
+            let (info, poster) = await prepareVideo(url, mime, UInt64(values.fileSize ?? 0))
             posterFile = poster
+            try assertActiveSession()
             try assertDestination(roomID)
             kind = .video(videoInfo: info, thumbnailSource: poster.map { .file(filename: $0.path) })
         } else if mime.hasPrefix("image/") {
@@ -2828,10 +3716,41 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         } else {
             target = try requireTimeline()
         }
+        try FileHandle(forReadingFrom: url).close()
         let handle = try target.sendAttachment(params: parameters, attachment: kind)
+        do {
+            try await handle.join()
+        } catch {
+            if Self.isPreEnqueueAttachmentError(error) { throw error }
+            throw AttachmentDeliveryError(underlying: error, message: Self.safeError(error))
+        }
         if let destination { sends[Conversation(roomID: destination, threadRootID: threadRootID), default: 0] += 1 }
         await returnToLive(after: token, threadRootID: threadRootID)
-        try await handle.join()
+    }
+
+    /// Distinguishes unambiguous local validation or file-read errors that failed before queueing from uncertain
+    /// delivery/queue failures that might already have reached the server.
+    private static func isPreEnqueueAttachmentError(_ error: Error) -> Bool {
+        if let roomError = error as? RoomError {
+            switch roomError {
+            case .InvalidAttachmentData, .InvalidAttachmentMimeType, .InvalidMediaInfo, .TimelineUnavailable,
+                .InvalidThumbnailData, .InvalidRepliedToEventId:
+                return true
+            case .FailedSendingAttachment:
+                return false
+            }
+        }
+        if let cocoa = error as? CocoaError {
+            return cocoa.code == .fileNoSuchFile || cocoa.code == .fileReadNoSuchFile
+                || cocoa.code == .fileReadNoPermission || cocoa.code == .fileReadUnknown
+        }
+        let nsError = error as NSError
+        if nsError.domain == NSPOSIXErrorDomain,
+            nsError.code == Int(ENOENT) || nsError.code == Int(EACCES) || nsError.code == Int(EPERM)
+        {
+            return true
+        }
+        return false
     }
 
     /// An image's size upright, from its header alone: EXIF orientations 5 to 8 turn it a quarter, swapping the sides.
@@ -2915,6 +3834,16 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     /// The thread pane closed: nothing counts its replies, and nothing started for it lands, until another opens.
     func closeThread() {
+        guard threadOpening != nil || threadTimeline != nil || loadedThreadRootID != nil || threadPage != nil else {
+            return
+        }
+        threadAnchorSearchTask?.cancel()
+        threadAnchorSearchTask = nil
+        threadBuildFailedSelection = nil
+        threadRevealedSelection = nil
+        threadAnchorSearchDoneSelection = nil
+        searchingThreadTargetSelection = nil
+        wakeThreadDiffWaiters()
         threadOpening = nil
         threadSelection = UUID()
     }
@@ -3416,19 +4345,152 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         requestRefresh()
         return destination
     }
+    private func handleAuthError(isSoftLogout: Bool, generation: UUID) {
+        guard sessionGeneration == generation, connectionStopTask == nil, !sessionExpired else { return }
+        sessionExpired = true
+        sessionExpiredIsSoftLogout = isSoftLogout
+        connectionErrorMessage = nil
+        connectionState = .stopped
+        isRetryingConnection = false
+        canRetryConnection = false
+        status = .error
+        publishGlobalSendQueue()
+        Task { @MainActor [weak self] in
+            guard let self, self.sessionGeneration == generation else { return }
+            await self.connectionRecovery.stop()
+        }
+    }
+    #if DEBUG
+    func expireSessionForChecks(isSoftLogout: Bool = false) {
+        handleAuthError(isSoftLogout: isSoftLogout, generation: sessionGeneration)
+    }
+    #endif
+    private var persistedSendFailuresURL: URL? {
+        storeRoots.first?.appendingPathComponent("send-queue-failures.json")
+    }
+    func loadPersistedSendFailures(accountID: String) {
+        guard let url = persistedSendFailuresURL, let data = try? Data(contentsOf: url),
+            let all = try? JSONDecoder().decode([String: [String: [String: Bool]]].self, from: data),
+            let saved = all[accountID]
+        else { return }
+        globalSendQueue.loadPersisted(saved)
+        publishGlobalSendQueue()
+    }
+    func beginInitialSendQueueReplay() { globalSendQueue.beginInitialReplay() }
+    func finishInitialSendQueueReplay() {
+        globalSendQueue.finishInitialReplay()
+        persistSendQueueFailures()
+        publishGlobalSendQueue()
+    }
+    private func persistSendQueueFailures() {
+        guard !isPreview, let accountID = user?.id, let url = persistedSendFailuresURL else { return }
+        var all =
+            (try? Data(contentsOf: url)).flatMap {
+                try? JSONDecoder().decode([String: [String: [String: Bool]]].self, from: $0)
+            } ?? [:]
+        all[accountID] = globalSendQueue.failures.isEmpty ? nil : globalSendQueue.failures
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let encoded = try? JSONEncoder().encode(all) {
+            try? encoded.write(to: url, options: .atomic)
+        }
+    }
+    private func clearPersistedSendFailures(accountID: String) {
+        guard let url = persistedSendFailuresURL, let data = try? Data(contentsOf: url),
+            var all = try? JSONDecoder().decode([String: [String: [String: Bool]]].self, from: data)
+        else { return }
+        all.removeValue(forKey: accountID)
+        if let encoded = try? JSONEncoder().encode(all) { try? encoded.write(to: url, options: .atomic) }
+    }
+    func handleSendQueueUpdate(roomID: String, update: RoomSendQueueUpdate) {
+        if case .mediaUpload(let relatedTo, _, _, let progress) = update {
+            if progress.total > 0 {
+                uploadProgress.set(
+                    Double(progress.current) / Double(progress.total), roomID: roomID, messageID: relatedTo)
+            }
+            return
+        }
+        let previousFailures = globalSendQueue.failures
+        globalSendQueue.apply(roomID: roomID, update: update)
+        switch update {
+        case .sendError(let id, _, _):
+            retryingSendKeys.remove(SendQueueMessageKey(roomID: roomID, messageID: id))
+            uploadProgress.clear(roomID: roomID, messageID: id)
+        case .sentEvent(let id, _), .cancelledLocalEvent(let id):
+            let key = SendQueueMessageKey(roomID: roomID, messageID: id)
+            retryingSendKeys.remove(key)
+            mainSendFailures.removeValue(forKey: key)
+            threadSendFailures.removeValue(forKey: key)
+            sendFailures.removeValue(forKey: key)
+            uploadProgress.clear(roomID: roomID, messageID: id)
+        case .newLocalEvent, .replacedLocalEvent, .retryEvent, .mediaUpload:
+            break
+        }
+        if globalSendQueue.failures != previousFailures { persistSendQueueFailures() }
+        publishGlobalSendQueue()
+    }
+    func displayedSendFailure(for key: SendQueueMessageKey) -> MessageSendFailure? {
+        guard !retryingSendKeys.contains(key), let failure = sendFailures[key] else { return nil }
+        return failure.shown(offline: suppressesRecoverableSendFailures)
+    }
+    func displayedSendFailures() -> [SendQueueMessageKey: MessageSendFailure] {
+        let suppressing = suppressesRecoverableSendFailures
+        var result: [SendQueueMessageKey: MessageSendFailure] = [:]
+        for (key, failure) in sendFailures where !retryingSendKeys.contains(key) {
+            if let shown = failure.shown(offline: suppressing) { result[key] = shown }
+        }
+        return result
+    }
+    /// Whether `roomID` has a displayed send failure outside `visibleIDs` (e.g., scrolled away or on the other surface).
+    func hasExternalSendFailure(in roomID: String, visibleIDs: Set<String>) -> Bool {
+        guard failedSendRoomIDs.contains(roomID) else { return false }
+        let suppressing = suppressesRecoverableSendFailures
+        if globalSendQueue.hasFailure(
+            in: roomID, excluding: visibleIDs, retryingKeys: retryingSendKeys, suppressingRecoverable: suppressing)
+        {
+            return true
+        }
+        return sendFailures.contains { key, failure in
+            key.roomID == roomID && !visibleIDs.contains(key.messageID) && !retryingSendKeys.contains(key)
+                && failure.shown(offline: suppressing) != nil
+        }
+    }
+    private func publishGlobalSendQueue() {
+        let suppressing = suppressesRecoverableSendFailures
+        var failed = globalSendQueue.failedRoomIDs(
+            suppressingRecoverable: suppressing, excluding: retryingSendKeys)
+        for (key, failure) in sendFailures
+        where !retryingSendKeys.contains(key) && (!suppressing || failure.kind != .recoverable) {
+            failed.insert(key.roomID)
+        }
+        if failed != failedSendRoomIDs { failedSendRoomIDs = failed }
+        let queued = globalSendQueue.queuedCount
+        if queued != queuedSendCount { queuedSendCount = queued }
+    }
     func applyConnection(_ feedback: MatrixConnectionFeedback) {
+        guard !sessionExpired else { return }
         connectionErrorMessage = feedback.errorMessage
         let returned = connectionState != .running
         connectionState = feedback.state
         isRetryingConnection = feedback.isRetrying
         canRetryConnection = feedback.canRetry
+        publishGlobalSendQueue()
         switch feedback.state {
         case .running:
             status = .ready
             savedMessages.resume()
             watchPresence()
-            // A thread page that failed while the connection was down is asked for again as it comes back.
-            if returned, threadPageError != nil { retryThreadPage() }
+            if returned {
+                reconnectCount &+= 1
+                // A thread page, room open, subscription or initial profile that failed while down retries now.
+                if threadPageError != nil { retryThreadPage() }
+                if openState == .failed { Task { [weak self] in await self?.retryOpenRoom() } }
+                if let id = failedSubscriptionRoomID, id == selectedRoomID { updateSubscriptions(id) }
+                if needsInitialProfileLoad { loadInitialProfile() }
+                if let liveRoom = projectedLiveRoomID, liveRoom == selectedRoomID, focusedEventID == nil {
+                    reconcileLiveTimelineSendQueue(roomID: liveRoom)
+                }
+            }
         case .failed: status = .error
         case .idle, .connecting, .offline, .stopped: status = .syncing
         }
@@ -3492,8 +4554,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             }.value
             let canNotify = (try? await room.getPowerLevels().canOwnUserTriggerRoomNotification()) ?? false
             if token == selection {
-                members = result
-                canMentionRoom = canNotify
+                if result != members { members = result }
+                if canNotify != canMentionRoom { canMentionRoom = canNotify }
             }
         } catch { if token == selection { errorMessage = Self.safeError(error) } }
     }
@@ -3629,19 +4691,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     func setTyping(_ typing: Bool, roomID: String, sessionID: UUID) async {
         guard sessionGeneration == sessionID, connectionStopTask == nil, !isPreview, !Task.isCancelled,
-            !typing || selectedRoomID == roomID, let client
+            connectionState == .running, !typing || selectedRoomID == roomID, let client
         else { return }
-        do {
-            guard let room = try client.getRoom(roomId: roomID), room.membership() == .joined else { return }
-            // Capture the room before suspension. A late stop notice may clean
-            // up its original room, but must never address the newly selected one.
-            try await room.typingNotice(isTyping: typing)
-        } catch {
-            guard sessionGeneration == sessionID, connectionStopTask == nil, !isPreview,
-                !Task.isCancelled, selectedRoomID == roomID
-            else { return }
-            errorMessage = Self.safeError(error)
-        }
+        guard let room = try? client.getRoom(roomId: roomID), room.membership() == .joined else { return }
+        // Capture the room before suspension. A late stop notice may clean
+        // up its original room, but must never address the newly selected one.
+        try? await room.typingNotice(isTyping: typing)
     }
     func setProfile(name: String) async throws {
         guard connectionStopTask == nil else { throw CancellationError() }
@@ -3714,13 +4769,27 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
 
     func retryMessage(_ message: ChatMessage) async throws {
+        try assertActiveSession()
         guard let context = try pendingSendContext(message) else { return }
         guard let failure = sendFailure(for: message) else {
             throw MatrixServiceError.request("This message is not waiting for a manual retry.")
         }
+        let key = SendQueueMessageKey(roomID: message.roomID, messageID: message.eventID)
         try await performSendAction(context, message: message) {
-            _ = try await SendQueueActions.retry(
-                failure, itemID: context.itemID, room: context.room, timeline: context.timeline)
+            self.retryingSendKeys.insert(key)
+            self.publishGlobalSendQueue()
+            do {
+                let retried = try await SendQueueActions.retry(
+                    failure, itemID: context.itemID, room: context.room, timeline: context.timeline)
+                if !retried {
+                    self.retryingSendKeys.remove(key)
+                    self.publishGlobalSendQueue()
+                }
+            } catch {
+                self.retryingSendKeys.remove(key)
+                self.publishGlobalSendQueue()
+                throw error
+            }
         }
     }
 
@@ -3728,9 +4797,31 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     // remove an in-flight message after delivery; it is not a remote delete API.
     func cancelMessage(_ message: ChatMessage) async throws -> Bool {
         guard let context = try pendingSendContext(message) else { return false }
+        let key = SendQueueMessageKey(roomID: message.roomID, messageID: message.eventID)
+        let transactionID: String? = if case .transactionId(let id) = context.itemID { id } else { nil }
+        let cancelledWasFailure =
+            sendFailures[key] != nil
+            || transactionID.map { globalSendQueue.isFailed(roomID: message.roomID, transactionID: $0) } == true
+        let excludedIDs = Set([message.eventID, transactionID].compactMap(\.self))
+        let otherFailureRemains =
+            globalSendQueue.hasFailure(
+                in: message.roomID, excluding: excludedIDs, suppressingRecoverable: false)
+            || sendFailures.keys.contains { $0.roomID == message.roomID && !excludedIDs.contains($0.messageID) }
+        let shouldUnblockQueue = cancelledWasFailure && !otherFailureRemains
         var cancelled = false
         try await performSendAction(context, message: message) {
-            cancelled = try await SendQueueActions.cancel(itemID: context.itemID, timeline: context.timeline)
+            cancelled = try await SendQueueActions.cancel(
+                itemID: context.itemID, room: context.room, timeline: context.timeline,
+                resumeQueue: self.connectionState == .running && shouldUnblockQueue)
+        }
+        if cancelled {
+            if shouldUnblockQueue { connectionRecovery.cancelRoomResume(roomID: message.roomID) }
+            retryingSendKeys.remove(key)
+            if let transactionID {
+                globalSendQueue.remove(roomID: message.roomID, transactionID: transactionID)
+                persistSendQueueFailures()
+            }
+            publishGlobalSendQueue()
         }
         return cancelled
     }
@@ -3809,6 +4900,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         String(decoding: try JSONSerialization.data(withJSONObject: value), as: UTF8.self)
     }
     static func safeError(_ error: Error) -> String {
+        if let error = error as? AttachmentDeliveryError { return safeError(error.underlying) }
         if let error = error as? MatrixServiceError { return error.localizedDescription }
         if let error = error as? ForwardMessageError { return error.localizedDescription }
         if let error = error as? ForwardMessageReviewChanged { return error.localizedDescription }

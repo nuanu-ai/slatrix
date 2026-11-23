@@ -186,6 +186,40 @@ struct TimelineLayoutTests {
         #expect(belowLine(rows("$d")) == line)
     }
 
+    // capability: conversation.unread-line
+    @MainActor
+    @Test(
+        "A partial sliding-sync cache waits for older history to bring the unread anchor without marking live arrivals")
+    func partialCacheWaitsForUnreadAnchor() {
+        let cache = TimelineLayoutCache()
+        func make(_ id: String, _ sender: String, at minutes: Double) -> ChatMessage {
+            var item = message(id, sender, at: minutes)
+            item.timelineEventID = "$\(id)"
+            return item
+        }
+        let a = make("a", "@alice", at: 6)
+        let b = make("b", "@alice", at: 5)
+        let c = make("c", "@me", at: 4)
+        let d = make("d", "@alice", at: 3)
+        let e = make("e", "@bob", at: 2)
+        let f = make("f", "@bob", at: 1)
+
+        // Initial partial cache holds only the newest two messages, not yet reaching the anchor "$b".
+        let initial = cache.rows([d, e], firstUnreadEventID: nil, unreadAnchor: "$b", me: "@me", groups: true)
+        #expect(belowLine(initial) == nil)
+        // A live arrival while older history is still loading must not get an unread line.
+        let withLive = cache.rows([d, e, f], firstUnreadEventID: "$f", unreadAnchor: "$b", me: "@me", groups: true)
+        #expect(belowLine(withLive) == nil)
+        // Once readOlder prepends history reaching "$b", the unread line lands above "$d" (skipping own "$c").
+        let loaded = cache.rows(
+            [a, b, c, d, e, f], firstUnreadEventID: nil, unreadAnchor: "$b", me: "@me", groups: true)
+        #expect(belowLine(loaded) == "$d")
+        // Once resolved, later markers cannot move it.
+        let later = cache.rows(
+            [a, b, c, d, e, f], firstUnreadEventID: "$e", unreadAnchor: "$b", me: "@me", groups: true)
+        #expect(belowLine(later) == "$d")
+    }
+
     // capability: conversation.day-dividers
     @Test("Day dividers stay distinct when server timestamps return to an earlier day")
     func repeatedDayIdentities() {
@@ -213,5 +247,33 @@ struct TimelineLayoutTests {
             [message("a", "@alice", at: 20)] + recent, unreadBoundaryEventID: nil, groups: true, now: Self.now,
             calendar: Self.calendar, locale: Self.locale)
         #expect(Set(before.map(\.id)).isSubset(of: Set(after.map(\.id))))
+    }
+
+    @MainActor
+    @Test("Cancelling an opening local echo before backfill arrives never marks live arrivals as unread")
+    func cancelledLocalEchoNeverMarksLiveArrivalsUnread() {
+        let cache = TimelineLayoutCache()
+        var pending = message("txn-1", "@me", at: 10)
+        pending.sendState = "sending"
+        let anchor = message("$m8", "@me", at: 30)
+        let unreadOld = message("$m9", "@alice", at: 20)
+        let live = message("$live", "@bob", at: 0)
+
+        // Room opens with only a pending local echo; unreadAnchor ($m8) is not in the cache yet.
+        _ = cache.rows(
+            [pending], firstUnreadEventID: nil, unreadAnchor: "$m8", me: "@me", groups: true)
+        // Local echo is cancelled, backfill brings only the read anchor ($m8), and a live message arrives after open.
+        let rows = cache.rows(
+            [anchor, live], firstUnreadEventID: nil, unreadAnchor: "$m8", me: "@me", groups: true)
+        #expect(!rows.contains { $0.id == "unread" })
+
+        // When an older unread message ($m9) also arrives before the opening cutoff, only $m9 gets the unread line.
+        let cache2 = TimelineLayoutCache()
+        _ = cache2.rows(
+            [pending], firstUnreadEventID: nil, unreadAnchor: "$m8", me: "@me", groups: true)
+        let rows2 = cache2.rows(
+            [anchor, unreadOld, live], firstUnreadEventID: nil, unreadAnchor: "$m8", me: "@me", groups: true)
+        let unreadIndex = rows2.firstIndex { $0.id == "unread" }
+        #expect(unreadIndex.map { rows2[$0 + 1].id == unreadOld.id } == true)
     }
 }

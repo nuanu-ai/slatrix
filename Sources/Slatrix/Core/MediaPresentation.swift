@@ -129,6 +129,21 @@ enum MediaViewerNavigation {
     }
 }
 
+/// Reload key for an open media viewer page: changes when the server event or its remote media source lands.
+struct MediaViewerLoadKey: Hashable {
+    let eventID: String
+    let sendState: String
+    let attachmentURL: String?
+    let sourceRevision: Data?
+
+    init(message: ChatMessage, sourceRevision: Data?) {
+        eventID = message.eventID
+        sendState = message.sendState
+        attachmentURL = message.attachment?.url
+        self.sourceRevision = sourceRevision
+    }
+}
+
 /// The message the media viewer shows, if it is open.
 @Observable @MainActor final class MediaViewerState {
     private(set) var message: ChatMessage?
@@ -181,13 +196,29 @@ enum MediaViewerNavigation {
         if let next = neighbor(offset, in: messages) { message = next }
     }
 
+    /// Truthful placeholder copy for unsent/failed attachments in the viewer; nil when an image can show its cached still.
+    static func pendingNotice(for message: ChatMessage, hasCachedStill: Bool) -> String? {
+        guard message.sendState != "sent" else { return nil }
+        if message.sendState == "failed" { return "Couldn’t send." }
+        if !message.isViewerMedia { return "Available once sent." }
+        if message.kind == "m.video" || !hasCachedStill { return "Still sending…" }
+        return nil
+    }
+
     /// Follows the message as its timeline or Files list changes, and closes once it is deleted, replaced or gone.
     func update(from messages: [ChatMessage]) {
         guard let current = message else { return }
         if let files {
             self.files = files.compactMap { file in messages.first { $0.eventID == file.eventID } }
         }
-        if let found = messages.first(where: { $0.eventID == current.eventID }), !found.isRedacted,
+        // A pending local echo keeps its timeline `id` when its server event lands, while `eventID` switches from
+        // transaction ID to server event ID and attachment URL switches from local file path to `mxc://`.
+        if current.sendState != "sent",
+            let found = messages.first(where: { $0.id == current.id || $0.eventID == current.eventID }),
+            !found.isRedacted, found.attachment != nil
+        {
+            if found != current { message = found }
+        } else if let found = messages.first(where: { $0.eventID == current.eventID }), !found.isRedacted,
             found.attachment == current.attachment
         {
             if found != current { message = found }

@@ -4,6 +4,8 @@ import SwiftUI
 struct TimelineView: View {
     @Environment(\.metrics) private var m
     @Environment(\.openURL) private var openURL
+    @Environment(\.timelineBarInsets) private var barInsets
+    @Environment(\.composerAccessoryHeight) private var accessoryHeight
     let matrix: MatrixService
     @EnvironmentObject var appearance: AppearanceStore
     @Environment(Popovers.self) private var popovers: Popovers?
@@ -36,12 +38,17 @@ struct TimelineView: View {
     var onOpenMedia: ((ChatMessage) -> Void)? = nil
     /// The window's one inline video player.
     var inlineVideo: InlineVideo? = nil
-    /// Messages scrolled up under the header, which then gets its line. Held by the pane, so a conversation switched
-    /// to keeps the line until its own messages say otherwise.
-    var contentAbove: Binding<Bool> = .constant(false)
+    /// Messages scrolled up under the header, which then gets its line. Held by the pane in an isolated observable
+    /// state so toggling the hairline never redraws the window or timeline shell.
+    var scrollEdge: ScrollEdgeState? = nil
     /// The header's and the composer's heights, which float over the timeline's ends.
     var insets = EdgeInsets()
     @State private var loadingHistory = false
+    /// In a thread, the loading row sits between the root and replies; show it only after the loading delay so short
+    /// threads never open with a 40 pt blank gap that snaps replies up when history ends.
+    @State private var showThreadOlder = false
+    /// True once this thread pane has rendered its entries, so retries or errors never re-hide an already-visible root.
+    @State private var showedThreadEntries = false
     @State private var deleting: MessageActionTarget?
     @State private var cancelling: ChatMessage?
     /// Retries and cancellations started here and not yet finished, by message ID.
@@ -62,10 +69,55 @@ struct TimelineView: View {
     /// A thread's page loads for whoever asked for it: its loading row, Retry, or a jump reading back.
     private var loadingOlder: Bool { thread ? matrix.isLoadingThreadPage : loadingHistory }
     private var hasOlder: Bool {
-        !matrix.isPreview && (thread ? matrix.hasMoreThreadHistory : matrix.loadsMoreHistory)
+        !matrix.isPreview
+            && (thread ? matrix.loadsMoreThreadHistory : (matrix.loadsMoreHistory || matrix.settlingEndReached))
+    }
+    private var memoryKey: TimelineMemory.Key {
+        TimelineMemory.Key(
+            sessionID: matrix.notificationSessionID, roomID: room.id, threadRootID: thread ? threadRootID : nil)
+    }
+    private var rememberedThreadEventID: String? {
+        guard thread, jumpTarget == nil else { return nil }
+        return TimelineMemory.positions[memoryKey]?.eventID
+    }
+    /// True while reopening a thread with a remembered or jumped reply beyond page 1 and older pages are still being
+    /// fetched before locking the opening position.
+    private var awaitingThreadTarget: Bool {
+        guard thread, !matrix.isPreview, let rootID = threadRootID, matrix.threadOpening?.rootID == rootID,
+            !matrix.isBuildingThreadTimeline, matrix.threadPageError == nil,
+            matrix.loadsMoreThreadHistory || matrix.searchingThreadTargetSelection == matrix.threadSelection
+        else { return false }
+        if let target = jumpTarget {
+            guard !messages.contains(where: { $0.eventID == target }) else { return false }
+            return matrix.jump?.landed.contains(rootID) != true
+        }
+        guard let target = rememberedThreadEventID, !messages.contains(where: { $0.eventID == target }) else {
+            return false
+        }
+        return matrix.threadAnchorSearchDoneSelection != matrix.threadSelection
+    }
+    /// True while a cold thread open is still awaiting its timeline, first page, or a target reply beyond page 1.
+    private var awaitingThreadReplies: Bool {
+        guard thread, let rootID = threadRootID, matrix.threadOpening?.rootID == rootID else { return false }
+        return matrix.isOpeningThread || awaitingThreadTarget
+    }
+    private var threadAnchorSearchKey: String? {
+        guard thread, !matrix.isPreview, let rootID = threadRootID, let target = rememberedThreadEventID,
+            matrix.loadsMoreThreadHistory, matrix.threadPageError == nil,
+            matrix.threadAnchorSearchDoneSelection != matrix.threadSelection,
+            matrix.threadOpening?.rootID == rootID
+        else { return nil }
+        return "\(rootID):\(matrix.threadSelection):\(target)"
+    }
+    /// Holds back the synthetic `[root]` row while replies or a remembered/jumped position are still arriving so a
+    /// tall thread never flashes its root and teleports off-screen. Once shown, never re-hides an already-visible root.
+    private var holdsThreadEntries: Bool {
+        guard !showedThreadEntries, awaitingThreadReplies else { return false }
+        return matrix.isBuildingThreadTimeline || matrix.threadExpectsReplies
+            || TimelineMemory.positions[memoryKey] != nil || jumpTarget != nil
     }
     /// The intro tops a conversation loaded back to its start, or one with nothing else to show.
-    private var reachedStart: Bool { matrix.isPreview || !matrix.hasMoreHistory }
+    var reachedStart: Bool { !thread && (matrix.isPreview || !matrix.hasMoreHistory) }
     /// The message jumped to, when this pane shows it.
     private var jumpTarget: String? {
         thread ? threadRootID.flatMap { matrix.jump?.eventID(inThread: $0) } : matrix.jump?.eventID(inThread: nil)
@@ -78,16 +130,18 @@ struct TimelineView: View {
     var body: some View {
         TimelineTable(
             entries: entries, context: updatedContext, live: live, bottomAligned: !thread,
+            canOpen: !awaitingThreadReplies,
             focusedEventID: thread ? jumpTarget : jumpTarget ?? matrix.focusedEventID,
             jumpID: jumpTarget == nil ? nil : matrix.jump?.id,
             sends: matrix.sends[Conversation(roomID: room.id, threadRootID: thread ? threadRootID : nil)] ?? 0,
             startsAtUnread: unreadAnchor != nil,
-            memoryKey: TimelineMemory.Key(
-                sessionID: matrix.notificationSessionID, roomID: room.id, threadRootID: thread ? threadRootID : nil),
-            timelineID: thread ? nil : matrix.shownTimelineID,
+            memoryKey: memoryKey,
+            timelineID: thread ? matrix.threadSelection : matrix.shownTimelineID,
             pagesLanded: thread ? matrix.threadPagesLanded : 0,
-            // A thread whose page failed asks again when the reader retries or the connection returns.
-            canLoadOlder: hasOlder && !loadingOlder && !(thread && matrix.threadPageError != nil),
+            // A thread whose page failed asks again when the reader retries or the connection returns; a main timeline
+            // settling an empty `endReached` does not trigger redundant older pages.
+            canLoadOlder: hasOlder && !loadingOlder
+                && !(thread ? matrix.threadPageError != nil : matrix.settlingEndReached),
             canLoadNewer: hasNewer && !loadingHistory && !matrix.isLoadingForwardHistory,
             scroller: scroller, onLoadOlder: { loadHistory() }, onLoadNewer: { loadHistory(forward: true) },
             onLand: { jump in
@@ -99,9 +153,11 @@ struct TimelineView: View {
             onScroll: { atBottom, showsJump, scrolled, report in
                 self.atBottom = atBottom
                 jumpVisible = showsJump
-                if let scrolled, scrolled != contentAbove.wrappedValue { contentAbove.wrappedValue = scrolled }
+                if let scrolled, let scrollEdge, scrolled != scrollEdge.contentAbove {
+                    scrollEdge.contentAbove = scrolled
+                }
                 onReport?(report)
-            }, readKey: readKey, insets: insets
+            }, readKey: readKey, insets: insets, barInsets: barInsets
         )
         .overlay(alignment: .bottom) {
             // A conversation still reading its first rows, after the loading delay, holds their place on the composer.
@@ -110,36 +166,71 @@ struct TimelineView: View {
                     .conversationRow(m, isThread: false).padding(.bottom, insets.bottom)
             }
         }
+        .overlay {
+            if !thread && messages.isEmpty && matrix.openState == .failed {
+                VStack(spacing: m.sp12) {
+                    Text("Couldn’t load messages.").font(m.font(.body)).foregroundStyle(colors.textSecondary)
+                    Button("Retry") { Task { await matrix.retryOpenRoom() } }.buttonStyle(.secondary)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
         .overlay(alignment: .top) {
-            if contentAbove.wrappedValue {
-                Divider().overlay(colors.border).padding(.top, insets.top)
+            if thread && holdsThreadEntries {
+                SkeletonRows(count: 6).fixedSize(horizontal: false, vertical: true)
+                    .conversationRow(m, isThread: true).padding(.top, insets.top)
             }
         }
-        .overlay(alignment: .bottomTrailing) {
-            if jumpVisible && !messages.isEmpty {
-                Button {
-                    if matrix.focusedEventID != nil {
-                        if let onJumpToLatest {
-                            onJumpToLatest()
-                        } else {
-                            Task { await matrix.selectRoom(room.id) }
-                        }
-                    } else {
-                        scroller.scrollToBottom()
+        .overlay(alignment: .top) {
+            if let scrollEdge { ScrollEdgeHairline(state: scrollEdge, top: insets.top) }
+        }
+        .overlay(alignment: .bottom) {
+            ZStack {
+                if jumpVisible && !messages.isEmpty {
+                    HStack {
+                        Spacer(minLength: 0)
+                        Button {
+                            if matrix.focusedEventID != nil {
+                                if let onJumpToLatest {
+                                    onJumpToLatest()
+                                } else {
+                                    Task { await matrix.selectRoom(room.id) }
+                                }
+                            } else {
+                                scroller.scrollToBottom()
+                            }
+                        } label: {
+                            Label("Jump to recent", systemImage: "arrow.down").font(m.font(.subheadline, .semibold))
+                                .padding(.horizontal, m.sp16).padding(.vertical, m.sp8)
+                                .background(colors.raised, in: Capsule())
+                                .elevation(.e2, cornerRadius: m.sp20)
+                        }.buttonStyle(.row)
                     }
-                } label: {
-                    Label("Jump to recent", systemImage: "arrow.down").font(m.font(.subheadline, .semibold))
-                        .padding(.horizontal, m.sp16).padding(.vertical, m.sp8)
-                        .background(colors.raised, in: Capsule()).overlay(Capsule().stroke(colors.border))
-                        .elevation(.e2, cornerRadius: m.sp20)
-                }.buttonStyle(.row).padding(m.sp20).padding(.bottom, insets.bottom).transition(.opacity)
+                    .padding(.horizontal, m.conversationInset(thread: thread))
+                    .padding(.bottom, m.sp16 + insets.bottom + accessoryHeight)
+                    .animation(Motion.overlay, value: accessoryHeight)
+                    .conversationRow(m, isThread: thread).transition(.opacity)
+                }
             }
+            .animation(Motion.overlay, value: jumpVisible)
         }
-        .animation(Motion.overlay, value: jumpVisible)
         .task(id: turnsLive) {
             guard turnsLive else { return }
             await matrix.goLive { scroller.screenAnchorEventID }
         }
+        .task(id: threadAnchorSearchKey) {
+            guard let rootID = threadRootID, let target = rememberedThreadEventID else { return }
+            matrix.reachThreadAnchor(target, inThread: rootID)
+        }
+        .onChange(of: thread && !holdsThreadEntries && !messages.isEmpty, initial: true) { _, visible in
+            if visible { showedThreadEntries = true }
+        }
+        .task(id: thread && hasOlder && loadingOlder && matrix.connectionState != .offline) {
+            showThreadOlder = false
+            guard thread, hasOlder, loadingOlder, matrix.connectionState != .offline else { return }
+            try? await Task.sleep(for: LoadingPresentation.indicatorDelay)
+            if !Task.isCancelled { showThreadOlder = true }
+        }
+        .loadingInterval(.historyLoading, while: thread && hasOlder && loadingOlder)
         .task(id: landing) {
             // Held long enough to find, then faded by the row.
             guard landing != nil, (try? await Task.sleep(for: .seconds(1.5))) != nil else { return }
@@ -180,12 +271,12 @@ struct TimelineView: View {
         }
         .modal(isPresented: Binding(get: { cancelling != nil }, set: { if !$0 { cancelling = nil } })) {
             let failed =
-                cancelling.flatMap { matrix.sendFailure(for: $0)?.shown(offline: matrix.connectionState == .offline) }
-                != nil
+                cancelling.flatMap {
+                    matrix.displayedSendFailure(for: SendQueueMessageKey(roomID: $0.roomID, messageID: $0.eventID))
+                } != nil
+            let prompt = SendCancelPrompt.copy(failed: failed, offline: matrix.connectionState == .offline)
             ConfirmModal(
-                title: failed ? "Delete message?" : "Cancel sending this message?",
-                message: failed ? "This can’t be undone." : "It may already have been delivered.",
-                action: failed ? "Delete" : "Cancel sending", cancel: failed ? "Cancel" : "Keep sending",
+                title: prompt.title, message: prompt.message, action: prompt.action, cancel: prompt.cancel,
                 onConfirm: {
                     if let message = cancelling { cancelSend(message) }
                     cancelling = nil
@@ -203,23 +294,31 @@ struct TimelineView: View {
     /// One row per layout row, plus what the row shows from the session; the layout itself changes only with the
     /// messages.
     private var entries: [TimelineEntry] {
+        if holdsThreadEntries { return [] }
         let rows = layout.rows(
             messages, firstUnreadEventID: thread ? nil : matrix.firstUnreadEventID,
             unreadAnchor: unreadAnchor, me: matrix.user?.id,
             groups: appearance.density != .compact, threadRootEventID: thread ? threadRootID : nil,
             repliesLine: thread ? matrix.threadRepliesLine : nil)
-        let context = matrix.messageActionContext
-        let offline = matrix.connectionState == .offline
-        let failures = matrix.sendFailures.compactMapValues { $0.shown(offline: offline) }
+        let failures = matrix.displayedSendFailures()
+        let waitingToReconnect = matrix.suppressesRecoverableSendFailures
+        let externalFailure = matrix.hasExternalSendFailure(in: room.id, visibleIDs: Set(messages.map(\.eventID)))
+        let showOlder = thread ? (hasOlder && showThreadOlder) : hasOlder
         let inputs = TimelineLayoutCache.EntryInputs(
-            rows: rows, hasOlder: hasOlder, reachedStart: reachedStart, reading: !thread && matrix.timelineLoading,
+            rows: rows, hasOlder: showOlder, reachedStart: reachedStart, reading: !thread && matrix.timelineLoading,
+            openFailed: !thread && matrix.openState == .failed,
             hasNewer: hasNewer,
             loadingHistory: loadingOlder, welcome: welcome,
             pinned: room.pinnedEventIDs,
-            canPin: canPinMessages, savedIDs: savedIDs, highlighted: highlighted,
-            sendFailures: failures, pendingSendActions: matrix.pendingSendActions, sendActions: sendActions,
-            context: context, collapsedMedia: matrix.collapsedMedia)
-        return layout.entries(for: inputs) { buildEntries(rows, context: context, failures: failures) }
+            savedIDs: savedIDs, highlighted: highlighted,
+            sendFailures: failures, waitingToReconnect: waitingToReconnect, externalFailure: externalFailure,
+            pendingSendActions: matrix.pendingSendActions, sendActions: sendActions,
+            collapsedMedia: matrix.collapsedMedia)
+        return layout.entries(for: inputs) {
+            buildEntries(
+                rows, showOlder: showOlder, failures: failures, waitingToReconnect: waitingToReconnect,
+                externalFailure: externalFailure)
+        }
     }
 
     private var welcome: TimelineWelcome {
@@ -229,14 +328,16 @@ struct TimelineView: View {
     }
 
     private func buildEntries(
-        _ rows: [TimelineLayout.Row], context: MessageActionTarget.Context,
-        failures: [SendQueueMessageKey: MessageSendFailure]
+        _ rows: [TimelineLayout.Row], showOlder: Bool,
+        failures: [SendQueueMessageKey: MessageSendFailure], waitingToReconnect: Bool, externalFailure: Bool
     ) -> [TimelineEntry] {
         var entries: [TimelineEntry] = []
         entries.reserveCapacity(rows.count + 2)
         // A thread's older replies load under its root and the line counting them.
         var olderAt = 0
-        if !hasOlder && !thread && (reachedStart || rows.isEmpty && !matrix.timelineLoading) {
+        if !showOlder && !thread && matrix.openState != .failed
+            && (reachedStart || rows.isEmpty && !matrix.timelineLoading)
+        {
             entries.append(
                 TimelineEntry(
                     id: "welcome",
@@ -247,6 +348,7 @@ struct TimelineView: View {
         let pending = matrix.pendingSendActions
         let collapsed = matrix.collapsedMedia
         let seen = matrix.user.map { SeenPolicy.headers(rows, me: $0.id) } ?? [:]
+        var sawFailureInPane = false
         for row in rows {
             switch row.kind {
             case .day(let label): entries.append(TimelineEntry(id: row.id, kind: .day(label)))
@@ -257,6 +359,15 @@ struct TimelineView: View {
             case .message(let message, let grouped, let time):
                 if message.eventID == threadRootID { olderAt = entries.count + 1 }
                 let key = SendQueueMessageKey(roomID: message.roomID, messageID: message.eventID)
+                let failure = failures.isEmpty ? nil : failures[key]
+                let own = message.senderID == matrix.user?.id
+                let pendingSend = own && message.sendState != "sent"
+                let waitStatus = SendWaitStatus.resolve(
+                    pendingSend: pendingSend, sendFailure: failure,
+                    pendingChange: own ? message.pendingChange : nil,
+                    waitingToReconnect: waitingToReconnect,
+                    blockedByEarlierFailure: sawFailureInPane || externalFailure)
+                if failure != nil { sawFailureInPane = true }
                 entries.append(
                     TimelineEntry(
                         id: row.id,
@@ -266,16 +377,18 @@ struct TimelineView: View {
                                 saved: !savedIDs.isEmpty
                                     && savedIDs.contains(
                                         SavedMessageReference(roomID: message.roomID, eventID: message.eventID).id),
-                                pinned: pinned.contains(message.eventID), canPin: canPinMessages,
+                                pinned: pinned.contains(message.eventID),
                                 highlighted: highlighted == message.eventID,
-                                sendFailure: failures.isEmpty ? nil : failures[key],
+                                sendFailure: failure,
+                                sendWaitStatus: waitStatus,
                                 sendBusy: !pending.isEmpty && pending.contains(key) || sendActions.contains(message.id),
                                 seenBy: seen[row.id],
-                                mediaCollapsed: !collapsed.isEmpty && collapsed.contains(message.eventID),
-                                context: context))))
+                                mediaCollapsed: !collapsed.isEmpty && collapsed.contains(message.eventID)))))
             }
         }
-        if hasOlder { entries.insert(TimelineEntry(id: "older", kind: .loading(loadingOlder)), at: olderAt) }
+        if showOlder {
+            entries.insert(TimelineEntry(id: "older", kind: .loading(loadingOlder, immediate: thread)), at: olderAt)
+        }
         if hasNewer { entries.append(TimelineEntry(id: "newer", kind: .loading(loadingHistory))) }
         return entries
     }
@@ -285,6 +398,10 @@ struct TimelineView: View {
         context.matrix = matrix
         context.isThread = thread
         context.threadRootID = threadRootID
+        context.canPin = canPinMessages
+        context.canAct =
+            !matrix.isPreview && room.membership == "join" && matrix.user != nil && matrix.isAuthenticated
+            && (!thread || matrix.hasThreadTimeline(for: threadRootID))
         context.metrics = m
         context.appearance = appearance
         context.openURL = openURL
@@ -418,23 +535,28 @@ struct TimelineView: View {
     private var rows: [TimelineLayout.Row] = []
     private var unreadBoundary: String?
     private var opened = false
+    /// The newest confirmed (or only) event present when partial cached rows first arrived without their unread anchor,
+    /// plus its timestamp cutoff in case an opening local echo is later cancelled before backfill lands.
+    private var openedNewestEventID: String?
+    private var openedCutoff: Date?
     /// Everything a timeline's entries show besides the rows; the timeline redraws for many changes that touch none.
     struct EntryInputs: Equatable {
         var rows: [TimelineLayout.Row]
         var hasOlder: Bool
         var reachedStart: Bool
         var reading: Bool
+        var openFailed: Bool
         var hasNewer: Bool
         var loadingHistory: Bool
         var welcome: TimelineWelcome
         var pinned: [String]
-        var canPin: Bool
         var savedIDs: Set<String>
         var highlighted: String?
         var sendFailures: [SendQueueMessageKey: MessageSendFailure]
+        var waitingToReconnect: Bool
+        var externalFailure: Bool
         var pendingSendActions: Set<SendQueueMessageKey>
         var sendActions: Set<String>
-        var context: MessageActionTarget.Context
         var collapsedMedia: Set<String>
     }
     private var entryInputs: EntryInputs?
@@ -455,12 +577,31 @@ struct TimelineView: View {
         groups: Bool, threadRootEventID: String? = nil, repliesLine: Int? = nil
     ) -> [TimelineLayout.Row] {
         if !opened, !messages.isEmpty {
-            opened = true
-            if let firstUnreadEventID, messages.contains(where: { $0.eventID == firstUnreadEventID }) {
+            if openedNewestEventID == nil {
+                let confirmed = messages.last { $0.eventID.hasPrefix("$") }
+                openedNewestEventID = confirmed?.eventID ?? messages.last?.eventID
+                openedCutoff = confirmed?.timestamp ?? messages.last?.timestamp
+            }
+            let ceiling: Int? =
+                openedNewestEventID.flatMap { id in messages.lastIndex { $0.eventID == id } }
+                ?? openedCutoff.flatMap { cutoff in messages.lastIndex { $0.timestamp <= cutoff } }
+            if let firstUnreadEventID,
+                let unreadIndex = messages.firstIndex(where: { $0.eventID == firstUnreadEventID }),
+                let ceiling, unreadIndex <= ceiling
+            {
+                opened = true
                 unreadBoundary = firstUnreadEventID
-            } else if let anchor = messages.firstIndex(where: { $0.eventID == unreadAnchor }) {
-                // The read marker can land after the messages; it would go before the next one someone else sent.
-                unreadBoundary = messages[(anchor + 1)...].first { $0.senderID != me }?.eventID
+            } else if let unreadAnchor {
+                if let anchor = messages.firstIndex(where: { $0.eventID == unreadAnchor }) {
+                    opened = true
+                    // The read marker can land after the messages; it would go before the next one someone else sent.
+                    let afterAnchor = anchor + 1
+                    if let ceiling, afterAnchor <= ceiling {
+                        unreadBoundary = messages[afterAnchor...ceiling].first { $0.senderID != me }?.eventID
+                    }
+                }
+            } else {
+                opened = true
             }
         }
         if let input, input.groups == groups, input.unread == unreadBoundary, input.repliesLine == repliesLine,
@@ -509,6 +650,7 @@ struct MessageRow: View {
     var isSaved = false
     var isPinned = false
     var sendFailure: MessageSendFailure? = nil
+    var sendWaitStatus: SendWaitStatus? = nil
     var sendBusy = false
     /// The timeline tracks the pointer for all rows, so hover never resets when a row's values change.
     var hovered = false
@@ -529,6 +671,15 @@ struct MessageRow: View {
     private var colors: AppColors { appearance.colors }
     private var pendingSend: Bool { own && message.sendState != "sent" }
     private var sending: Bool { pendingSend && sendFailure == nil }
+    private var pendingMutation: Bool { own && !pendingSend && message.pendingChange != nil }
+    private var effectiveWaitStatus: SendWaitStatus? {
+        if let sendWaitStatus { return sendWaitStatus }
+        if sending { return .sending }
+        if pendingMutation {
+            return message.pendingChange == .deleting ? .deleting : .savingEdit
+        }
+        return nil
+    }
     private var compact: Bool { appearance.density == .compact }
     private var time: String { timeLabel ?? message.timestamp.formatted(.dateTime.hour().minute()) }
     private var gutterTime: String {
@@ -566,21 +717,64 @@ struct MessageRow: View {
             // that leading of its own, so it comes on top of them. Two grouped rows share both their 2s, so a sender's
             // first gap is the tightest.
             .padding(.top, Self.topInset(m, grouped: grouped, compact: compact))
-            .padding(.bottom, compact ? m.sp4 : grouped ? m.sp4 : m.sp2)
+            .padding(.bottom, compact ? m.sp2 : grouped ? m.sp4 : m.sp2)
     }
     /// The space above a row's first line, which the hover toolbar may hang into.
     static func topInset(_ m: Metrics, grouped: Bool, compact: Bool) -> CGFloat {
         compact ? (grouped ? 0 : m.sp2) : grouped ? m(3) : m.sp12
     }
-    private func content(gutter: CGFloat) -> some View {
-        HStack(alignment: .top, spacing: gutter) {
-            if !compact {
+    @ViewBuilder private func content(gutter: CGFloat) -> some View {
+        if compact {
+            VStack(alignment: .leading, spacing: m.sp2) {
+                if !message.isRedacted, let replyPreview { replyPreview.id(message.id) }
+                HStack(alignment: .top, spacing: m(6)) {
+                    HStack(alignment: .firstTextBaseline, spacing: m(6)) {
+                        Text(time).font(m.font(.subheadline)).monospacedDigit()
+                            .foregroundStyle(colors.textSecondary).fixedSize()
+                        Button {
+                            actions.openProfile?()
+                        } label: {
+                            Text(message.senderName).font(m.font(.reading, .semibold))
+                                .foregroundStyle(colors.textPrimary).lineLimit(1).truncationMode(.tail)
+                        }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help("View profile")
+                        if let seen, !pendingSend {
+                            ReadTicks(read: seen.read).help(seen.tooltip ?? "")
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: m.sp2) {
+                        messageText
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .overlay(alignment: .topLeading) {
+                    if isSaved || effectiveWaitStatus != nil {
+                        HStack(spacing: m.sp2) {
+                            if let status = effectiveWaitStatus {
+                                SendingClock(since: message.timestamp, status: status)
+                            }
+                            if isSaved {
+                                Image(systemName: "bookmark.fill").font(m.font(.subheadline))
+                                    .foregroundStyle(colors.accent)
+                            }
+                        }
+                        .fixedSize()
+                        .frame(width: 0, alignment: .trailing)
+                        .offset(x: -m(4), y: m.sp2)
+                    }
+                }
+                if !message.isRedacted { messageExtras }
+            }
+        } else {
+            HStack(alignment: .top, spacing: gutter) {
                 if grouped || !appearance.showAvatars {
                     // One line: a wrap would grow the row on hover.
                     Text(hovered ? gutterTime : "").font(m.font(.subheadline)).monospacedDigit().lineLimit(1)
                         .fixedSize()
                         .foregroundStyle(colors.textSecondary).frame(width: m.avatar, alignment: .trailing)
-                        .overlay(alignment: .trailing) { if grouped && sending && !hovered { clock } }
+                        .overlay(alignment: .trailing) {
+                            if grouped, !hovered, let status = effectiveWaitStatus {
+                                SendingClock(since: message.timestamp, status: status)
+                            }
+                        }
                         .padding(.top, m.sp2)
                 } else {
                     Button {
@@ -591,89 +785,88 @@ struct MessageRow: View {
                         "View \(message.senderName)’s profile"
                     ).padding(.top, m.sp2)
                 }
+                VStack(alignment: .leading, spacing: m.sp2) {
+                    if !grouped {
+                        HStack(alignment: .firstTextBaseline, spacing: m(6)) {
+                            Button {
+                                actions.openProfile?()
+                            } label: {
+                                Text(message.senderName).font(m.font(.reading, .semibold))
+                                    .foregroundStyle(colors.textPrimary)
+                            }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help("View profile")
+                            Text(time).font(m.font(.subheadline)).monospacedDigit()
+                                .foregroundStyle(colors.textSecondary)
+                            if let seen, !pendingSend {
+                                ReadTicks(read: seen.read).help(seen.tooltip ?? "")
+                            }
+                            if isSaved {
+                                Image(systemName: "bookmark.fill").font(m.font(.subheadline))
+                                    .foregroundStyle(colors.accent)
+                            }
+                            if let status = effectiveWaitStatus {
+                                SendingClock(since: message.timestamp, status: status, showsBlockedLabel: true)
+                            }
+                        }
+                    }
+                    if !message.isRedacted, let replyPreview { replyPreview.id(message.id) }
+                    messageText
+                    if !message.isRedacted { messageExtras }
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
-            VStack(alignment: .leading, spacing: m.sp2) {
-                if !grouped || compact {
-                    HStack(alignment: .firstTextBaseline, spacing: m(6)) {
-                        if compact {
-                            Text(time).font(m.font(.subheadline)).monospacedDigit()
-                                .foregroundStyle(colors.textSecondary)
-                        }
-                        Button {
-                            actions.openProfile?()
-                        } label: {
-                            Text(message.senderName).font(m.font(.body, .semibold))
-                                .foregroundStyle(colors.textPrimary)
-                        }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help("View profile")
-                        if !compact {
-                            Text(time).font(m.font(.subheadline)).monospacedDigit()
-                                .foregroundStyle(colors.textSecondary)
-                        }
-                        if let seen, !pendingSend {
-                            ReadTicks(read: seen.read).help(seen.tooltip ?? "")
-                        }
-                        if isSaved {
-                            Image(systemName: "bookmark.fill").font(m.font(.subheadline)).foregroundStyle(colors.accent)
-                        }
-                    }.overlay(alignment: .trailing) {
-                        if sending { clock.padding(.leading, m.sp8).frame(width: 0, alignment: .leading) }
-                    }
-                }
-                if message.isRedacted {
-                    Text(ChatMessage.deletedBody).italic().font(m.font(.reading)).foregroundStyle(
-                        colors.textSecondary
-                    )
-                } else {
-                    // State of its own per message, so a reused cell never names another copy's thread.
-                    if let replyPreview { replyPreview.id(message.id) }
-                    if message.kind == "m.room.encrypted" {
-                        // One quiet line per message; the header offers the recovery key once for all of them.
-                        Label(message.body, systemImage: "lock").font(m.font(.body)).italic()
-                            .foregroundStyle(colors.textSecondary)
-                    } else if message.showsMessageBody {
-                        // Slack draws a message that hasn't reached the server lighter, and nothing else.
-                        NativeMessageBody(
-                            body: message.body, formattedBody: message.formattedBody, edited: message.isEdited,
-                            menuCommands: actions.menu
-                        ).opacity(pendingSend ? 0.5 : 1)
-                    }
-                    if message.isEdited && (!message.showsMessageBody || message.kind == "m.room.encrypted") {
-                        Text("(edited)").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-                    }
-                    // A reused cell shows another message: a download or preview in flight must not carry over.
-                    if let attachment { attachment.padding(.top, m(6)).id(message.id) }
-                    if !message.reactions.isEmpty { reactions.padding(.top, m(3)) }
-                    if !isThread, let count = message.replyCount, count > 0 {
-                        ThreadRepliesBar(
-                            count: count, lastReply: message.lastReply, avatar: replierAvatar,
-                            prepare: actions.prepareThread, action: actions.openReplies
-                        ).padding(.top, m.sp4)
-                    }
-                    if pendingSend, let failure = sendFailure {
-                        VStack(alignment: .leading, spacing: m.sp4) {
-                            HStack(alignment: .firstTextBaseline, spacing: m.sp12) {
-                                Label("Not delivered", systemImage: "exclamationmark.circle.fill")
-                                    .foregroundStyle(colors.destructive)
-                                if failure.canRetry {
-                                    Button("Retry", action: actions.retrySend).buttonStyle(.textLink)
-                                }
-                                Button("Delete", role: .destructive, action: actions.cancelSend).buttonStyle(.textLink)
-                            }.disabled(sendBusy).overlay(alignment: .trailing) {
-                                if sendBusy {
-                                    DelayedProgress().padding(.leading, m.sp8).frame(width: 0, alignment: .leading)
-                                }
-                            }
-                            // A network failure needs only Retry; the others say what to do first.
-                            if failure.kind != .recoverable {
-                                Text(failure.message).foregroundStyle(colors.textSecondary)
-                            }
-                        }.font(m.font(.subheadline)).padding(.top, m.sp2)
-                    }
-                }
-            }.frame(maxWidth: .infinity, alignment: .leading)
         }
     }
-    private var clock: some View { SendingClock(since: message.timestamp) }
+    @ViewBuilder private var messageText: some View {
+        if message.isRedacted {
+            Text(ChatMessage.deletedBody).italic().font(m.font(.reading)).foregroundStyle(colors.textSecondary)
+                .opacity(pendingMutation ? 0.5 : 1)
+        } else {
+            if message.kind == "m.room.encrypted" {
+                // One quiet line per message; the header offers the recovery key once for all of them.
+                Label(message.body, systemImage: "lock").font(m.font(.body)).italic()
+                    .foregroundStyle(colors.textSecondary)
+            } else if message.showsMessageBody {
+                // Slack draws a message that hasn't reached the server lighter, and nothing else.
+                NativeMessageBody(
+                    body: message.body, formattedBody: message.formattedBody, edited: message.isEdited,
+                    menuCommands: actions.menu
+                ).opacity(pendingSend || pendingMutation ? 0.5 : 1)
+            }
+            if message.isEdited && (!message.showsMessageBody || message.kind == "m.room.encrypted") {
+                Text("(edited)").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+            }
+        }
+    }
+    @ViewBuilder private var messageExtras: some View {
+        // A reused cell shows another message: a download or preview in flight must not carry over.
+        if let attachment { attachment.padding(.top, m(6)).id(message.id) }
+        if !message.reactions.isEmpty { reactions.padding(.top, m(3)) }
+        if !isThread, let count = message.replyCount, count > 0 {
+            ThreadRepliesBar(
+                count: count, lastReply: message.lastReply, avatar: replierAvatar,
+                prepare: actions.prepareThread, action: actions.openReplies
+            ).padding(.top, m.sp4)
+        }
+        if pendingSend, let failure = sendFailure {
+            VStack(alignment: .leading, spacing: m.sp4) {
+                HStack(alignment: .firstTextBaseline, spacing: m.sp12) {
+                    Label("Not delivered", systemImage: "exclamationmark.circle.fill")
+                        .foregroundStyle(colors.destructive)
+                    if failure.canRetry {
+                        Button("Retry", action: actions.retrySend).buttonStyle(.textLink)
+                    }
+                    Button("Delete", role: .destructive, action: actions.cancelSend).buttonStyle(.textLink)
+                }.disabled(sendBusy).overlay(alignment: .trailing) {
+                    if sendBusy {
+                        DelayedProgress().padding(.leading, m.sp8).frame(width: 0, alignment: .leading)
+                    }
+                }
+                // A network failure needs only Retry; the others say what to do first.
+                if failure.kind != .recoverable {
+                    Text(failure.message).foregroundStyle(colors.textSecondary)
+                }
+            }.font(m.font(.subheadline)).padding(.top, m.sp2)
+        }
+    }
 
     private var reactions: some View {
         WrappingRow(spacing: m.sp4) {
@@ -682,7 +875,7 @@ struct MessageRow: View {
                     actions.react?(reaction.key)
                 } label: {
                     ReactionChip(mine: reaction.mine) {
-                        Text(EmojiCatalog.presented(reaction.key)).font(m.font(.subheadline)).lineLimit(1)
+                        Text(EmojiCatalog.presented(reaction.key)).font(m.font(.body)).lineLimit(1)
                         Text("\(reaction.count)").font(m.font(.subheadline, .semibold)).fixedSize()
                             .foregroundStyle(reaction.mine ? colors.accent : colors.textSecondary)
                     }
@@ -714,17 +907,22 @@ struct MessageRow: View {
     }
 }
 
-/// Slack's clock for a send still going after a few seconds. It always takes its space, so the row never moves for it.
+/// Slack's clock for a send still going after a few seconds. Lives inline on the header or gutter so a wait-status
+/// transition never changes the row's height.
 private struct SendingClock: View {
     let since: Date
+    let status: SendWaitStatus
+    var showsBlockedLabel = false
     @State private var shown: Bool
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
 
-    init(since: Date) {
+    init(since: Date, status: SendWaitStatus, showsBlockedLabel: Bool = false) {
         self.since = since
-        // A message that has been sending a while shows its clock in its first frame.
-        _shown = State(initialValue: Self.shows(since))
+        self.status = status
+        self.showsBlockedLabel = showsBlockedLabel
+        // A message that has been sending a while, or is waiting on reconnect or an earlier failure, shows at once.
+        _shown = State(initialValue: status.showsImmediately || Self.shows(since))
     }
 
     private static func shows(_ since: Date) -> Bool {
@@ -732,22 +930,32 @@ private struct SendingClock: View {
     }
 
     var body: some View {
-        Image(systemName: "clock").font(m.font(.subheadline)).foregroundStyle(appearance.colors.textSecondary)
-            .opacity(shown ? 1 : 0).accessibilityHidden(!shown).accessibilityLabel("Sending")
-            .task(id: since) {
-                shown = Self.shows(since)
-                guard !shown else { return }
-                let left = LoadingPresentation.sendingClockDelay - .seconds(Date().timeIntervalSince(since))
-                try? await Task.sleep(for: left)
-                if !Task.isCancelled { shown = Self.shows(since) }
+        let visible = status.showsImmediately || shown
+        let iconColor = status == .blockedByEarlierFailure ? appearance.colors.warning : appearance.colors.textSecondary
+        HStack(alignment: .firstTextBaseline, spacing: m.sp4) {
+            Image(systemName: "clock").foregroundStyle(iconColor)
+            if showsBlockedLabel && status == .blockedByEarlierFailure {
+                Text(status.label).foregroundStyle(appearance.colors.textSecondary).lineLimit(1).truncationMode(.tail)
             }
+        }
+        .font(m.font(.subheadline))
+        .opacity(visible ? 1 : 0).help(status.label).accessibilityHidden(!visible)
+        .accessibilityElement(children: .ignore).accessibilityLabel(status.label)
+        .task(id: "\(since.timeIntervalSinceReferenceDate)|\(status.showsImmediately)") {
+            shown = status.showsImmediately || Self.shows(since)
+            guard !shown else { return }
+            let left = LoadingPresentation.sendingClockDelay - .seconds(Date().timeIntervalSince(since))
+            try? await Task.sleep(for: left)
+            if !Task.isCancelled { shown = status.showsImmediately || Self.shows(since) }
+        }
     }
 }
 
-/// A reaction's pill: 24 pt, gray at rest; yours are tinted.
+/// A reaction's pill: 24 pt, gray at rest; yours are tinted with an accent edge.
 private struct ReactionChip<Content: View>: View {
     let mine: Bool
     @ViewBuilder let content: Content
+    @State private var hovering = false
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
     var body: some View {
@@ -756,6 +964,9 @@ private struct ReactionChip<Content: View>: View {
         HStack(alignment: .firstTextBaseline, spacing: m.sp4) { content }.padding(.horizontal, m.sp8)
             .frame(height: m.sp24)
             .background(mine ? colors.accentTint : colors.sunken, in: Capsule())
+            .overlay { if hovering { Capsule().fill(colors.hover) } }
+            .overlay { if mine { Capsule().strokeBorder(colors.accentLine, lineWidth: 1) } }
+            .onHover { hovering = $0 }
     }
 }
 
@@ -895,6 +1106,8 @@ struct HoveredMessageToolbar: View {
     let context: TimelineRowContext
     var body: some View {
         if let matrix = context.matrix, let appearance = context.appearance {
+            // Observe async pin-permission updates only in the active hover toolbar so resting rows never redraw.
+            let _ = context.pinPermission.allowed
             let message = entry.message
             MessageToolbar(
                 quick: EmojiRecents.quick(matrix.recentEmoji), isThread: context.isThread, isSaved: entry.saved,
@@ -1008,7 +1221,7 @@ extension TimelineRowContext {
             commands.append(
                 MessageMenuCommand(
                     id: "pin", title: row.pinned ? "Unpin from conversation" : "Pin to conversation",
-                    isEnabled: row.canPin && (row.pinned || !message.isRedacted) && message.eventID.hasPrefix("$"),
+                    isEnabled: self.canPin && (row.pinned || !message.isRedacted) && message.eventID.hasPrefix("$"),
                     perform: { onTogglePin(message) }))
         }
         let link = permalinkTarget(for: message)
@@ -1041,6 +1254,68 @@ extension TimelineRowContext {
         return commands
     }
 
+    private func canAct(on message: ChatMessage) -> Bool {
+        canAct && message.eventID.hasPrefix("$") && message.sendState == "sent" && !message.isRedacted
+    }
+
+    /// Actions for a resting row: captures the SDK action target only when the user actually interacts or opens a menu,
+    /// so evaluating `TimelineRow.body` never subscribes cells to `messages`, `threadMessages` or action context.
+    func rowActions(for row: TimelineMessageEntry) -> MessageRowActions {
+        let message = row.message
+        let actionable = canAct(on: message)
+        var actions = MessageRowActions(
+            openProfile: onOpenProfile.map { open in
+                {
+                    open(
+                        message.senderID,
+                        ChatUser(id: message.senderID, name: message.senderName, avatarURL: message.avatarURL))
+                }
+            },
+            thread: { self.onThread(message) }, openReplies: { self.onOpenReplies(message) },
+            prepareThread: { self.matrix?.prepareThread(message) },
+            reply: { self.onReply(message) }, save: { self.onSave(message) },
+            react: actionable
+                ? { emoji in
+                    guard let target = self.actionTarget(for: message) else { return }
+                    self.onReact(target, emoji)
+                } : nil,
+            openReactions: actionable
+                ? {
+                    guard let target = self.actionTarget(for: message),
+                        self.matrix?.isCurrentMessageAction(target) == true
+                    else { return }
+                    self.onPickEmoji(EmojiPick { self.onReact(target, $0) })
+                } : nil,
+            forward: onForward.flatMap { send in
+                guard actionable, ForwardMessageContent.supports(message) else { return nil }
+                return {
+                    guard let target = self.actionTarget(for: message) else { return }
+                    send(target)
+                }
+            },
+            retrySend: { self.onRetrySend(message) }, cancelSend: { self.onCancelSend(message) })
+        actions.menu = {
+            let target = self.actionTarget(for: message)
+            return self.actions(for: row, target: target).menu()
+        }
+        return actions
+    }
+
+    func rowAttachmentActions(for message: ChatMessage) -> AttachmentActions {
+        let actionable = canAct(on: message)
+        return AttachmentActions(
+            open: { self.onOpenMedia(message) },
+            forward: actionable && ForwardMessageContent.supports(message)
+                ? onForward.map { send in
+                    {
+                        guard let target = self.actionTarget(for: message) else { return }
+                        send(target)
+                    }
+                } : nil,
+            copyLink: { if let link = self.permalinkTarget(for: message) { self.onCopyLink(link) } },
+            inlineVideo: matrix.flatMap { matrix in inlineVideo?.slot(message, matrix: matrix, in: self) })
+    }
+
     func attachmentActions(for message: ChatMessage, target: MessageActionTarget?) -> AttachmentActions {
         AttachmentActions(
             open: { self.onOpenMedia(message) },
@@ -1063,21 +1338,121 @@ extension TimelineRowContext {
     }
 }
 
+/// Isolated scroll-edge hairline state held by the pane so scrolling across the header never redraws the window.
+@Observable @MainActor final class ScrollEdgeState {
+    var contentAbove = false
+}
+
+private struct ScrollEdgeHairline: View {
+    let state: ScrollEdgeState
+    let top: CGFloat
+    @ThemeColors private var colors
+    var body: some View {
+        Divider().overlay(colors.border)
+            .opacity(state.contentAbove ? 1 : 0)
+            .animation(Motion.overlay, value: state.contentAbove)
+            .padding(.top, top)
+            .allowsHitTesting(false)
+    }
+}
+
+/// Measured heights of the floating header and composer bars over a timeline, pushed synchronously to the table in
+/// `TimelineUnderBars`'s layout pass before the table places or opens.
+@MainActor final class TimelineBarInsets {
+    private(set) var current = EdgeInsets()
+    private(set) var measured = false
+    var onChange: ((EdgeInsets) -> Void)?
+
+    func update(_ new: EdgeInsets) {
+        let changed = !measured || new.top != current.top || new.bottom != current.bottom
+        current = new
+        measured = true
+        if changed { onChange?(new) }
+    }
+}
+
+private struct TimelineBarInsetsKey: EnvironmentKey {
+    static let defaultValue: TimelineBarInsets? = nil
+}
+
+extension EnvironmentValues {
+    var timelineBarInsets: TimelineBarInsets? {
+        get { self[TimelineBarInsetsKey.self] }
+        set { self[TimelineBarInsetsKey.self] = newValue }
+    }
+}
+
+/// Height of floating cards above the composer (reply banner, attachment draft status, mention menu) so `Jump to recent`
+/// stays clear of them without resizing the timeline's bottom inset.
+struct ComposerAccessoryHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat { 0 }
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+private struct ComposerAccessoryHeightEnvironmentKey: EnvironmentKey { static let defaultValue: CGFloat = 0 }
+
+extension EnvironmentValues {
+    var composerAccessoryHeight: CGFloat {
+        get { self[ComposerAccessoryHeightEnvironmentKey.self] }
+        set { self[ComposerAccessoryHeightEnvironmentKey.self] = newValue }
+    }
+}
+
+/// Measures the floating header and composer bars before placing the timeline under them, so the table receives its
+/// real insets synchronously before its first `open()`.
+private struct TimelineBarsLayout: Layout {
+    let onMeasure: @MainActor (EdgeInsets) -> Void
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let first = subviews.first else { return proposal.replacingUnspecifiedDimensions() }
+        return first.sizeThatFits(proposal)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count >= 3 else {
+            for subview in subviews { subview.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size)) }
+            return
+        }
+        let barProposal = ProposedViewSize(width: bounds.width, height: bounds.height)
+        let headerSize = subviews[1].sizeThatFits(barProposal)
+        let footerSize = subviews[2].sizeThatFits(barProposal)
+        if bounds.width > 0 && bounds.height > 0 {
+            let measured = EdgeInsets(top: headerSize.height, leading: 0, bottom: footerSize.height, trailing: 0)
+            MainActor.assumeIsolated { onMeasure(measured) }
+        }
+        subviews[0].place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+        subviews[1].place(
+            at: CGPoint(x: bounds.midX, y: bounds.minY), anchor: .top,
+            proposal: ProposedViewSize(width: bounds.width, height: headerSize.height))
+        subviews[2].place(
+            at: CGPoint(x: bounds.midX, y: bounds.maxY), anchor: .bottom,
+            proposal: ProposedViewSize(width: bounds.width, height: footerSize.height))
+    }
+}
+
 /// A timeline with its header over its top and its composer over its bottom, floating so rows scroll under both. Their
 /// heights, tracked here as the composer grows, keep the timeline's own view of the screen between them.
 struct TimelineUnderBars<Timeline: View, Header: View, Footer: View>: View {
     @State private var insets = EdgeInsets()
+    @State private var barInsets = TimelineBarInsets()
+    @State private var accessoryHeight: CGFloat = 0
     let timeline: (EdgeInsets) -> Timeline
     @ViewBuilder let header: Header
     @ViewBuilder let footer: Footer
 
     var body: some View {
-        timeline(insets)
-            .overlay(alignment: .top) {
-                header.onGeometryChange(for: CGFloat.self, of: \.size.height) { insets.top = $0 }
-            }
-            .overlay(alignment: .bottom) {
-                footer.onGeometryChange(for: CGFloat.self, of: \.size.height) { insets.bottom = $0 }
-            }
+        TimelineBarsLayout(onMeasure: measured) {
+            timeline(insets)
+                .environment(\.timelineBarInsets, barInsets)
+                .environment(\.composerAccessoryHeight, accessoryHeight)
+            ZStack(alignment: .top) { header }
+            ZStack(alignment: .bottom) { footer }
+                .onPreferenceChange(ComposerAccessoryHeightKey.self) { accessoryHeight = $0 }
+        }
+    }
+
+    private func measured(_ new: EdgeInsets) {
+        barInsets.update(new)
+        if insets != new { DispatchQueue.main.async { insets = new } }
     }
 }

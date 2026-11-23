@@ -170,14 +170,14 @@ struct WindowHostedTests {
         }
 
         /// A point in the toolbar's capsule of conversation buttons, which SwiftUI draws without views: `inset` from
-        /// its trailing end, which sits a gap short of back and forward, and they of the search field, which ends on
-        /// the messages' column.
+        /// its trailing end, which sits a gap short of back and forward, and they of the search field, which ends at
+        /// the toolbar's trailing margin.
         func toolbarCapsule(inset: CGFloat) -> CGRect {
             let m = Metrics()
-            let left = conversationLeft ?? 0
-            let column = ConversationGrid.column(width: window.frame.width - left, thread: false)
             let history = 2 * m.iconButton + 2 * m.sp2
-            let end = left + column.trailing - m(RootView.searchWidth) - m.sp12 - history - m.sp12
+            let end =
+                window.frame.width - m.conversationInset(thread: false) - m(RootView.searchWidth) - m.sp12 - history
+                - m.sp12
             return CGRect(x: end - inset, y: window.frame.height - m.paneHeader / 2, width: 0, height: 0)
         }
 
@@ -922,7 +922,7 @@ struct WindowHostedTests {
     }
 
     @Test(
-        "The composer's text starts where message text starts, in either density",
+        "The composer's text aligns with message text in comfortable density, and compact messages sit inline after time and sender",
         arguments: [MessageDensity.comfortable, .compact])
     func composerTextOnMessageText(density: MessageDensity) async throws {
         let harness = Harness()
@@ -935,7 +935,15 @@ struct WindowHostedTests {
         }
         let message = try #require(try harness.newest() as? NSTextView)
         let composer = try #require(harness.shown().first { ($0 as? NSTextView)?.isEditable == true } as? NSTextView)
-        #expect(abs(textStart(composer) - textStart(message)) <= 1, "\(textStart(composer)) and \(textStart(message))")
+        if density == .comfortable {
+            #expect(
+                abs(textStart(composer) - textStart(message)) <= 1, "\(textStart(composer)) and \(textStart(message))")
+        } else {
+            #expect(
+                textStart(message) > textStart(composer),
+                "Compact message body should sit inline after time and sender: \(textStart(composer)) vs \(textStart(message))"
+            )
+        }
     }
 
     @Test("Also send to names a private channel with its lock, as a public one shows its #")

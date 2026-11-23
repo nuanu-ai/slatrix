@@ -77,6 +77,17 @@ struct MediaCaptionSavedResult {
     let snapshotID: UUID
     let queued: Bool
 }
+struct MediaCaptionSaveNotice: Equatable {
+    let text: String
+    let symbol: String
+
+    static func forConnection(_ state: MatrixConnectionState) -> Self {
+        if state == .running {
+            return Self(text: "Caption update queued.", symbol: "clock")
+        }
+        return Self(text: "Caption queued. It will save when you reconnect.", symbol: "clock")
+    }
+}
 struct MediaCaptionReviewChanged: LocalizedError {
     let snapshot: MediaCaptionSnapshot
     var errorDescription: String? { "The caption changed. Check it, then save." }

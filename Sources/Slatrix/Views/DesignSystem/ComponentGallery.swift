@@ -121,7 +121,7 @@ struct ComponentGallery: View {
     private var typeScale: some View {
         let roles: [(String, TextRole)] = [
             ("Hero 40", .hero), ("Large Title 26", .largeTitle), ("Title 1 22", .title1), ("Title 3 15", .title3),
-            ("Reading 14", .reading), ("Body 13", .body), ("Subheadline 11", .subheadline),
+            ("Reading 14", .reading), ("Body 13", .body), ("Caption 12", .caption), ("Subheadline 11", .subheadline),
         ]
         return VStack(alignment: .leading, spacing: m.sp8) {
             ForEach(roles, id: \.0) { role in

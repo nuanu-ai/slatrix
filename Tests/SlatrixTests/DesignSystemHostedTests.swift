@@ -465,4 +465,29 @@ struct DesignSystemHostedTests {
         let canvas = try #require(NSColor(appearance.colors.canvas).usingColorSpace(.sRGB))
         #expect(fill.brightnessComponent < canvas.brightnessComponent)
     }
+
+    @Test("A secondary button darkens further when pressed than on hover")
+    func secondaryButtonPressedDiffersFromHover() throws {
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(savedMode, forKey: "appearance.mode") }
+        let appearance = AppearanceStore()
+        appearance.mode = .light
+        func fillColor(_ state: InteractionState) throws -> NSColor {
+            let host = Host(
+                ButtonChrome(kind: .secondary, state: state) { Text("   ") }
+                    .frame(width: 120, height: 48).background(Color.white).environmentObject(appearance),
+                size: CGSize(width: 120, height: 48))
+            defer { host.close() }
+            host.hosting.layoutSubtreeIfNeeded()
+            let image = try #require(host.hosting.bitmapImageRepForCachingDisplay(in: host.hosting.bounds))
+            host.hosting.cacheDisplay(in: host.hosting.bounds, to: image)
+            let scale = CGFloat(image.pixelsWide) / host.hosting.bounds.width
+            return try #require(image.colorAt(x: Int(60 * scale), y: Int(24 * scale))?.usingColorSpace(.sRGB))
+        }
+        let hover = try fillColor(.hover)
+        let pressed = try fillColor(.pressed)
+        #expect(
+            pressed.brightnessComponent < hover.brightnessComponent - 0.01,
+            "Expected pressed (\(pressed.brightnessComponent)) darker than hover (\(hover.brightnessComponent))")
+    }
 }

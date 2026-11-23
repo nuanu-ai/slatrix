@@ -100,8 +100,8 @@ struct RootView: View {
     @State private var pinPermission = false
     @State private var threadRoot: ChatMessage?
     /// Whether messages sit under the conversation's and the thread's headers, which then draw their lines.
-    @State private var conversationContentAbove = false
-    @State private var threadContentAbove = false
+    @State private var conversationScrollEdge = ScrollEdgeState()
+    @State private var threadScrollEdge = ScrollEdgeState()
     /// Threads left open in a conversation, by room, for this session: coming back opens them again, as in Slack.
     @State private var leftThreads: [String: ChatMessage] = [:]
     /// The thread whose "Also send to #channel" is checked; another thread starts unchecked, as in Slack.
@@ -331,6 +331,7 @@ struct RootView: View {
 
     var body: some View {
         ModalHost(
+            top: m.paneHeader + (colors.theme.framed ? m.sidebarInset : 0),
             onCovered: { shown in
                 modalShown = shown
                 // A notification that arrived while a modal was open opens once it closes.
@@ -422,6 +423,13 @@ struct RootView: View {
                 }
             }
             .background(ViewerInvalidation(matrix: matrix, viewer: viewer))
+            .background(
+                MessageActionInvalidation(matrix: matrix) {
+                    if let editActionTarget, !matrix.isCurrentMessageAction(editActionTarget) { cancelCurrentEdit() }
+                    cancelStaleForward()
+                    cancelStaleCaption()
+                }
+            )
             .background(layoutMeasurement)
     }
 
@@ -476,6 +484,17 @@ struct RootView: View {
             }
             .onChange(of: navigationGeneration) { _, generation in
                 if let request = pendingMatrixLink, request.navigation != generation { cancelMatrixLink() }
+            }
+            .onChange(of: matrix.connectionState) { previous, current in
+                if previous != .running, current == .running {
+                    if threadLoadError != nil, let root = threadRoot, openingThreadID == nil {
+                        openThread(root, room: root.roomID, openedWith: matrix.threadOpening?.openedWith)
+                    } else if threadOpenError != nil, let request = pendingThreadOpen, isCurrentThreadOpen(request) {
+                        openThread(request.message, openedWith: request.openedWith)
+                    } else if replyError != nil, !replyOpening, let target = replyTarget {
+                        prepareReply(target)
+                    }
+                }
             }
     }
 
@@ -556,11 +575,6 @@ struct RootView: View {
                 cancelStaleCaption()
             }
             .onChange(of: matrix.timelineSelectionID) { _, _ in cancelStaleThreadOpen() }
-            .onChange(of: matrix.messageActionContext) { _, _ in
-                if let editActionTarget, !matrix.isCurrentMessageAction(editActionTarget) { cancelCurrentEdit() }
-                cancelStaleForward()
-                cancelStaleCaption()
-            }
             .onChange(of: editContext) { _, _ in
                 if let target = editTarget, !target.isCurrent(editTarget, in: editContext) { cancelCurrentEdit() }
                 if let target = replyTarget, target.threadID != nil, !replyOpening,
@@ -574,7 +588,7 @@ struct RootView: View {
     // A single long modifier chain exceeds the type checker's time limit in some Swift releases.
     private var observedContent: some View {
         navigationObservedContent
-            .onChange(of: systemScheme) { _, scheme in appearance.systemIsDark = scheme == .dark }
+            .onChange(of: systemScheme, initial: true) { _, scheme in appearance.systemIsDark = scheme == .dark }
             .onReceive(NotificationCenter.default.publisher(for: .menuAction)) { notification in
                 handleMenu(notification.userInfo?["action"] as? String ?? "")
             }
@@ -706,10 +720,17 @@ struct RootView: View {
                     onCancel: logoutRecovery.cancel)
             }
             .modal(isPresented: $logoutConfirmation) {
+                let expiredWarning =
+                    matrix.sessionExpired
+                    ? SignOutWarning.forExpiredSession(
+                        queuedCount: matrix.queuedSendCount, hasFailedSends: !matrix.failedSendRoomIDs.isEmpty,
+                        isSoftLogout: matrix.sessionExpiredIsSoftLogout)
+                    : nil
                 ConfirmModal(
-                    title: "Sign out of Slatrix?",
-                    message: "You’ll need your recovery key to read encrypted messages when you sign back in.",
-                    action: "Sign out",
+                    title: expiredWarning?.title ?? "Sign out of Slatrix?",
+                    message: expiredWarning?.message
+                        ?? "You’ll need your recovery key to read encrypted messages when you sign back in.",
+                    action: expiredWarning?.action ?? "Sign out",
                     onConfirm: {
                         logoutConfirmation = false
                         if !logoutRecovery.isBusy { beginLogout() }
@@ -770,6 +791,7 @@ struct RootView: View {
             } else {
                 IdentityGate(
                     verification: matrix.verification, accountID: matrix.isPreview ? nil : matrix.user?.id,
+                    isOnline: matrix.connectionState == .running, retryToken: matrix.reconnectCount,
                     hasIdentity: { await matrix.accountHasIdentity() }, onRecovery: { showRecovery = true },
                     onPrompting: { identityPrompt = $0 }
                 ) {
@@ -810,8 +832,10 @@ struct RootView: View {
                                 if paneCovers {
                                     inspector(room).overlay(alignment: .top) { Divider().overlay(colors.border) }
                                         .padding(.top, m.paneHeader)
+                                        .transition(.opacity)
                                 }
                             }
+                            .animation(Motion.pane, value: paneCovers)
                             // Banners float over the conversation instead of pushing it down, under whichever header is
                             // on top: a pane in the conversation's place brings its own, with its close button. A thread
                             // there floats its own notice in the same column, first, so neither lies over the other.
@@ -838,7 +862,8 @@ struct RootView: View {
                                     inspector(room).layoutIsolated()
                                 }
                             }
-                        }.frameCard(colors.theme.framed, leading: sidebarCollapsed)
+                        }
+                        .frameCard(colors.theme.framed, leading: sidebarCollapsed)
                     }
                     .covered(coverage.drawer)
                     .overlay(alignment: .leading) { drawer }
@@ -868,6 +893,14 @@ struct RootView: View {
     /// cancelled, and errors.
     private var banners: some View {
         VStack(spacing: 0) {
+            if matrix.sessionExpired {
+                Banner(
+                    text: "Your session expired. Sign in again.", symbol: "exclamationmark.circle.fill",
+                    tone: .destructive
+                ) {
+                    Button("Sign in again", action: signOut)
+                }
+            }
             ConnectionBanner(matrix: matrix, onRetry: retryConnection)
             if pendingMatrixLink != nil {
                 Banner(text: "Opening…", tone: .neutral) {
@@ -888,9 +921,11 @@ struct RootView: View {
                         Button("Cancel") { if pendingThreadOpen?.id == request.id { cancelThreadOpen() } }
                     }
                 } else {
-                    Banner(text: "Opening thread…", tone: .neutral) {
-                        Button("Cancel") { if pendingThreadOpen?.id == request.id { cancelThreadOpen() } }
-                    }.loadingInterval(.threadLoading)
+                    AfterLoadingDelay(active: true, hasContent: false, offline: false, interval: .threadLoading) {
+                        Banner(text: "Opening thread…", tone: .neutral) {
+                            Button("Cancel") { if pendingThreadOpen?.id == request.id { cancelThreadOpen() } }
+                        }
+                    }
                 }
             }
             ErrorBanner(matrix: matrix)
@@ -917,6 +952,12 @@ struct RootView: View {
                 }
             }
         }
+        .animation(
+            Motion.overlay,
+            value: [
+                pendingMatrixLink != nil, pendingThreadOpen != nil, threadOpenError != nil, navigationNotice != nil,
+                platform.pendingNotification != nil, localError != nil, attachmentDrafts.errorMessage != nil,
+            ])
     }
 
     @ViewBuilder private func inspector(_ room: ChatRoom?) -> some View {
@@ -1023,6 +1064,8 @@ struct RootView: View {
     private var automaticReadTarget: ReadReceiptTarget? { ReadStatePolicy.automaticTarget(readContext, hold: readHold) }
     private func markReadState(_ targetRoom: ChatRoom, unread: Bool) {
         guard !matrix.isPreview, targetRoom.membership == "join" else { return }
+        let rollbackContext =
+            unread && targetRoom.id == matrix.selectedRoomID && !readHold.blocks(readContext) ? readContext : nil
         if targetRoom.id == matrix.selectedRoomID {
             if unread { readHold.markUnread(readContext) } else { readHold.clearForExplicitRead(readContext) }
         }
@@ -1031,6 +1074,7 @@ struct RootView: View {
             guard matrix.notificationSessionID == account else { return }
             do { try await matrix.setMarkedUnread(targetRoom.id, value: unread) } catch {
                 guard matrix.notificationSessionID == account else { return }
+                if let rollbackContext { readHold.rollbackMarkUnread(rollbackContext) }
                 matrix.errorMessage = MatrixService.safeError(error)
             }
         }
@@ -1075,6 +1119,7 @@ struct RootView: View {
                 if let me = matrix.user { profilePane = ProfileSelection(id: me.id, fallback: me) }
             },
             onSignOut: signOut,
+            onReconnect: retryConnection,
             onMarkUnread: { markReadState($0, unread: true) },
             onMarkRead: { markReadState($0, unread: false) },
             onInviteWorkspace: { id in
@@ -1167,7 +1212,7 @@ struct RootView: View {
                         editing: editTarget?.surface == .conversation, onForward: startForward,
                         onEditCaption: startCaption,
                         onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) },
-                        inlineVideo: viewer.inlineVideo, contentAbove: $conversationContentAbove, insets: insets
+                        inlineVideo: viewer.inlineVideo, scrollEdge: conversationScrollEdge, insets: insets
                     )
                     .id("\(room.id):\(matrix.shownTimelineID)")
                     // A pane in its place covers all but the toolbar.
@@ -1177,12 +1222,32 @@ struct RootView: View {
                 } footer: {
                     VStack(spacing: 0) {
                         if room.canPostMessages == false {
+                            let reply = replyTarget.flatMap {
+                                $0.message.roomID == room.id
+                                    && ($0.threadID == nil || $0.threadID != threadRoot?.eventID) ? $0 : nil
+                            }
+                            let draftAddress = editTarget == nil ? AttachmentDraftAddress(roomID: room.id) : nil
                             ComposerNotice(text: Self.cannotPost).padding(.top, m.sp4).padding(.bottom, m.sp12)
+                                .overlay(alignment: .top) {
+                                    VStack(alignment: .leading, spacing: m.sp8) {
+                                        ToastHost(toasts: toasts).frame(maxWidth: .infinity)
+                                        if hasComposerAccessories(reply: reply, drafts: draftAddress) {
+                                            composerAccessories(reply: reply, drafts: draftAddress)
+                                        }
+                                    }
+                                    .alignmentGuide(.top) { $0[.bottom] + m.sp8 }
+                                }
                         } else if let target = editTarget, target.surface == .conversation,
                             target.message.roomID == room.id
                         {
-                            editComposer(target, room: room).padding(.top, m.sp4).padding(.bottom, m.sp12)
+                            editComposer(target, room: room, topOverlay: AnyView(ToastHost(toasts: toasts)))
+                                .padding(.top, m.sp4).padding(.bottom, m.sp12)
                         } else {
+                            let reply = replyTarget.flatMap {
+                                $0.message.roomID == room.id
+                                    && ($0.threadID == nil || $0.threadID != threadRoot?.eventID) ? $0 : nil
+                            }
+                            let draftAddress = editTarget == nil ? AttachmentDraftAddress(roomID: room.id) : nil
                             BindingScope({ draftBinding(room.id) }) { text in
                                 MessageComposer(
                                     text: text,
@@ -1215,32 +1280,22 @@ struct RootView: View {
                                         guard isCurrentComposer(context) else { return }
                                         matrix.errorMessage = error
                                     },
-                                    allowsSend: attachmentDrafts.canSend(AttachmentDraftAddress(roomID: room.id))
+                                    allowsSend: !matrix.sessionExpired
+                                        && attachmentDrafts.canSend(AttachmentDraftAddress(roomID: room.id))
                                         && replyAllowsSend(roomID: room.id),
                                     onDiscardAttachments: attachmentDrafts.discard,
                                     requiresTextForSend: scopedReply(roomID: room.id) != nil,
                                     onConversationKey: { conversationKey($0, room: room, threadRootID: nil) },
-                                    isPrimary: true
+                                    isPrimary: true,
+                                    inputDisabled: !localReady || !attachmentDrafts.ready,
+                                    topOverlay: AnyView(ToastHost(toasts: toasts)),
+                                    accessories: hasComposerAccessories(reply: reply, drafts: draftAddress)
+                                        ? AnyView(composerAccessories(reply: reply, drafts: draftAddress)) : nil
                                 )
                             }
-                            .disabled(!localReady || !attachmentDrafts.ready).id(
-                                "composer-\(composerGeneration)-\(room.id)"
-                            )
+                            .id("composer-\(composerGeneration)-\(room.id)")
                             .padding(.top, m.sp4).padding(.bottom, m.sp12)
                         }
-                    }
-                    // Floats above the composer, so a toast, reply or attachment notice never resizes it or moves the
-                    // timeline.
-                    .overlay(alignment: .top) {
-                        VStack(spacing: m.sp8) {
-                            ToastHost(toasts: toasts)
-                            composerAccessories(
-                                reply: replyTarget.flatMap {
-                                    $0.message.roomID == room.id
-                                        && ($0.threadID == nil || $0.threadID != threadRoot?.eventID) ? $0 : nil
-                                },
-                                drafts: editTarget == nil ? AttachmentDraftAddress(roomID: room.id) : nil)
-                        }.alignmentGuide(.top) { $0[.bottom] }
                     }
                     .conversationColumn(m, isThread: false).scrollEdge(.bottom, colors.canvas)
                     .covered(coverage.pane)
@@ -1258,13 +1313,22 @@ struct RootView: View {
         channelPanel = panel
     }
     private func channelHeader(_ room: ChatRoom) -> some View {
-        toolbar(grid: true) {
+        toolbar(grid: false) {
             ChannelHeader.Title(matrix: matrix, room: room) { headerAction($0, room: room) }
         } trailing: {
             // In the toolbar, so it never covers or moves a message.
             if matrix.hasLockedMessages {
-                Button("Unlock messages") { showRecovery = true }.buttonStyle(.secondary).controlSize(.small)
+                if matrix.verification.deviceStatus == .unverified {
+                    Menu("Verify device") {
+                        Button("Use another device") { Task { await matrix.verification.requestVerification() } }
+                        Button("Use recovery key…") { showRecovery = true }
+                    }
+                    .menuStyle(.button).buttonStyle(.secondary).controlSize(.small)
                     .disabled(matrix.isPreview)
+                } else {
+                    Button("Unlock messages") { showRecovery = true }.buttonStyle(.secondary).controlSize(.small)
+                        .disabled(matrix.isPreview)
+                }
             }
             ChannelHeader(
                 matrix: matrix, room: room, panel: Binding(get: { channelPanel }, set: openChannelPanel)
@@ -1325,20 +1389,32 @@ struct RootView: View {
                 onReport: { [identity = matrix.threadReadIdentity] in matrix.record($0, thread: identity) },
                 readKey: matrix.threadReadIdentity, onForward: startForward, onEditCaption: startCaption,
                 onOpenMedia: { [viewer] in viewer.open($0, surface: .thread(rootID: root.eventID)) },
-                inlineVideo: viewer.inlineVideo, contentAbove: $threadContentAbove, insets: insets
-            ).id(root.eventID)
+                inlineVideo: viewer.inlineVideo, scrollEdge: threadScrollEdge, insets: insets
+            ).id("\(root.eventID):\(matrix.threadSelection)")
         } header: {
             PaneHeader(title: "Thread", subtitle: room.writtenName, closeLabel: "Close thread", onClose: closeThread)
                 .scrollEdge(.top, colors.canvas)
         } footer: {
             VStack(spacing: 0) {
                 if room.canPostMessages == false {
-                    ComposerNotice(text: Self.cannotPost).padding(.top, m.sp4).padding(.bottom, m.sp16)
+                    let reply = replyTarget.flatMap { $0.belongsTo(roomID: room.id, threadID: root.eventID) ? $0 : nil }
+                    let draftAddress =
+                        editTarget == nil ? AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID) : nil
+                    ComposerNotice(text: Self.cannotPost).padding(.top, m.sp4).padding(.bottom, m.sp12)
+                        .overlay(alignment: .top) {
+                            if hasComposerAccessories(reply: reply, drafts: draftAddress) {
+                                composerAccessories(reply: reply, drafts: draftAddress)
+                                    .alignmentGuide(.top) { $0[.bottom] + m.sp8 }
+                            }
+                        }
                 } else if let target = editTarget, target.surface == .thread(rootID: root.eventID),
                     target.message.roomID == room.id
                 {
-                    editComposer(target, room: room, isThread: true).padding(.top, m.sp4).padding(.bottom, m.sp16)
+                    editComposer(target, room: room, isThread: true).padding(.top, m.sp4).padding(.bottom, m.sp12)
                 } else {
+                    let reply = replyTarget.flatMap { $0.belongsTo(roomID: room.id, threadID: root.eventID) ? $0 : nil }
+                    let draftAddress =
+                        editTarget == nil ? AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID) : nil
                     BindingScope({ threadDraftBinding(root.eventID, roomID: room.id) }) { text in
                         MessageComposer(
                             text: text, placeholder: "Reply…",
@@ -1377,19 +1453,21 @@ struct RootView: View {
                                 guard isCurrentComposer(context) else { return }
                                 matrix.errorMessage = error
                             },
-                            allowsSend: attachmentDrafts.canSend(
-                                AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID))
+                            allowsSend: !matrix.sessionExpired
+                                && attachmentDrafts.canSend(
+                                    AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID))
                                 && replyAllowsSend(roomID: room.id, threadID: root.eventID),
                             onDiscardAttachments: attachmentDrafts.discard,
                             requiresTextForSend: scopedReply(roomID: room.id, threadID: root.eventID) != nil,
                             onConversationKey: { conversationKey($0, room: room, threadRootID: root.eventID) },
-                            isThread: true
+                            isThread: true,
+                            inputDisabled: !localReady || !attachmentDrafts.ready || threadReadyID != root.eventID
+                                || matrix.selectedRoomID != root.roomID,
+                            accessories: hasComposerAccessories(reply: reply, drafts: draftAddress)
+                                ? AnyView(composerAccessories(reply: reply, drafts: draftAddress)) : nil
                         )
                     }
                     .id("thread-composer-\(composerGeneration)-\(root.eventID)").padding(.top, m.sp4)
-                    .disabled(
-                        !localReady || !attachmentDrafts.ready || threadReadyID != root.eventID
-                            || matrix.selectedRoomID != root.roomID)
                     let withFiles = hasQueuedFiles(roomID: room.id, threadID: root.eventID)
                     Toggle(
                         isOn: Binding(
@@ -1407,16 +1485,9 @@ struct RootView: View {
                             Text("Also send to \(Text(room.writtenName).fontWeight(.semibold))")
                         }
                     }.toggleStyle(.checkbox).font(m.font(.body)).foregroundStyle(colors.textSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.top, m.sp8).padding(.bottom, m.sp16)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.top, m.sp8).padding(.bottom, m.sp12)
                         .disabled(threadReadyID != root.eventID || withFiles)
                 }
-            }
-            .overlay(alignment: .top) {
-                composerAccessories(
-                    reply: replyTarget.flatMap { $0.belongsTo(roomID: room.id, threadID: root.eventID) ? $0 : nil },
-                    drafts: editTarget == nil
-                        ? AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID) : nil
-                ).alignmentGuide(.top) { $0[.bottom] }
             }
             .conversationColumn(m, isThread: true).scrollEdge(.bottom, colors.canvas)
         }
@@ -1525,9 +1596,11 @@ struct RootView: View {
                                     roomID: address.roomID, body: draftSummary(address),
                                     thread: address.threadRootID != nil)
                             }.buttonStyle(.row)
-                            Divider().overlay(colors.border).padding(.leading, m.sp24)
+                            Divider().overlay(colors.border).padding(.leading, m.sp20)
                         }
                     }
+                    .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
+                    .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -1594,7 +1667,9 @@ struct RootView: View {
                 Image(systemName: "chevron.right").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
             }
             Text(body).font(m.font(.body)).foregroundStyle(colors.textSecondary).lineLimit(3)
-        }.padding(m.sp24).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+        }.padding(.horizontal, m.sp20).padding(.vertical, m.sp16).frame(maxWidth: .infinity, alignment: .leading)
+            .modifier(FeedRowHover())
+            .contentShape(Rectangle())
     }
     private func openThreadDraft(_ address: ThreadDraftAddress) {
         let identity = composerIdentity
@@ -1742,11 +1817,18 @@ struct RootView: View {
         }.padding(.horizontal, m.sp16).padding(.vertical, m.sp8).frame(maxWidth: .infinity, alignment: .leading)
             .modifier(ComposerCard(colors: colors))
     }
+    private func hasComposerAccessories(reply: MessageReplyTarget?, drafts: AttachmentDraftAddress?) -> Bool {
+        if reply != nil { return true }
+        guard let drafts else { return false }
+        if !attachmentDrafts.ready { return true }
+        if localReady && attachmentDrafts.needsReview(drafts) { return true }
+        return localReady && attachmentDrafts.files[drafts, default: []].contains { $0.url == nil }
+    }
     private func composerAccessories(reply: MessageReplyTarget?, drafts: AttachmentDraftAddress?) -> some View {
-        VStack(alignment: .leading, spacing: m.sp4) {
+        VStack(alignment: .leading, spacing: m.sp8) {
             if let reply { replyBanner(reply) }
             if let drafts { attachmentDraftStatus(drafts) }
-        }.padding(.bottom, m.sp4)
+        }
     }
     private func startReply(_ message: ChatMessage, surface: MessageReplyTarget.Surface, session: UUID, timeline: UUID)
     {
@@ -1958,9 +2040,11 @@ struct RootView: View {
     }
     private func loadThread(
         _ thread: ChatMessage, generation: UUID, identity: ComposerIdentity, restoringReply: MessageReplyTarget?,
-        openedWith: Int?
+        openedWith: Int?, autoRetried: Bool = false
     ) async {
         let id = thread.roomID
+        let startedReconnect = matrix.reconnectCount
+        let startedOffline = matrix.connectionState != .running
         threadRoot = thread
         openingThreadID = thread.eventID
         do {
@@ -1978,6 +2062,14 @@ struct RootView: View {
         } catch {
             guard navigationGeneration == generation, composerIdentity == identity, matrix.selectedRoomID == id
             else { return }
+            if !autoRetried, matrix.connectionState == .running,
+                startedOffline || matrix.reconnectCount != startedReconnect
+            {
+                await loadThread(
+                    thread, generation: generation, identity: identity, restoringReply: restoringReply,
+                    openedWith: openedWith, autoRetried: true)
+                return
+            }
             openingThreadID = nil
             if let restoringReply, restoringReply.isCurrent(replyTarget, owner: replyOwner) {
                 replyOpening = false
@@ -2011,10 +2103,12 @@ struct RootView: View {
             openThread(message, openedWith: openedWith(message))
         }
     }
-    private func openThread(_ message: ChatMessage, openedWith: Int? = nil) {
+    private func openThread(_ message: ChatMessage, openedWith: Int? = nil, autoRetried: Bool = false) {
         guard pendingRoomID == nil, localReady,
             matrix.rooms.contains(where: { $0.id == message.roomID && $0.membership == "join" })
         else { return }
+        let startedReconnect = matrix.reconnectCount
+        let startedOffline = matrix.connectionState != .running
         let rootID = message.threadRootID ?? message.eventID
         let candidates = [message] + matrix.messages + matrix.threadMessages + matrix.threadFeed.roots
         if matrix.isPreview {
@@ -2027,6 +2121,10 @@ struct RootView: View {
         Performance.start(.threadOpen)
         cancelThreadOpen()
         cancelReply()
+        if let root = ThreadRootResolver.cached(roomID: message.roomID, rootID: rootID, candidates: candidates) {
+            openThread(root, room: root.roomID, openedWith: openedWith)
+            return
+        }
         navigationGeneration = UUID()
         let request = ThreadOpenRequest(
             message: message, owner: composerIdentity,
@@ -2050,6 +2148,12 @@ struct RootView: View {
             } catch {
                 guard isCurrentThreadOpen(request) else {
                     if pendingThreadOpen?.id == request.id { cancelThreadOpen() }
+                    return
+                }
+                if !autoRetried, matrix.connectionState == .running,
+                    startedOffline || matrix.reconnectCount != startedReconnect
+                {
+                    openThread(message, openedWith: openedWith, autoRetried: true)
                     return
                 }
                 threadOpenTask = nil
@@ -2314,7 +2418,9 @@ struct RootView: View {
                 target.write(value, current: editTarget, context: editContext, text: &editText)
             })
     }
-    private func editComposer(_ target: MessageEditTarget, room: ChatRoom, isThread: Bool = false) -> some View {
+    private func editComposer(
+        _ target: MessageEditTarget, room: ChatRoom, isThread: Bool = false, topOverlay: AnyView? = nil
+    ) -> some View {
         let context = composerContext
         return BindingScope({ editBinding(target, context: context) }) { text in
             MessageComposer(
@@ -2335,7 +2441,8 @@ struct RootView: View {
                 onError: { error in
                     guard isCurrentEdit(target, context: context) else { return }
                     matrix.errorMessage = error
-                }, allowsSend: isCurrentEdit(target, context: context), isThread: isThread
+                }, allowsSend: !matrix.sessionExpired && isCurrentEdit(target, context: context), isThread: isThread,
+                topOverlay: topOverlay
             )
         }
         .id("edit-\(composerGeneration)-\(target.id)").disabled(!isCurrentEdit(target, context: context))
@@ -2441,8 +2548,11 @@ struct RootView: View {
             try assertComposerContext(context)
             try assertComposerDestination(room: room, threadID: threadID)
             try await matrix.uploadFile(file, threadRootID: threadID, roomID: room.id)
-        } catch {
+        } catch let delivery as AttachmentDeliveryError {
             if isCurrentComposer(context) { await attachmentDrafts.didFail(file, at: address) }
+            throw delivery.underlying
+        } catch {
+            if isCurrentComposer(context) { await attachmentDrafts.didCancel(file, at: address) }
             throw error
         }
         if isCurrentComposer(context) { await attachmentDrafts.didSend(file, at: address) }
@@ -2645,7 +2755,20 @@ struct RootView: View {
     }
     /// Signing out asks first. The sample workspace has nothing to lose, so leaving it goes straight to sign-in.
     private func signOut() {
-        if matrix.isPreview { leavePreview() } else { logoutConfirmation = true }
+        if matrix.isPreview {
+            leavePreview()
+        } else if matrix.sessionExpired {
+            if SignOutWarning.forExpiredSession(
+                queuedCount: matrix.queuedSendCount, hasFailedSends: !matrix.failedSendRoomIDs.isEmpty,
+                isSoftLogout: matrix.sessionExpiredIsSoftLogout) != nil
+            {
+                logoutConfirmation = true
+            } else {
+                beginLogout()
+            }
+        } else {
+            logoutConfirmation = true
+        }
     }
     private func leavePreview() {
         matrix.exitPreview()
@@ -3012,6 +3135,12 @@ private struct SeenInputs: Equatable {
     }
 }
 
+/// Pairs a read target with the session's reconnect count so receipts that failed while disconnected re-attempt.
+private struct ReconnectReadKey<Target: Equatable>: Equatable {
+    let target: Target
+    let reconnect: Int
+}
+
 /// Marks what the reader can see as read. Apart from the window, so a new message reruns only these checks.
 private struct ReadTracking: View {
     let matrix: MatrixService
@@ -3022,10 +3151,19 @@ private struct ReadTracking: View {
     var body: some View {
         let context = inputs.readContext(matrix)
         let thread = inputs.threadReadContext(matrix)
+        let reconnect = matrix.reconnectCount
         Color.clear
             .onChange(of: context) { _, context in onReadContext(context) }
-            .task(id: ReadStatePolicy.automaticTarget(context, hold: inputs.readHold)) { await acknowledgeTimeline() }
-            .task(id: ThreadReadPolicy.target(thread)) { await acknowledgeThread() }
+            .task(
+                id: ReadStatePolicy.automaticTarget(context, hold: inputs.readHold).map {
+                    ReconnectReadKey(target: $0, reconnect: reconnect)
+                }
+            ) { await acknowledgeTimeline() }
+            .task(
+                id: ThreadReadPolicy.target(thread).map {
+                    ReconnectReadKey(target: $0, reconnect: reconnect)
+                }
+            ) { await acknowledgeThread() }
             // Activity takes what the reader has seen off its count, the messages that land in view too.
             .onChange(
                 of: SeenInputs(
@@ -3123,7 +3261,9 @@ private struct TitleSearch<Field: View>: View {
                 // Opened from the button, ⌘G or ⌘F: the field was not there to take the cursor, so it takes it now.
                 field().onAppear { if open { bar.focus() } }
             } else {
-                IconButton(symbol: "magnifyingglass", label: "Search", role: .body) { open = true }
+                ToolbarCapsule {
+                    IconButton(symbol: "magnifyingglass", label: "Search", role: .body) { open = true }
+                }
             }
         }
         .onChange(of: bar.focusRequests) { _, _ in if !fits { open = true } }
@@ -3170,24 +3310,29 @@ private struct ToolbarGrid: Layout {
 private struct ConnectionBanner: View {
     let matrix: MatrixService
     let onRetry: () -> Void
+    @EnvironmentObject private var appearance: AppearanceStore
     @State private var shown = false
     var body: some View {
-        let message = matrix.connectionErrorMessage
+        let notice = matrix.connectionErrorMessage
+        let text = ConnectionHealth.bannerText(notice: notice, queuedCount: matrix.queuedSendCount)
         ZStack {
-            if shown, let message {
-                // While a retry runs the notice itself says so, so the button steps aside.
+            if shown, let text {
                 Banner(
-                    text: message,
-                    symbol: matrix.connectionSymbol
+                    text: text,
+                    symbol: matrix.isRetryingConnection ? nil : matrix.connectionSymbol
                 ) {
-                    if matrix.canRetryConnection { Button("Retry", action: onRetry) }
+                    if matrix.isRetryingConnection {
+                        Text("Retrying…").foregroundStyle(appearance.colors.textSecondary)
+                    } else if matrix.canRetryConnection {
+                        Button("Retry", action: onRetry)
+                    }
                 }.transition(.opacity)
             }
         }
         .animation(Motion.overlay, value: shown)
-        .task(id: message != nil) {
+        .task(id: notice != nil) {
             shown = false
-            guard message != nil else { return }
+            guard notice != nil else { return }
             let start = ContinuousClock.now
             try? await Task.sleep(for: LoadingPresentation.connectionNoticeDelay)
             guard !Task.isCancelled else { return }
@@ -3199,10 +3344,14 @@ private struct ConnectionBanner: View {
 private struct ErrorBanner: View {
     let matrix: MatrixService
     var body: some View {
-        if let error = matrix.errorMessage {
-            Banner(
-                text: error, symbol: "exclamationmark.triangle.fill", onDismiss: { matrix.errorMessage = nil })
+        ZStack {
+            if let error = matrix.errorMessage {
+                Banner(
+                    text: error, symbol: "exclamationmark.triangle.fill", onDismiss: { matrix.errorMessage = nil }
+                ).transition(.opacity)
+            }
         }
+        .animation(Motion.overlay, value: matrix.errorMessage != nil)
     }
 }
 
@@ -3244,13 +3393,13 @@ private struct ViewerInvalidation: View {
     }
 }
 
-/// What lies outside a rounded rectangle within its square bounds: its four corners.
-private struct OutsideCorners: Shape {
-    let radius: CGFloat
-    func path(in rect: CGRect) -> Path {
-        var path = Path(rect)
-        path.addPath(RoundedRectangle(cornerRadius: radius).path(in: rect))
-        return path
+/// Drops stale edit, forward and caption flows when action context changes; on its own, so thread opens do not redraw
+/// the window.
+private struct MessageActionInvalidation: View {
+    let matrix: MatrixService
+    let onChange: () -> Void
+    var body: some View {
+        Color.clear.onChange(of: matrix.messageActionContext) { _, _ in onChange() }
     }
 }
 
@@ -3260,7 +3409,6 @@ private struct ComposerCard: ViewModifier {
     let colors: AppColors
     func body(content: Content) -> some View {
         content.background(colors.raised).clipShape(RoundedRectangle(cornerRadius: m.radiusLarge))
-            .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
             .elevation(.e2, cornerRadius: m.radiusLarge)
     }
 }

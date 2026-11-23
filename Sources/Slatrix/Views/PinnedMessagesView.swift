@@ -16,6 +16,7 @@ struct PinnedMessagesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            Divider().overlay(colors.border)
             if let error = service.errorMessage {
                 HStack {
                     InlineErrorView(message: error)
@@ -71,7 +72,7 @@ struct PinnedMessagesView: View {
                         Button {
                             profile(message)
                         } label: {
-                            Text(message.senderName).font(m.font(.body, .semibold))
+                            Text(message.senderName).font(m.font(.reading, .semibold))
                         }.buttonStyle(.row).linkCursor().help("View profile")
                         Text(message.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute()).font(
                             m.font(.subheadline)

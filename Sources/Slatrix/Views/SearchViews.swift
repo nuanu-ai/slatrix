@@ -34,9 +34,12 @@ struct SearchBarField: View {
     let recents: [String]
     let visited: [String]
     let onPick: (SearchSuggestion) -> Void
-    @FocusState private var focused: Bool
+    private enum FocusField: Hashable { case field, clear }
+    @FocusState private var focused: FocusField?
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
+
+    private var isFocused: Bool { focused != nil }
 
     private var items: [SearchSuggestion] {
         SearchSuggestions.items(query: bar.text, recents: recents, rooms: matrix.rooms, visited: visited)
@@ -48,34 +51,46 @@ struct SearchBarField: View {
         HStack(spacing: m.sp8) {
             Image(systemName: "magnifyingglass").font(m.font(.body)).foregroundStyle(colors.textSecondary)
                 .accessibilityHidden(true)
-            TextField(prompt, text: $bar.text).textFieldStyle(.plain).font(m.font(.body)).focused($focused)
+            TextField(prompt, text: $bar.text).textFieldStyle(.plain).font(m.font(.body))
+                .focused($focused, equals: .field)
                 .onKeyPress(.upArrow) { move(-1) }
                 .onKeyPress(.downArrow) { move(1) }
                 .onSubmit {
                     let items = items
                     if items.indices.contains(bar.selection) { onPick(items[bar.selection]) }
                 }
-                .onExitCommand {
-                    if bar.text.isEmpty { bar.close() } else { bar.text = "" }
-                }
+            if !bar.text.isEmpty {
+                IconButton(symbol: "xmark.circle.fill", label: "Clear search", role: .body, side: 20) {
+                    focused = .field
+                    bar.text = ""
+                }.focused($focused, equals: .clear).foregroundStyle(colors.textTertiary)
+            }
+        }
+        .onExitCommand {
+            if bar.text.isEmpty {
+                bar.close()
+            } else {
+                focused = .field
+                bar.text = ""
+            }
         }
         .padding(.horizontal, m.sp12).frame(height: m.control)
         .foregroundStyle(colors.textPrimary)
         .glass(colors.control, in: Capsule(), cornerRadius: m.control / 2)
-        .overlay { if focused { Capsule().strokeBorder(colors.accentFill, lineWidth: 1) } }
+        .overlay { if isFocused { Capsule().strokeBorder(colors.accentFill, lineWidth: 1) } }
         .onGeometryChange(for: CGRect.self) {
             $0.frame(in: .named(SearchBar.space))
         } action: {
             bar.frame = $0
         }
-        .onChange(of: focused) { _, focused in
-            if focused { bar.menuOpen = true } else { bar.close() }
+        .onChange(of: focused) { _, newFocus in
+            if newFocus != nil { bar.menuOpen = true } else { bar.close() }
         }
-        .onChange(of: bar.menuOpen) { _, open in if !open { focused = false } }
-        .onChange(of: bar.focusRequests) { _, _ in focused = true }
+        .onChange(of: bar.menuOpen) { _, open in if !open { focused = nil } }
+        .onChange(of: bar.focusRequests) { _, _ in focused = .field }
         .onChange(of: bar.text) { _, _ in
             bar.selection = 0
-            if focused { bar.menuOpen = true }
+            if isFocused { bar.menuOpen = true }
         }
     }
 
@@ -104,28 +119,33 @@ struct SearchMenu: View {
 
     var body: some View {
         let colors = appearance.colors
-        ZStack(alignment: .topLeading) {
-            if bar.menuOpen {
-                let items = SearchSuggestions.items(
-                    query: bar.text, recents: recents, rooms: matrix.rooms, visited: visited)
-                // A button, not a tap gesture, so the click outside lands however the window was activated.
-                Button(action: bar.close) { Color.clear.contentShape(Rectangle()) }.buttonStyle(.row)
-                    .focusable(false).accessibilityHidden(true).padding(.top, top)
-                if !items.isEmpty {
-                    let width = max(bar.frame.width, m(360))
-                    VStack(spacing: 0) {
-                        ForEach(Array(items.enumerated()), id: \.element) { index, item in
-                            row(item, selected: index == bar.selection)
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                if bar.menuOpen {
+                    let items = SearchSuggestions.items(
+                        query: bar.text, recents: recents, rooms: matrix.rooms, visited: visited)
+                    // A button, not a tap gesture, so the click outside lands however the window was activated.
+                    Button(action: bar.close) { Color.clear.contentShape(Rectangle()) }.buttonStyle(.row)
+                        .focusable(false).accessibilityHidden(true).padding(.top, top)
+                    if !items.isEmpty {
+                        let margin = m.sp8
+                        let available = max(0, proxy.size.width - 2 * margin)
+                        let width = min(max(bar.frame.width, m(360)), available)
+                        let x = max(margin, min(bar.frame.maxX - width, proxy.size.width - width - margin))
+                        VStack(spacing: 0) {
+                            ForEach(Array(items.enumerated()), id: \.element) { index, item in
+                                row(item, selected: index == bar.selection)
+                            }
                         }
+                        .padding(m(6)).frame(width: width)
+                        .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+                        .elevation(.e2, cornerRadius: m.radiusLarge)
+                        .offset(x: x, y: bar.frame.maxY + m.sp4)
                     }
-                    .padding(m(6)).frame(width: width)
-                    .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
-                    .elevation(.e2, cornerRadius: m.radiusLarge)
-                    .offset(x: bar.frame.maxX - width, y: bar.frame.maxY + m.sp4)
                 }
             }
+            .animation(Motion.overlay, value: bar.menuOpen)
         }
-        .animation(Motion.overlay, value: bar.menuOpen)
     }
 
     @ViewBuilder private func row(_ item: SearchSuggestion, selected: Bool) -> some View {
@@ -224,13 +244,13 @@ struct SearchResultsView: View {
                 Image(systemName: "magnifyingglass").font(m.font(.title3)).foregroundStyle(colors.textSecondary)
                 Text(query.text.isEmpty ? "Search" : query.text).font(m.font(.title3, .bold))
                     .foregroundStyle(colors.textPrimary).lineLimit(1).accessibilityAddTraits(.isHeader)
-            }.padding(.horizontal, m.sp24).frame(height: m.paneHeader)
+            }.padding(.horizontal, m.sp20).frame(height: m.paneHeader)
             TabBar(
                 tabs: [
                     .init(value: Tab.messages, title: "Messages"), .init(value: Tab.files, title: "Files"),
                     .init(value: Tab.channels, title: "Channels"), .init(value: Tab.people, title: "People"),
                 ], selection: $tab
-            ).padding(.horizontal, m.sp24)
+            ).padding(.horizontal, m.sp20)
             Divider().overlay(colors.border)
             switch tab {
             case .messages: messagesTab
@@ -251,7 +271,7 @@ struct SearchResultsView: View {
 
     private var messagesTab: some View {
         VStack(spacing: 0) {
-            filters.padding(.horizontal, m.sp24).padding(.vertical, m.sp12)
+            filters.padding(.horizontal, m.sp20).padding(.vertical, m.sp12)
             messageResults.frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider().overlay(colors.border)
             indexingFooter
@@ -342,17 +362,19 @@ struct SearchResultsView: View {
                         HStack(spacing: m.sp8) {
                             InlineErrorView(message: searchError)
                             Button("Try again") { retry += 1 }.buttonStyle(.textLink).disabled(searchBusy || paging)
-                        }.padding(.horizontal, m.sp24).padding(.top, m.sp12)
+                        }.padding(.horizontal, m.sp20).padding(.top, m.sp12)
                     }
                     ForEach(messages) { message in
                         MessageResultRow(
                             matrix: matrix, message: message, query: query, action: { onOpenMessage(message) })
-                        Divider().overlay(colors.border).padding(.horizontal, m.sp24)
+                        Divider().overlay(colors.border).padding(.horizontal, m.sp20)
                     }
                     if matrix.searchHasMore {
                         loadMoreButton.frame(maxWidth: .infinity).padding(.vertical, m.sp16)
                     }
                 }
+                .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
         }
     }
@@ -391,7 +413,7 @@ struct SearchResultsView: View {
                     .font(m.font(.subheadline, .medium)).disabled(indexBusy || matrix.isPreview)
             }
         }
-        .buttonStyle(.textLink).padding(.horizontal, m.sp24).padding(.vertical, m.sp12).background(colors.raised)
+        .buttonStyle(.textLink).padding(.horizontal, m.sp20).padding(.vertical, m.sp12).background(colors.raised)
     }
 
     private func search(_ run: Run) async {
@@ -439,7 +461,7 @@ struct SearchResultsView: View {
     private var filesTab: some View {
         let files = messages.filter { $0.attachment != nil }
         return VStack(spacing: 0) {
-            filters.padding(.horizontal, m.sp24).padding(.vertical, m.sp12)
+            filters.padding(.horizontal, m.sp20).padding(.vertical, m.sp12)
             if files.isEmpty && query.sdkQuery() != nil && (searchBusy || activeRun != run) {
                 SkeletonRows(interval: .searchLoading)
             } else if files.isEmpty {
@@ -464,7 +486,9 @@ struct SearchResultsView: View {
                         if matrix.searchHasMore {
                             loadMoreButton.frame(maxWidth: .infinity).padding(.vertical, m.sp16)
                         }
-                    }.padding(.horizontal, m.sp12).padding(.vertical, m.sp8)
+                    }.padding(.horizontal, m.sp8).padding(.vertical, m.sp8)
+                        .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
+                        .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -481,9 +505,11 @@ struct SearchResultsView: View {
                 LazyVStack(spacing: 0) {
                     ForEach(rooms) { room in
                         ChannelResultRow(matrix: matrix, room: room) { onOpenRoom(room.id) }
-                        Divider().overlay(colors.border).padding(.horizontal, m.sp24)
+                        Divider().overlay(colors.border).padding(.horizontal, m.sp20)
                     }
                 }
+                .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
         }
     }
@@ -513,7 +539,9 @@ struct SearchResultsView: View {
                                         ? ChatUser(id: person.id, name: person.name, avatarURL: person.avatarURL) : nil)
                             }
                         }
-                    }.padding(.horizontal, m.sp12).padding(.vertical, m.sp8)
+                    }.padding(.horizontal, m.sp8).padding(.vertical, m.sp8)
+                        .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
+                        .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -550,7 +578,8 @@ private struct MessageResultRow: View {
                     AvatarView(name: message.senderName, size: m.avatar, matrix: matrix, source: message.avatarURL)
                     VStack(alignment: .leading, spacing: m.sp2) {
                         HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
-                            Text(message.senderName).font(m.font(.reading, .bold)).foregroundStyle(colors.textPrimary)
+                            Text(message.senderName).font(m.font(.reading, .semibold)).foregroundStyle(
+                                colors.textPrimary)
                             Text(message.timestamp.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
                                 .font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                         }.lineLimit(1)
@@ -559,7 +588,7 @@ private struct MessageResultRow: View {
                     }
                 }
             }
-            .padding(.horizontal, m.sp24).padding(.vertical, m.sp12).frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, m.sp20).padding(.vertical, m.sp12).frame(maxWidth: .infinity, alignment: .leading)
             .background(hovering ? colors.hover : .clear)
         }
         .buttonStyle(.row).onHover { hovering = $0 }
@@ -602,12 +631,12 @@ private struct ChannelResultRow: View {
                         Text(room.name).font(m.font(.reading, .semibold)).foregroundStyle(colors.textPrimary)
                         if room.membership == "invite" { TagLabel(text: "Invited") }
                     }
-                    Text(room.topic.isEmpty ? "\(room.memberCount) members" : room.topic).font(m.font(.subheadline))
+                    Text(room.topic.isEmpty ? "\(room.memberCount) members" : room.topic).font(m.font(.caption))
                         .foregroundStyle(colors.textSecondary)
                 }.lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, m.sp24).frame(height: m.personRow + m.sp8)
+            .padding(.horizontal, m.sp20).frame(height: m.personRow + m.sp8)
             .background(hovering ? colors.hover : .clear)
         }
         .buttonStyle(.row).onHover { hovering = $0 }

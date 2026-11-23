@@ -62,6 +62,10 @@ final class ActionTimeline: Timeline, @unchecked Sendable {
     override func redactEvent(eventOrTransactionId: EventOrTransactionId, reason: String?) async throws {
         try await write("delete:\(MatrixMapping.identifier(eventOrTransactionId))")
     }
+    override func abortSend(itemId: EventOrTransactionId, target: SendTarget) async throws -> Bool {
+        try await write("abort:\(MatrixMapping.identifier(itemId))")
+        return true
+    }
     override func send(msg: RoomMessageEventContentWithoutRelation) async throws -> SendHandle {
         try await write("send")
         return SendHandle(noHandle: .init())
@@ -106,6 +110,7 @@ final class ActionRoom: Room, @unchecked Sendable {
     let linkRequests = Recorder<String>()
     private let lock = NSLock()
     private var isJoined = true
+    private var queueEnabled = true
     var links: [String: String] = [:]
     var failsLinks = false
     var encryption: EncryptionState = .encrypted
@@ -123,6 +128,8 @@ final class ActionRoom: Room, @unchecked Sendable {
     }
     override func id() -> String { identifier }
     override func membership() -> Membership { joined ? .joined : .left }
+    override func isSendQueueEnabled() -> Bool { lock.withLock { queueEnabled } }
+    override func enableSendQueue(enable: Bool) { lock.withLock { queueEnabled = enable } }
     override func isEncrypted() async -> Bool { encryption == .encrypted }
     override func roomInfo() async throws -> RoomInfo {
         SlatrixTests.roomInfo(id: identifier, membership: membership())
@@ -160,6 +167,7 @@ final class ActionClient: Client, @unchecked Sendable {
     }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
     override func getRoom(roomId: String) throws -> Room? { entries[roomId] }
+    override func session() throws -> Session { throw URLError(.userAuthenticationRequired) }
     override func rooms() -> [Room] { Array(entries.values) }
     override func spaceService() async -> SpaceService { FakeSpaceService() }
     override func addRecentEmoji(emoji: String) async throws { recentEmoji.append(emoji) }

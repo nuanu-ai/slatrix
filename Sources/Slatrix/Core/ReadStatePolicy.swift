@@ -71,6 +71,12 @@ struct ReadStateHold: Equatable {
         self.heldVisit = nil
     }
 
+    /// Reverses a provisional Mark unread hold when the server write fails, without touching a newer visit.
+    mutating func rollbackMarkUnread(_ context: ReadStateContext) {
+        guard let heldVisit, heldVisit == ReadStateVisit(context) else { return }
+        self.heldVisit = nil
+    }
+
     func blocks(_ context: ReadStateContext) -> Bool {
         guard let heldVisit else { return false }
         return heldVisit == ReadStateVisit(context)

@@ -18,6 +18,7 @@ struct SidebarView: View {
     var onPreferences: () -> Void
     var onProfile: () -> Void
     var onSignOut: () -> Void
+    var onReconnect: () -> Void = {}
     var onMarkUnread: (ChatRoom) -> Void
     var onMarkRead: (ChatRoom) -> Void
     var onInviteWorkspace: (String) -> Void
@@ -31,6 +32,7 @@ struct SidebarView: View {
     @Binding var collapsed: Set<String>
     /// Over the conversation in the drawer, where a frame theme's sidebar needs a panel of the frame's own.
     var floating = false
+    @State private var connectingTooLong = false
     @Environment(\.metrics) private var m
     @ThemeColors private var colors
     private var workspace: Workspace? { matrix.workspaces.first { $0.id == workspaceID } }
@@ -60,7 +62,7 @@ struct SidebarView: View {
                     Spacer()
                     IconButton(symbol: "sidebar.left", label: "Hide sidebar", role: .body, action: onHide)
                         .foregroundStyle(colors.textSecondary)
-                }.frame(height: m.paneHeader - (appearance.theme.framed ? 0 : m.sidebarInset))
+                }.frame(height: m.paneHeader - (appearance.theme.framed ? 0 : 2 * m.sidebarInset))
                     .background(WindowDragArea())
                 if route == .directMessages {
                     DirectMessagesColumn(
@@ -72,8 +74,7 @@ struct SidebarView: View {
                 }
             }
             .padding(.horizontal, m.sp8)
-            // The list fades out above you.
-            .fadeOut(bottom: m.sidebarFade)
+            Divider().overlay(colors.border)
             footer
         }
         .background(panel ? colors.sidebar : .clear)
@@ -107,7 +108,7 @@ struct SidebarView: View {
                     Button("New message…") { onCreate(.directMessage) }
                     Button("Browse people…") { route = .directory }
                 }
-            }.padding(.top, m.sp8).padding(.bottom, m.sidebarFade)
+            }.padding(.top, m.sp8).padding(.bottom, m.sp8)
         }.scrollIndicators(.hidden)
             .loadingInterval(.sidebarLoading, while: !matrix.roomsLoaded)
             .onChange(of: matrix.rooms.isEmpty, initial: true) { _, empty in
@@ -127,36 +128,57 @@ struct SidebarView: View {
             Spacer(minLength: m.sp2)
             IconButton(symbol: "square.and.pencil", label: "New message", role: .body) { onCreate(.directMessage) }
                 .foregroundStyle(colors.textSecondary)
-        }.padding(.leading, m.sp8).frame(height: m.control)
+        }.padding(.leading, m.sp2).frame(height: m.control)
     }
 
     /// You, with your status, Preferences and signing out; and an update or the preview's way out beside you.
     private var footer: some View {
-        HStack(spacing: m.sp8) {
+        let statusText = matrix.connectionStatusLabel
+        let tooltip = [statusText, matrix.homeserverHost].compactMap(\.self).joined(separator: " · ")
+        let canManuallyReconnect =
+            !matrix.isRetryingConnection && (matrix.connectionState == .running || matrix.canRetryConnection)
+        return HStack(spacing: m.sp8) {
             Menu {
                 Text(matrix.user?.name ?? "Slatrix")
                 if let id = matrix.user?.id { Text(id) }
                 Divider()
+                Text(statusText)
+                if let host = matrix.homeserverHost { Text(host) }
+                if !matrix.isPreview && !matrix.sessionExpired {
+                    Button("Reconnect", action: onReconnect).disabled(!canManuallyReconnect)
+                }
+                Divider()
                 Button("Profile", action: onProfile)
                 Button("Preferences…") { onPreferences() }
                 Divider()
-                Button(matrix.isPreview ? "Leave preview" : "Sign out", action: onSignOut)
+                Button(
+                    matrix.isPreview ? "Leave preview" : matrix.sessionExpired ? "Sign in again" : "Sign out",
+                    action: onSignOut)
             } label: {
                 HStack(spacing: m.sp8) {
                     AvatarView(
                         name: matrix.user?.name ?? "You", size: m.avatarFooter,
-                        presence: matrix.connectionLost ? .away : .active, matrix: matrix,
+                        presence: matrix.ownPresence(downLongEnough: connectingTooLong), matrix: matrix,
                         source: matrix.user?.avatarURL)
                     Text(matrix.user?.name ?? "You").font(m.font(.body)).foregroundStyle(colors.textPrimary)
                         .lineLimit(1)
                     Spacer(minLength: 0)
                 }.padding(.leading, m.sp8).frame(height: m(36)).modifier(SidebarRowFill(selected: false))
             }.menuStyle(.button).buttonStyle(.row).menuIndicator(.hidden)
+                .help(tooltip)
                 .accessibilityLabel("Your profile and status")
+                .accessibilityValue(statusText)
+                .task(id: matrix.connectionState == .running || matrix.isPreview) {
+                    connectingTooLong = false
+                    guard !matrix.isPreview, matrix.connectionState != .running else { return }
+                    try? await Task.sleep(for: LoadingPresentation.connectionNoticeDelay)
+                    guard !Task.isCancelled else { return }
+                    connectingTooLong = true
+                }
             if let accessory {
                 Button(accessory.title, action: accessory.action).buttonStyle(.primary).controlSize(.small)
             }
-        }.padding(.horizontal, m.sp8).padding(.bottom, m.sp8)
+        }.padding(.horizontal, m.sp8).padding(.vertical, m.sp8)
     }
 
     private func shortcut(_ item: AppRoute, label: String, badge: Int = 0, count: Int = 0) -> some View {
@@ -199,6 +221,7 @@ struct SidebarView: View {
                 room in
                 SidebarRoomRow(
                     room: room, selected: selectedID == room.id, hasDraft: draftRoomIDs.contains(room.id),
+                    hasSendFailure: matrix.failedSendRoomIDs.contains(room.id),
                     isPreview: matrix.isPreview, matrix: matrix, onSelect: onSelect, onMarkUnread: onMarkUnread,
                     onMarkRead: onMarkRead, onNotifications: onNotifications
                 ).equatable()
@@ -264,9 +287,11 @@ private struct SpacesMenu: View {
                     Circle().fill(colors.accentFill).frame(width: m(6), height: m(6))
                 }
             }
+            .padding(.horizontal, m(6)).frame(height: m.row)
+            .modifier(SidebarRowFill(selected: false))
         }
         // A borderless-button menu hands its label to AppKit, which moves the chevron before the name.
-        .menuStyle(.button).buttonStyle(.row).menuIndicator(.hidden).fixedSize()
+        .menuStyle(.button).buttonStyle(.row).menuIndicator(.hidden).fixedSize(horizontal: false, vertical: true)
         .help("Switch space")
         .accessibilityLabel(
             "\(current?.name ?? "All conversations"), switch space"
@@ -318,6 +343,7 @@ private struct SidebarRoomRow: View, Equatable {
     let room: ChatRoom
     let selected: Bool
     let hasDraft: Bool
+    let hasSendFailure: Bool
     let isPreview: Bool
     let matrix: MatrixService
     let onSelect: (String) -> Void
@@ -329,7 +355,7 @@ private struct SidebarRoomRow: View, Equatable {
 
     static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.room == rhs.room && lhs.selected == rhs.selected && lhs.hasDraft == rhs.hasDraft
-            && lhs.isPreview == rhs.isPreview
+            && lhs.hasSendFailure == rhs.hasSendFailure && lhs.isPreview == rhs.isPreview
     }
 
     var body: some View {
@@ -350,6 +376,10 @@ private struct SidebarRoomRow: View, Equatable {
                 Text(room.name).font(m.font(.body, badge != .none ? .semibold : .regular)).lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: m.sp2)
+                if hasSendFailure {
+                    Image(systemName: "exclamationmark.circle.fill").font(m.font(.subheadline))
+                        .foregroundStyle(colors.destructive).help("Message not delivered").accessibilityHidden(true)
+                }
                 if hasDraft { Image(systemName: "pencil").font(m.font(.subheadline)) }
                 if case .count(let count) = badge { CountBadge(text: count) }
             }
@@ -364,7 +394,8 @@ private struct SidebarRoomRow: View, Equatable {
             // Bold, dimming and the lock don't reach VoiceOver.
             .accessibilityValue(
                 [
-                    room.isPrivate && !room.isDirect ? "Private channel" : nil, badge != .none ? "Unread" : nil,
+                    room.isPrivate && !room.isDirect ? "Private channel" : nil,
+                    hasSendFailure ? "Message not delivered" : nil, badge != .none ? "Unread" : nil,
                     room.muted ? "Muted" : nil,
                 ].compactMap(\.self).joined(separator: ", ")
             )

@@ -8,6 +8,8 @@ import Testing
 private final class TypingRoom: Room, @unchecked Sendable {
     let gate = Gate()
     let notices = Recorder<Bool>()
+    let sendQueueHandles = Recorder<FakeCancellableHandle>()
+    var onSubscribeSendQueue: (@Sendable () async -> Void)?
     var joined = true
     var failTyping = false
     override func membership() -> Membership { joined ? .joined : .left }
@@ -16,11 +18,18 @@ private final class TypingRoom: Room, @unchecked Sendable {
         await gate.wait()
         if failTyping { throw MatrixServiceError.request("typing request failed") }
     }
+    override func subscribeToSendQueueUpdates(listener: SendQueueListener) async throws -> TaskHandle {
+        if let onSubscribeSendQueue { await onSubscribeSendQueue() }
+        let handle = FakeCancellableHandle(noHandle: .init())
+        sendQueueHandles.append(handle)
+        return handle
+    }
 }
 
 private final class RoomsClient: Client, @unchecked Sendable {
     var roomsByID: [String: Room] = [:]
     override func getRoom(roomId: String) throws -> Room? { roomsByID[roomId] }
+    override func session() throws -> Session { throw URLError(.userAuthenticationRequired) }
 }
 
 private final class SendTimeline: Timeline, @unchecked Sendable {
@@ -29,29 +38,43 @@ private final class SendTimeline: Timeline, @unchecked Sendable {
     override func send(msg: RoomMessageEventContentWithoutRelation) async throws -> SendHandle {
         sends.append("send")
         if failEnqueue { throw MatrixServiceError.request("enqueue failed") }
-        return SendHandle(noHandle: .init())
+        return FakeSendHandle("tx-send")
     }
     override func sendReply(msg: RoomMessageEventContentWithoutRelation, eventId: String) async throws -> SendHandle {
         sends.append("reply:\(eventId)")
         if failEnqueue { throw MatrixServiceError.request("enqueue failed") }
-        return SendHandle(noHandle: .init())
+        return FakeSendHandle("tx-reply")
     }
     let attachments = Recorder<AttachmentKind>()
     /// A video's poster as it is when it goes up; the upload removes it after.
     let posters = Recorder<Data>()
+    var failAttachmentEnqueue = false
+    var failAttachmentJoin = false
+    var attachmentJoinError: Error?
     override func sendAttachment(params: UploadParameters, attachment: AttachmentKind) throws
         -> SendAttachmentJoinHandle
     {
         attachments.append(attachment)
+        if failAttachmentEnqueue { throw MatrixServiceError.request("Unreadable attachment") }
         if case .video(_, .file(let path)?) = attachment, let poster = FileManager.default.contents(atPath: path) {
             posters.append(poster)
         }
-        return SentAttachment(noHandle: .init())
+        let error =
+            attachmentJoinError ?? (failAttachmentJoin ? MatrixServiceError.request("upload queue failed") : nil)
+        return SentAttachment(joinError: error)
     }
 }
 
 private final class SentAttachment: SendAttachmentJoinHandle, @unchecked Sendable {
-    override func join() async throws {}
+    let joinError: Error?
+    init(joinError: Error? = nil) {
+        self.joinError = joinError
+        super.init(noHandle: .init())
+    }
+    required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    override func join() async throws {
+        if let joinError { throw joinError }
+    }
 }
 
 private let roomID = "!original:example.org"
@@ -73,6 +96,8 @@ struct ComposerSendTests {
         service.selectedRoomID = roomID
         service.rooms = [ChatRoom(id: roomID, name: "Send")]
         configure(session)
+        service.applyConnection(
+            MatrixConnectionFeedback(state: .running, isRetrying: false, canRetry: false, errorMessage: nil))
     }
 
     private func configure(_ session: UUID) {
@@ -162,6 +187,118 @@ struct ComposerSendTests {
         #expect(main.attachments.all.isEmpty && thread.attachments.all.isEmpty)
     }
 
+    @Test("An attachment failure during handle.join throws AttachmentDeliveryError and does not bump sends")
+    func attachmentJoinFailureDoesNotBumpSends() async throws {
+        let scratch = try TemporaryDirectory()
+        let file = try scratch.file("notes.txt", Data("hello".utf8))
+        main.failAttachmentJoin = true
+        await #expect(throws: AttachmentDeliveryError.self) {
+            try await service.uploadFile(file, roomID: roomID)
+        }
+        #expect(service.sends[Conversation(roomID: roomID, threadRootID: nil)] == nil)
+    }
+
+    @Test("A pre-enqueue sendAttachment failure is not wrapped in AttachmentDeliveryError")
+    func preEnqueueAttachmentFailureIsNotDeliveryError() async throws {
+        let scratch = try TemporaryDirectory()
+        let file = try scratch.file("notes.txt", Data("hello".utf8))
+        main.failAttachmentEnqueue = true
+        do {
+            try await service.uploadFile(file, roomID: roomID)
+            Issue.record("Expected pre-enqueue failure to throw")
+        } catch is AttachmentDeliveryError {
+            Issue.record("Pre-enqueue failure must not trigger AttachmentDeliveryError ('Send anyway')")
+        } catch let error as MatrixServiceError {
+            #expect(error.localizedDescription == "Unreadable attachment")
+        }
+    }
+
+    @Test("Session expiry while awaiting SentEcho refuses enqueueing and cancels the echo subscription")
+    func sendMessageRefusesEnqueueIfSessionExpiresDuringSentEcho() async {
+        room.onSubscribeSendQueue = { [service] in
+            await MainActor.run { service.expireSessionForChecks() }
+        }
+        do {
+            try await service.sendMessage(
+                "Do not enqueue after expiry", threadRootID: "$root", roomID: roomID, alsoToChannel: true)
+            Issue.record("Expected expired session to refuse send after SentEcho subscription")
+        } catch let error as MatrixServiceError {
+            #expect(error.localizedDescription.contains("expired"))
+        } catch {
+            Issue.record("Expected MatrixServiceError, got \(error)")
+        }
+        #expect(thread.sends.all.isEmpty && main.sends.all.isEmpty)
+        #expect(room.sendQueueHandles.all.first?.isCancelled == true)
+    }
+
+    @Test("Session expiry during video preparation refuses enqueueing and cleans up the poster file")
+    func uploadFileRefusesEnqueueIfSessionExpiresDuringVideoPrepare() async throws {
+        let scratch = try TemporaryDirectory()
+        let clip = try scratch.file("clip.mov", Data("fake-video".utf8))
+        let poster = try scratch.file("poster.jpg", Data("jpeg".utf8))
+        let prepareGate = Gate()
+        prepareGate.arm()
+        service.prepareVideo = { _, mimetype, size in
+            await prepareGate.wait()
+            return (
+                VideoUpload.info(mimetype: mimetype, size: size, shown: nil, durationMillis: nil, poster: nil), poster
+            )
+        }
+
+        let uploading = Task { try await service.uploadFile(clip, roomID: roomID) }
+        #expect(await eventually { prepareGate.isWaiting })
+        service.expireSessionForChecks()
+        prepareGate.release()
+
+        do {
+            try await uploading.value
+            Issue.record("Expected expired session to refuse video upload after prepare")
+        } catch let error as MatrixServiceError {
+            #expect(error.localizedDescription.contains("expired"))
+        } catch {
+            Issue.record("Expected MatrixServiceError, got \(error)")
+        }
+        #expect(main.attachments.all.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: poster.path))
+    }
+
+    @Test("An unreadable staged attachment fails before sendAttachment without AttachmentDeliveryError")
+    func unreadableAttachmentFailsBeforeSendAttachment() async throws {
+        let scratch = try TemporaryDirectory()
+        let file = try scratch.file("secret.txt", Data("hello".utf8))
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: file.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path) }
+        do {
+            try await service.uploadFile(file, roomID: roomID)
+            Issue.record("Expected unreadable file to throw before sendAttachment")
+        } catch is AttachmentDeliveryError {
+            Issue.record("Unreadable file must fail before queueing without AttachmentDeliveryError")
+        } catch {
+            // Expected local file-read error.
+        }
+        #expect(main.attachments.all.isEmpty)
+    }
+
+    @Test("Unambiguous pre-enqueue RoomError from join is not wrapped in AttachmentDeliveryError")
+    func preEnqueueRoomErrorFromJoinIsNotDeliveryError() async throws {
+        let scratch = try TemporaryDirectory()
+        let file = try scratch.file("notes.txt", Data("hello".utf8))
+        main.attachmentJoinError = RoomError.InvalidAttachmentData(message: "ENOENT")
+        do {
+            try await service.uploadFile(file, roomID: roomID)
+            Issue.record("Expected InvalidAttachmentData to throw")
+        } catch is AttachmentDeliveryError {
+            Issue.record("InvalidAttachmentData is a pre-enqueue error and must not become AttachmentDeliveryError")
+        } catch let error as RoomError {
+            #expect(error == .InvalidAttachmentData(message: "ENOENT"))
+        }
+
+        main.attachmentJoinError = RoomError.FailedSendingAttachment(message: "timeout")
+        await #expect(throws: AttachmentDeliveryError.self) {
+            try await service.uploadFile(file, roomID: roomID)
+        }
+    }
+
     @Test("A send the SDK refuses to queue fails without being retried", arguments: [false, true])
     func enqueueFailure(threaded: Bool) async {
         let target = threaded ? thread : main
@@ -213,11 +350,21 @@ struct ComposerSendTests {
         #expect(room.notices.all.isEmpty)
     }
 
-    @Test("A typing failure in the current room is shown")
-    func currentFailureShown() async {
+    @Test(
+        "Typing notices are skipped whenever the connection is not running",
+        arguments: [MatrixConnectionState.idle, .connecting, .offline, .stopped, .failed])
+    func typingSkippedWhenNotRunning(state: MatrixConnectionState) async {
+        service.applyConnection(
+            MatrixConnectionFeedback(state: state, isRetrying: false, canRetry: true, errorMessage: nil))
+        await service.setTyping(true, roomID: roomID, sessionID: session)
+        #expect(room.notices.all.isEmpty && service.errorMessage == nil)
+    }
+
+    @Test("A typing failure never writes to the conversation error banner")
+    func typingFailureNeverSetsErrorBanner() async {
         room.failTyping = true
         await service.setTyping(true, roomID: roomID, sessionID: session)
-        #expect(service.errorMessage == "typing request failed")
+        #expect(room.notices.all == [true] && service.errorMessage == nil)
     }
 
     enum Change: CaseIterable { case room, session, cancellation }

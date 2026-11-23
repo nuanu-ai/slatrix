@@ -32,7 +32,7 @@ struct MessageRowTests {
             id: message.id,
             kind: .message(
                 TimelineMessageEntry(
-                    message: message, grouped: false, time: "10:00 AM", saved: false, pinned: false, canPin: false,
+                    message: message, grouped: false, time: "10:00 AM", saved: false, pinned: false,
                     highlighted: false, sendBusy: false)))
         return TimelineRow(entry: entry, hovered: hovered, context: context)
     }
@@ -136,5 +136,155 @@ struct MessageRowTests {
         // It draws once the loading delay has passed.
         #expect(await eventually { host.sizeThatFits(in: offered).height > 0 })
         #expect(host.sizeThatFits(in: offered).width <= offered.width)
+    }
+
+    @Test("Wait-status transitions (sending, reconnecting, blocked, pending edit) never change a row's height")
+    func waitStatusesKeepRowHeightStable() {
+        let sentHeight = height(message([]), width: 400)
+        var sending = message([])
+        sending.sendState = "sending"
+        for status: SendWaitStatus in [.sending, .waitingToReconnect, .blockedByEarlierFailure] {
+            let rowHeight = NSHostingView(
+                rootView: MessageRow(message: sending, own: true, sendWaitStatus: status).frame(width: 400)
+                    .environmentObject(AppearanceStore()).environment(\.metrics, m)
+            ).fittingSize.height
+            #expect(rowHeight == sentHeight, "Row height shifted for \(status)")
+        }
+
+        let groupedSent = NSHostingView(
+            rootView: MessageRow(message: message([]), grouped: true, own: true).frame(width: 400)
+                .environmentObject(AppearanceStore()).environment(\.metrics, m)
+        ).fittingSize.height
+        let groupedBlocked = NSHostingView(
+            rootView: MessageRow(message: sending, grouped: true, own: true, sendWaitStatus: .blockedByEarlierFailure)
+                .frame(width: 400).environmentObject(AppearanceStore()).environment(\.metrics, m)
+        ).fittingSize.height
+        #expect(groupedBlocked == groupedSent)
+
+        var editing = message([])
+        editing.pendingChange = .editing
+        let editingHeight = NSHostingView(
+            rootView: MessageRow(message: editing, own: true, sendWaitStatus: .savingEdit).frame(width: 400)
+                .environmentObject(AppearanceStore()).environment(\.metrics, m)
+        ).fittingSize.height
+        #expect(editingHeight == sentHeight)
+
+        // Compact density also keeps row height invariant across wait statuses, even near a wrap boundary.
+        let saved = UserDefaults.standard.object(forKey: "appearance.density")
+        defer { UserDefaults.standard.set(saved, forKey: "appearance.density") }
+        let compactAppearance = AppearanceStore()
+        compactAppearance.density = .compact
+        let compactSent = ChatMessage(
+            id: "$compact-wait", roomID: "!room:example.org", senderID: "@me:example.org", senderName: "Anna",
+            body: "Checking whether a compact sending indicator ever narrows this text enough to wrap a word",
+            timestamp: Date(timeIntervalSince1970: 1_800_000_000))
+        let compactSentHeight = NSHostingView(
+            rootView: MessageRow(message: compactSent, own: true, timeLabel: "10:00").frame(width: 340)
+                .environmentObject(compactAppearance).environment(\.metrics, m)
+        ).fittingSize.height
+        var compactPending = compactSent
+        compactPending.sendState = "sending"
+        for status: SendWaitStatus in [.sending, .waitingToReconnect, .blockedByEarlierFailure, .savingEdit] {
+            let h = NSHostingView(
+                rootView: MessageRow(
+                    message: compactPending, own: true, sendWaitStatus: status, timeLabel: "10:00"
+                ).frame(width: 340).environmentObject(compactAppearance).environment(\.metrics, m)
+            ).fittingSize.height
+            #expect(
+                abs(h - compactSentHeight) < 0.5,
+                "Compact height shifted for \(status): \(h) vs \(compactSentHeight)")
+        }
+    }
+
+    @Test("Compact density takes less vertical space than comfortable for both grouped bursts and distinct senders")
+    func compactIsShorterThanComfortable() {
+        let saved = UserDefaults.standard.object(forKey: "appearance.density")
+        defer { UserDefaults.standard.set(saved, forKey: "appearance.density") }
+        let base = Date(timeIntervalSince1970: 1_800_000_000)
+        let burst = (0..<5).map { i in
+            ChatMessage(
+                id: "$b\(i)", roomID: "!room:example.org", senderID: "@anna:example.org", senderName: "Anna",
+                body: "Follow-up message number \(i + 1)", timestamp: base.addingTimeInterval(Double(i) * 30))
+        }
+        let mixed = ["Anna", "Bo", "Cara", "Dan", "Eve"].enumerated().map { i, name in
+            ChatMessage(
+                id: "$m\(i)", roomID: "!room:example.org", senderID: "@\(name.lowercased()):example.org",
+                senderName: name, body: "Short reply from \(name)",
+                timestamp: base.addingTimeInterval(Double(i) * 30))
+        }
+        func totalHeight(_ messages: [ChatMessage], density: MessageDensity, groupedInCompact: Bool) -> CGFloat {
+            let appearance = AppearanceStore()
+            appearance.density = density
+            let rows = TimelineLayout.rows(
+                messages, unreadBoundaryEventID: nil, groups: density == .comfortable || groupedInCompact,
+                now: base, calendar: .current, locale: .current)
+            return rows.reduce(0) { sum, row in
+                guard case .message(let msg, let grouped, let time) = row.kind else { return sum }
+                let h = NSHostingView(
+                    rootView: MessageRow(message: msg, grouped: grouped, timeLabel: time)
+                        .frame(width: 600).environmentObject(appearance).environment(\.metrics, m)
+                ).fittingSize.height
+                return sum + h
+            }
+        }
+        let burstComfortable = totalHeight(burst, density: .comfortable, groupedInCompact: false)
+        let burstCompact = totalHeight(burst, density: .compact, groupedInCompact: false)
+        #expect(
+            burstCompact < burstComfortable,
+            "Compact burst (\(burstCompact)) must be shorter than comfortable (\(burstComfortable))")
+
+        let mixedComfortable = totalHeight(mixed, density: .comfortable, groupedInCompact: false)
+        let mixedCompact = totalHeight(mixed, density: .compact, groupedInCompact: false)
+        #expect(
+            mixedCompact < mixedComfortable,
+            "Compact mixed (\(mixedCompact)) must be shorter than comfortable (\(mixedComfortable))")
+    }
+
+    @Test("Compact mode gives attachments full row width regardless of sender name length")
+    func compactAttachmentsKeepFullWidth() {
+        let saved = UserDefaults.standard.object(forKey: "appearance.density")
+        defer { UserDefaults.standard.set(saved, forKey: "appearance.density") }
+        let appearance = AppearanceStore()
+        appearance.density = .compact
+        let matrix = MatrixService.scratch()
+        func rowHeight(senderName: String) -> CGFloat {
+            let attachment = MessageAttachment(
+                name: "chart.png", url: "mxc://example.org/chart", mimeType: "image/png", width: 800, height: 600)
+            let message = ChatMessage(
+                id: "$att-\(senderName)", roomID: "!room:example.org", senderID: "@a:example.org",
+                senderName: senderName, body: "chart.png", timestamp: Date(timeIntervalSince1970: 1_800_000_000),
+                kind: "m.image", attachment: attachment)
+            let view = AttachmentView(matrix: matrix, message: message, attachment: attachment)
+            return NSHostingView(
+                rootView: MessageRow(message: message, grouped: false, timeLabel: "10:00", attachment: view)
+                    .frame(width: 420).environmentObject(appearance).environment(\.metrics, m)
+            ).fittingSize.height
+        }
+        let shortName = rowHeight(senderName: "Bo")
+        let longName = rowHeight(senderName: "Alexandria Bartholomew-Wellington")
+        #expect(
+            abs(shortName - longName) < 1,
+            "Long sender name squeezed compact attachment: short=\(shortName) long=\(longName)")
+    }
+
+    @Test("Bookmarking a compact message does not narrow or rewrap its body text")
+    func compactBookmarkDoesNotRewrap() {
+        let saved = UserDefaults.standard.object(forKey: "appearance.density")
+        defer { UserDefaults.standard.set(saved, forKey: "appearance.density") }
+        let appearance = AppearanceStore()
+        appearance.density = .compact
+        let message = ChatMessage(
+            id: "$bm", roomID: "!room:example.org", senderID: "@a:example.org", senderName: "Anna",
+            body: "Checking whether saving this compact message ever narrows its body enough to push a word down",
+            timestamp: Date(timeIntervalSince1970: 1_800_000_000))
+        func height(saved: Bool) -> CGFloat {
+            NSHostingView(
+                rootView: MessageRow(message: message, grouped: false, isSaved: saved, timeLabel: "10:00")
+                    .frame(width: 340).environmentObject(appearance).environment(\.metrics, m)
+            ).fittingSize.height
+        }
+        let unsaved = height(saved: false)
+        let bookmarked = height(saved: true)
+        #expect(abs(unsaved - bookmarked) < 0.5, "Compact bookmark changed row height: \(unsaved) vs \(bookmarked)")
     }
 }

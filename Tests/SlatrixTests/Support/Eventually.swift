@@ -23,6 +23,7 @@ final class Gate: @unchecked Sendable {
     private let lock = NSLock()
     private var armed = false
     private var pending: [CheckedContinuation<Void, Never>] = []
+    var isArmed: Bool { lock.withLock { armed } }
     var isWaiting: Bool { lock.withLock { !pending.isEmpty } }
 
     func arm() { lock.withLock { armed = true } }

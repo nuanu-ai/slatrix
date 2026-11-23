@@ -484,4 +484,269 @@ struct ComposerHostedTests {
         }
         return false
     }
+
+    @Test("The composer matches the timeline's line spacing and text ink color")
+    func matchesTimelineTypography() throws {
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        let savedTheme = UserDefaults.standard.object(forKey: "appearance.theme")
+        defer {
+            UserDefaults.standard.set(savedMode, forKey: "appearance.mode")
+            UserDefaults.standard.set(savedTheme, forKey: "appearance.theme")
+        }
+        let appearance = AppearanceStore()
+        appearance.mode = .light
+        appearance.theme = .sand
+        let draft = Draft("First line<br>Second line")
+        let m = Metrics(zoom: 1)
+        let hosting = NSHostingView(
+            rootView: AnyView(
+                MessageComposer(
+                    text: Binding(get: { draft.text }, set: { draft.text = $0 }), placeholder: "Message #team",
+                    members: [], onSend: { _, _ in }, onTyping: { _ in }
+                ).frame(width: 360).environmentObject(appearance).environment(\.metrics, m)))
+        let window = offscreenWindow(NSSize(width: 400, height: 400))
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        window.contentView = hosting
+        hosting.layoutSubtreeIfNeeded()
+        let view = try editor(in: hosting)
+        let attrs = try #require(view.textStorage?.attributes(at: 0, effectiveRange: nil))
+        let paragraph = try #require(attrs[.paragraphStyle] as? NSParagraphStyle)
+        let font = try #require(attrs[.font] as? NSFont)
+        #expect(
+            abs(font.pointSize - m.size(.reading)) < 0.1, "composer=\(font.pointSize) vs reading=\(m.size(.reading))")
+        let timeline = NativeSelectableMessageText.attributed(
+            [MessageBodyRun(text: "First line\nSecond line")], fontSize: Double(m.size(.reading)),
+            textColor: NSColor(appearance.colors.textBody), linkColor: NSColor(appearance.colors.accent))
+        let timelineParagraph = try #require(
+            timeline.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
+        #expect(
+            abs(paragraph.lineSpacing - timelineParagraph.lineSpacing) < 0.1,
+            "composer=\(paragraph.lineSpacing) vs timeline=\(timelineParagraph.lineSpacing)")
+        let ink = try #require((attrs[.foregroundColor] as? NSColor)?.usingColorSpace(.sRGB))
+        let expected = try #require(NSColor(appearance.colors.textBody).usingColorSpace(.sRGB))
+        #expect(
+            abs(ink.redComponent - expected.redComponent) < 0.02
+                && abs(ink.greenComponent - expected.greenComponent) < 0.02
+                && abs(ink.blueComponent - expected.blueComponent) < 0.02,
+            "Expected theme textBody ink, got \(ink) vs \(expected)")
+    }
+
+    @Test("The formatting toggle opens the formatting bar without requiring a text selection")
+    func persistentFormattingToggle() async throws {
+        _ = NSApplication.shared
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+        let (hosting, window) = host(Fixture())
+        defer { close(window) }
+        #expect(await eventually { !accessible("Formatting", in: hosting).isEmpty })
+        let toggle = try #require(accessible("Formatting", in: hosting).first)
+        #expect(accessible("Bold", in: hosting).isEmpty)
+        _ = toggle.accessibilityPerformPress?()
+        #expect(await eventually { !accessible("Bold", in: hosting).isEmpty })
+    }
+
+    @Test("The inline formatting bar fits within the minimum 248 pt thread composer width without overflowing")
+    func inlineFormattingBarFitsMinimumThreadWidth() async throws {
+        _ = NSApplication.shared
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+        let draft = Draft()
+        let (hosting, window) = host(
+            MessageComposer(
+                text: Binding(get: { draft.text }, set: { draft.text = $0 }), placeholder: "Reply",
+                members: [], onSend: { _, _ in }, onTyping: { _ in }
+            ).frame(width: 248))
+        defer { close(window) }
+        #expect(await eventually { !accessible("Formatting", in: hosting).isEmpty })
+        let toggle = try #require(accessible("Formatting", in: hosting).first)
+        _ = toggle.accessibilityPerformPress?()
+        #expect(await eventually { !accessible("Bold", in: hosting).isEmpty })
+        hosting.layoutSubtreeIfNeeded()
+        func allViews(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(allViews) }
+        let editorScroll = try editor(in: hosting).enclosingScrollView
+        let barScroll = try #require(
+            allViews(hosting).compactMap { $0 as? NSScrollView }.first { $0 !== editorScroll })
+        let barFrame = barScroll.convert(barScroll.bounds, to: hosting)
+        let composerLeft = (hosting.bounds.width - 248) / 2
+        let composerRight = composerLeft + 248
+        #expect(
+            barFrame.width <= 248.5 && barFrame.minX >= composerLeft - 0.5 && barFrame.maxX <= composerRight + 0.5,
+            "Formatting bar ScrollView overflowed 248 pt composer: \(barFrame) vs [\(composerLeft), \(composerRight)]")
+        #expect(
+            hosting.fittingSize.width <= 248.5,
+            "Inline formatting bar overflowed 248 pt thread width: \(hosting.fittingSize.width)")
+    }
+
+    @Test("Disabling composer input leaves reply Retry and Cancel buttons interactive")
+    func disabledInputKeepsReplyAccessoriesInteractive() async throws {
+        _ = NSApplication.shared
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+        let draft = Draft()
+        var retried = false
+        var cancelled = false
+        let (hosting, window) = host(
+            VStack {
+                Spacer()
+                MessageComposer(
+                    text: Binding(get: { draft.text }, set: { draft.text = $0 }), placeholder: "Reply",
+                    members: [], onSend: { _, _ in }, onTyping: { _ in }, inputDisabled: true,
+                    accessories: AnyView(
+                        HStack {
+                            Button("Retry") { retried = true }.buttonStyle(.textLink)
+                            Button("Cancel reply") { cancelled = true }.buttonStyle(.row)
+                        }.frame(maxWidth: .infinity, minHeight: 36)))
+            }.frame(width: 360, height: 320))
+        defer { close(window) }
+        func allViews(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(allViews) }
+        let view = try #require(allViews(hosting).compactMap { $0 as? NSTextView }.first)
+        #expect(!view.isEditable)
+        #expect(await eventually { !accessible("Retry", in: hosting).isEmpty })
+        let retry = try #require(accessible("Retry", in: hosting).first)
+        let cancel = try #require(accessible("Cancel reply", in: hosting).first)
+        #expect(retry.isAccessibilityEnabled?() == true)
+        #expect(cancel.isAccessibilityEnabled?() == true)
+        _ = retry.accessibilityPerformPress?()
+        _ = cancel.accessibilityPerformPress?()
+        #expect(await eventually { retried && cancelled })
+    }
+
+    @Test("Jump to recent stays above floating composer accessories without overlapping them")
+    func jumpToRecentClearsComposerAccessories() async throws {
+        _ = NSApplication.shared
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+        let matrix = MatrixService.scratch()
+        let room = ChatRoom(id: "!jump:example.org", name: "general")
+        let messages = (0..<6).map { i in
+            ChatMessage(
+                id: "$m\(i)", roomID: room.id, senderID: "@alice:example.org", senderName: "Alice",
+                body: "Message \(i)", timestamp: Date(timeIntervalSince1970: 1_800_000_000 + Double(i) * 60))
+        }
+        matrix.rooms = [room]
+        matrix.selectedRoomID = room.id
+        matrix.messages = messages
+        matrix.focusedEventID = messages.first?.id
+        let draft = Draft()
+        let members = [
+            ChatUser(id: "@alice:example.org", name: "Alice"),
+            ChatUser(id: "@alex:example.org", name: "Alex"),
+        ]
+        let (hosting, window) = host(
+            TimelineUnderBars { insets in
+                TimelineView(
+                    matrix: matrix, room: room, savedIDs: [], onThread: { _ in }, onReply: { _ in }, onEdit: { _ in },
+                    onSave: { _ in }, insets: insets)
+            } header: {
+                Color.clear.frame(height: 44)
+            } footer: {
+                MessageComposer(
+                    text: Binding(get: { draft.text }, set: { draft.text = $0 }), placeholder: "Message #general",
+                    members: members, onSend: { _, _ in }, onTyping: { _ in },
+                    accessories: AnyView(
+                        HStack {
+                            Text("Replying to Alice")
+                            Spacer()
+                            Button("Cancel reply") {}.buttonStyle(.row)
+                        }.frame(maxWidth: .infinity, minHeight: 44))
+                ).conversationRow(Metrics(zoom: 1), isThread: false)
+            }
+            .frame(width: 900, height: 500))
+        defer { close(window) }
+        #expect(
+            await eventually(timeout: .seconds(10)) {
+                !accessible("Jump to recent", in: hosting).isEmpty && !accessible("Cancel reply", in: hosting).isEmpty
+            })
+        let jump = try #require(accessible("Jump to recent", in: hosting).first)
+        let banner = try #require(accessible("Cancel reply", in: hosting).first)
+        #expect(
+            await eventually(timeout: .seconds(5)) {
+                let jumpFrame = jump.accessibilityFrame?() ?? .zero
+                let bannerFrame = banner.accessibilityFrame?() ?? .zero
+                return !jumpFrame.isEmpty && !bannerFrame.isEmpty && !jumpFrame.intersects(bannerFrame)
+                    && jumpFrame.minY >= bannerFrame.maxY - 1
+            })
+        // Opening mention suggestions above the banner lifts Jump to recent above the whole floating stack too.
+        let view = try editor(in: hosting)
+        window.makeFirstResponder(view)
+        type(view, "@Al")
+        #expect(await eventually(timeout: .seconds(5)) { !accessible("Alice", in: hosting).isEmpty })
+        let suggestion = try #require(accessible("Alice", in: hosting).first)
+        #expect(
+            await eventually(timeout: .seconds(5)) {
+                let jumpFrame = jump.accessibilityFrame?() ?? .zero
+                let suggestionFrame = suggestion.accessibilityFrame?() ?? .zero
+                return !jumpFrame.isEmpty && !suggestionFrame.isEmpty && !jumpFrame.intersects(suggestionFrame)
+                    && jumpFrame.minY >= suggestionFrame.maxY - 1
+            })
+    }
+
+    @Test("Mention suggestions stack cleanly above RootView composer banners without overlapping")
+    func overlaysNeverCollide() async throws {
+        _ = NSApplication.shared
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+        let local = try TemporaryDirectory()
+        let sample = local.url.appendingPathComponent("report.txt")
+        try Data("hello".utf8).write(to: sample)
+        let vaultKey: @Sendable (String) async throws -> Data = { _ in Data(repeating: 0x5a, count: 32) }
+        let store = ProtectedLocalStateStore(directory: local.url, keyProvider: vaultKey)
+        let files = AttachmentDraftStore(
+            directory: AttachmentDraftStore.directory(in: local.url), keyProvider: vaultKey)
+        let room = FakeOpenRoom("!overlay:example.org", cached: [])
+        room.memberList = [
+            roomMember("@alice:example.org", name: "Alice"),
+            roomMember("@alex:example.org", name: "Alex"),
+        ]
+        let address = AttachmentDraftAddress(roomID: room.id())
+        let access = try await files.open(accountID: "@me:example.org")
+        _ = try await files.save(urls: [sample], address: address, access: access, revision: 1)
+        try await files.markSending(url: sample, address: address, access: access, revision: 2)
+        await files.close(access: access)
+
+        let matrix = MatrixService.scratch()
+        matrix.configureRoomOpenForChecks(
+            client: FakeClient(rooms: [room]), roomList: FakeRoomListService(),
+            user: ChatUser(id: "@me:example.org", name: "Me"))
+        matrix.status = .ready
+        matrix.rooms = [ChatRoom(id: room.id(), name: "team")]
+        matrix.roomsLoaded = true
+        UserDefaults.standard.removeObject(forKey: "room.@me:example.org")
+        let hosting = NSHostingView(
+            rootView: AnyView(
+                RootView(matrix: matrix, localStore: store, attachmentDrafts: files)
+                    .environmentObject(AppearanceStore())
+                    .environment(\.metrics, Metrics(zoom: 1))))
+        let window = offscreenWindow(NSSize(width: 1_000, height: 700), key: true)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer { close(window) }
+
+        await matrix.selectRoom(room.id())
+        #expect(
+            await eventually(timeout: .seconds(10)) {
+                hosting.layoutSubtreeIfNeeded()
+                return matrix.members.count == 2 && !accessible("Send anyway", in: hosting).isEmpty
+                    && (try? editor(in: hosting).isEditable) == true
+            })
+        let view = try editor(in: hosting)
+        window.makeFirstResponder(view)
+        type(view, "@Al")
+        #expect(await eventually(timeout: .seconds(5)) { !accessible("Alice", in: hosting).isEmpty })
+        let banner = try #require(accessible("Send anyway", in: hosting).first)
+        let suggestion = try #require(accessible("Alice", in: hosting).first)
+        let bannerFrame = banner.accessibilityFrame?() ?? .zero
+        let suggestionFrame = suggestion.accessibilityFrame?() ?? .zero
+        #expect(!bannerFrame.isEmpty && !suggestionFrame.isEmpty)
+        #expect(
+            !bannerFrame.intersects(suggestionFrame), "banner=\(bannerFrame) overlaps suggestion=\(suggestionFrame)")
+        #expect(suggestionFrame.minY >= bannerFrame.maxY - 1, "suggestion=\(suggestionFrame) banner=\(bannerFrame)")
+
+        // Losing posting permission replaces the composer with ComposerNotice while keeping draft recovery reachable.
+        matrix.rooms[0].canPostMessages = false
+        #expect(await eventually(timeout: .seconds(5)) { !accessible("Send anyway", in: hosting).isEmpty })
+    }
 }

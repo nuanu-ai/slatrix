@@ -24,4 +24,11 @@ enum ConnectionHealth: String, Codable {
         }
     }
     var notice: String? { self == .connected || self == .paused ? nil : label }
+
+    static func bannerText(notice: String?, queuedCount: Int) -> String? {
+        guard let notice else { return nil }
+        guard queuedCount > 0 else { return notice }
+        let noun = queuedCount == 1 ? "message" : "messages"
+        return "\(notice) · \(queuedCount) \(noun) will send when you reconnect"
+    }
 }
