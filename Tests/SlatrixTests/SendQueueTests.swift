@@ -304,11 +304,12 @@ struct SendQueueStaleMessageTests {
         #expect(service.displayedSendFailure(for: key) != nil)
     }
 
-    @Test("Offline cancel prompt does not falsely warn that the message may already have been delivered")
+    @Test("Offline cancel prompt is truthful without over-promising that the message never reached the server")
     func cancelPromptCopy() {
         let offline = SendCancelPrompt.copy(failed: false, offline: true)
         #expect(!offline.message.contains("already have been delivered"))
-        #expect(offline.message.contains("offline"))
+        #expect(!offline.message.contains("hasn’t been sent yet"))
+        #expect(offline.message.contains("offline") && offline.message.contains("reconnect"))
 
         let online = SendCancelPrompt.copy(failed: false, offline: false)
         #expect(online.message.contains("already have been delivered"))

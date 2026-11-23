@@ -49,4 +49,28 @@ struct IdentityGatePolicyTests {
         #expect(!IdentityGatePolicy.shouldPersistSkip(isOnline: true, identity: .unavailable))
         #expect(IdentityGatePolicy.shouldPersistSkip(isOnline: true, identity: .present))
     }
+
+    @Test("Transient identity lookup failures retry with bounded backoff until a definite result arrives")
+    func transientLookupFailureRetriesWithBackoff() async {
+        var responses: [Bool?] = [nil, nil, true]
+        var slept: [Duration] = []
+        let resolved = await IdentityGatePolicy.resolveIdentity(
+            delays: [.seconds(2), .seconds(5), .seconds(15)],
+            lookup: { responses.removeFirst() },
+            sleep: { slept.append($0) })
+        #expect(resolved == .present && slept == [.seconds(2), .seconds(5)])
+
+        var alwaysFailing: [Bool?] = [nil, nil, nil]
+        var exhaustedSleeps: [Duration] = []
+        let unavailable = await IdentityGatePolicy.resolveIdentity(
+            delays: [.seconds(2), .seconds(5)],
+            lookup: { alwaysFailing.removeFirst() },
+            sleep: { exhaustedSleeps.append($0) })
+        #expect(unavailable == .unavailable && exhaustedSleeps == [.seconds(2), .seconds(5)])
+
+        var absentSleeps: [Duration] = []
+        let absent = await IdentityGatePolicy.resolveIdentity(
+            delays: [.seconds(2)], lookup: { false }, sleep: { absentSleeps.append($0) })
+        #expect(absent == .absent && absentSleeps.isEmpty)
+    }
 }

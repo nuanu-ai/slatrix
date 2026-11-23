@@ -9,6 +9,7 @@ struct IdentityGate<Content: View>: View {
     var isOnline = true
     /// Incremented on reconnect so a lookup that skipped or failed while offline retries once connected.
     var retryToken = 0
+    var lookupRetryDelays: [Duration] = IdentityGatePolicy.retryDelays
     let hasIdentity: () async -> Bool?
     let onRecovery: () -> Void
     /// Whether the prompt lies over the content.
@@ -42,9 +43,9 @@ struct IdentityGate<Content: View>: View {
                     identity = .unavailable
                     return
                 }
-                let result = await hasIdentity()
+                let resolved = await IdentityGatePolicy.resolveIdentity(delays: lookupRetryDelays, lookup: hasIdentity)
                 guard !Task.isCancelled else { return }
-                identity = result.map { $0 ? .present : .absent } ?? .unavailable
+                identity = resolved
             }
     }
 

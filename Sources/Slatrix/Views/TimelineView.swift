@@ -660,10 +660,8 @@ struct MessageRow: View {
                         if isSaved {
                             Image(systemName: "bookmark.fill").font(m.font(.subheadline)).foregroundStyle(colors.accent)
                         }
-                    }.overlay(alignment: .trailing) {
                         if let status = effectiveWaitStatus {
-                            SendingClock(since: message.timestamp, status: status)
-                                .padding(.leading, m.sp8).frame(width: 0, alignment: .leading)
+                            SendingClock(since: message.timestamp, status: status, showsBlockedLabel: true)
                         }
                     }
                 }
@@ -696,10 +694,6 @@ struct MessageRow: View {
                             count: count, lastReply: message.lastReply, avatar: replierAvatar,
                             prepare: actions.prepareThread, action: actions.openReplies
                         ).padding(.top, m.sp4)
-                    }
-                    if pendingSend, sendFailure == nil, effectiveWaitStatus == .blockedByEarlierFailure {
-                        Label(SendWaitStatus.blockedByEarlierFailure.label, systemImage: "clock")
-                            .font(m.font(.subheadline)).foregroundStyle(colors.textSecondary).padding(.top, m.sp2)
                     }
                     if pendingSend, let failure = sendFailure {
                         VStack(alignment: .leading, spacing: m.sp4) {
@@ -765,17 +759,20 @@ struct MessageRow: View {
     }
 }
 
-/// Slack's clock for a send still going after a few seconds. It always takes its space, so the row never moves for it.
+/// Slack's clock for a send still going after a few seconds. Lives inline on the header or gutter so a wait-status
+/// transition never changes the row's height.
 private struct SendingClock: View {
     let since: Date
     let status: SendWaitStatus
+    var showsBlockedLabel = false
     @State private var shown: Bool
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
 
-    init(since: Date, status: SendWaitStatus) {
+    init(since: Date, status: SendWaitStatus, showsBlockedLabel: Bool = false) {
         self.since = since
         self.status = status
+        self.showsBlockedLabel = showsBlockedLabel
         // A message that has been sending a while, or is waiting on reconnect or an earlier failure, shows at once.
         _shown = State(initialValue: status.showsImmediately || Self.shows(since))
     }
@@ -786,15 +783,23 @@ private struct SendingClock: View {
 
     var body: some View {
         let visible = status.showsImmediately || shown
-        Image(systemName: "clock").font(m.font(.subheadline)).foregroundStyle(appearance.colors.textSecondary)
-            .opacity(visible ? 1 : 0).help(status.label).accessibilityHidden(!visible).accessibilityLabel(status.label)
-            .task(id: "\(since.timeIntervalSinceReferenceDate)|\(status.showsImmediately)") {
-                shown = status.showsImmediately || Self.shows(since)
-                guard !shown else { return }
-                let left = LoadingPresentation.sendingClockDelay - .seconds(Date().timeIntervalSince(since))
-                try? await Task.sleep(for: left)
-                if !Task.isCancelled { shown = status.showsImmediately || Self.shows(since) }
+        let iconColor = status == .blockedByEarlierFailure ? appearance.colors.warning : appearance.colors.textSecondary
+        HStack(alignment: .firstTextBaseline, spacing: m.sp4) {
+            Image(systemName: "clock").foregroundStyle(iconColor)
+            if showsBlockedLabel && status == .blockedByEarlierFailure {
+                Text(status.label).foregroundStyle(appearance.colors.textSecondary).lineLimit(1).truncationMode(.tail)
             }
+        }
+        .font(m.font(.subheadline))
+        .opacity(visible ? 1 : 0).help(status.label).accessibilityHidden(!visible)
+        .accessibilityElement(children: .ignore).accessibilityLabel(status.label)
+        .task(id: "\(since.timeIntervalSinceReferenceDate)|\(status.showsImmediately)") {
+            shown = status.showsImmediately || Self.shows(since)
+            guard !shown else { return }
+            let left = LoadingPresentation.sendingClockDelay - .seconds(Date().timeIntervalSince(since))
+            try? await Task.sleep(for: left)
+            if !Task.isCancelled { shown = status.showsImmediately || Self.shows(since) }
+        }
     }
 }
 

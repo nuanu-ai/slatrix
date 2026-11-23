@@ -138,25 +138,31 @@ struct MessageRowTests {
         #expect(host.sizeThatFits(in: offered).width <= offered.width)
     }
 
-    @Test("A message waiting on an earlier failed send shows why it is blocked; a pending edit keeps its row height")
-    func blockedAndPendingEditRowsMeasure() {
+    @Test("Wait-status transitions (sending, reconnecting, blocked, pending edit) never change a row's height")
+    func waitStatusesKeepRowHeightStable() {
+        let sentHeight = height(message([]), width: 400)
         var sending = message([])
         sending.sendState = "sending"
-        let normalHeight = NSHostingView(
-            rootView: MessageRow(message: sending, own: true, sendWaitStatus: .sending).frame(width: 400)
+        for status: SendWaitStatus in [.sending, .waitingToReconnect, .blockedByEarlierFailure] {
+            let rowHeight = NSHostingView(
+                rootView: MessageRow(message: sending, own: true, sendWaitStatus: status).frame(width: 400)
+                    .environmentObject(AppearanceStore()).environment(\.metrics, m)
+            ).fittingSize.height
+            #expect(rowHeight == sentHeight, "Row height shifted for \(status)")
+        }
+
+        let groupedSent = NSHostingView(
+            rootView: MessageRow(message: message([]), grouped: true, own: true).frame(width: 400)
                 .environmentObject(AppearanceStore()).environment(\.metrics, m)
         ).fittingSize.height
-        let blockedHeight = NSHostingView(
-            rootView: MessageRow(message: sending, own: true, sendWaitStatus: .blockedByEarlierFailure).frame(
-                width: 400
-            )
-            .environmentObject(AppearanceStore()).environment(\.metrics, m)
+        let groupedBlocked = NSHostingView(
+            rootView: MessageRow(message: sending, grouped: true, own: true, sendWaitStatus: .blockedByEarlierFailure)
+                .frame(width: 400).environmentObject(AppearanceStore()).environment(\.metrics, m)
         ).fittingSize.height
-        #expect(blockedHeight > normalHeight)
+        #expect(groupedBlocked == groupedSent)
 
         var editing = message([])
         editing.pendingChange = .editing
-        let sentHeight = height(message([]), width: 400)
         let editingHeight = NSHostingView(
             rootView: MessageRow(message: editing, own: true, sendWaitStatus: .savingEdit).frame(width: 400)
                 .environmentObject(AppearanceStore()).environment(\.metrics, m)

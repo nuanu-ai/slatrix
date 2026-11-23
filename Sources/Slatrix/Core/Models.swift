@@ -130,8 +130,6 @@ struct ChatMessage: Identifiable, Hashable {
     static let deletedBody = "This message was deleted."
     enum PendingChange: Hashable { case editing, deleting }
     var sendState = "sent"
-    /// Fractional upload progress (0...1) while a local media echo is uploading.
-    var uploadProgress: Double? = nil
     /// Non-nil while an edit or redaction to this message is queued locally and not yet confirmed by the server.
     var pendingChange: PendingChange? = nil
     /// Who has read up to this message, from their read receipts.

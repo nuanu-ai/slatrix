@@ -86,4 +86,49 @@ struct MediaPresentationTests {
         viewer.step(-1, in: timeline)
         #expect(viewer.message?.eventID == "$new")
     }
+
+    @Test("Viewer upgrades an open pending local echo when its remote server event lands instead of closing")
+    @MainActor func upgradesPendingLocalEchoOnSend() {
+        var local = message("unique-1", kind: "m.image", mime: "image/png")
+        local.timelineEventID = "tx-1"
+        local.sendState = "sending"
+        local.attachment = MessageAttachment(name: "photo.png", url: "file:///tmp/photo.png", mimeType: "image/png")
+
+        let viewer = MediaViewerState()
+        viewer.open(local, surface: .conversation)
+
+        var remote = local
+        remote.timelineEventID = "$remote-1"
+        remote.sendState = "sent"
+        remote.attachment = MessageAttachment(name: "photo.png", url: "mxc://example.org/photo", mimeType: "image/png")
+
+        viewer.update(from: [remote])
+        #expect(viewer.message?.eventID == "$remote-1")
+        #expect(viewer.message?.sendState == "sent")
+        #expect(viewer.message?.attachment?.url == "mxc://example.org/photo")
+    }
+
+    @Test("Viewer pending notice distinguishes failed media from still-sending media")
+    @MainActor func pendingMediaNoticeCopy() {
+        var failedVideo = message("tx-v", kind: "m.video", mime: "video/mp4")
+        failedVideo.sendState = "failed"
+        #expect(MediaViewerState.pendingNotice(for: failedVideo, hasCachedStill: false) == "Couldn’t send.")
+
+        var failedFile = message("tx-f", kind: "m.file", mime: "application/pdf")
+        failedFile.sendState = "failed"
+        #expect(MediaViewerState.pendingNotice(for: failedFile, hasCachedStill: false) == "Couldn’t send.")
+
+        var sendingVideo = failedVideo
+        sendingVideo.sendState = "sending"
+        #expect(MediaViewerState.pendingNotice(for: sendingVideo, hasCachedStill: false) == "Still sending…")
+
+        var sendingFile = failedFile
+        sendingFile.sendState = "sending"
+        #expect(MediaViewerState.pendingNotice(for: sendingFile, hasCachedStill: false) == "Available once sent.")
+
+        var sendingImage = message("tx-i", kind: "m.image", mime: "image/png")
+        sendingImage.sendState = "sending"
+        #expect(MediaViewerState.pendingNotice(for: sendingImage, hasCachedStill: true) == nil)
+        #expect(MediaViewerState.pendingNotice(for: sendingImage, hasCachedStill: false) == "Still sending…")
+    }
 }

@@ -206,8 +206,9 @@ private struct InlineMedia: View {
                 .overlay(alignment: .bottomLeading) { if !playsHere { badge.padding(m.sp8) } }
                 .opacity(pendingSend ? 0.5 : 1)
                 .overlay(alignment: .bottom) {
-                    if pendingSend, let progress = message.uploadProgress {
-                        UploadProgressBar(progress: progress)
+                    if pendingSend {
+                        PendingUploadProgressOverlay(
+                            store: matrix.uploadProgress, roomID: message.roomID, messageID: message.eventID)
                     }
                 }
                 .clipShape(shape)
@@ -389,8 +390,9 @@ private struct FileCard: View {
             .opacity(pendingSend ? 0.5 : 1)
             .background(colors.canvas, in: shape)
             .overlay(alignment: .bottom) {
-                if pendingSend, let progress = message.uploadProgress {
-                    UploadProgressBar(progress: progress)
+                if pendingSend {
+                    PendingUploadProgressOverlay(
+                        store: matrix.uploadProgress, roomID: message.roomID, messageID: message.eventID)
                 }
             }
             .clipShape(shape)
@@ -417,6 +419,19 @@ private struct FileCard: View {
             }
                 ?? []))
             .joined(separator: " · ")
+    }
+}
+
+/// Observes upload progress strictly in a leaf overlay so progress ticks never invalidate `MessageRow` or the timeline.
+private struct PendingUploadProgressOverlay: View {
+    let store: UploadProgressStore
+    let roomID: String
+    let messageID: String
+
+    var body: some View {
+        if let progress = store.progress(roomID: roomID, messageID: messageID) {
+            UploadProgressBar(progress: progress)
+        }
     }
 }
 

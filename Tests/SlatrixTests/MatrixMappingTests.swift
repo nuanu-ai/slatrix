@@ -106,7 +106,9 @@ struct MatrixMappingTests {
         #expect(unknown.formattedBody == nil && unknown.body == "Literal <tag>")
     }
 
-    @Test("Upload progress, pending edits, and pending deletions project onto ChatMessage")
+    @Test(
+        "Upload progress projects independently of ChatMessage, while pending edits and deletions project onto ChatMessage"
+    )
     func uploadProgressAndPendingChanges() {
         func makeItem(
             local: EventSendState? = nil, edit: EventSendState? = nil, redaction: EventSendState? = nil
@@ -120,19 +122,18 @@ struct MatrixMappingTests {
                 redactionSendState: redaction, localCreatedAt: nil, readReceipts: [:], origin: nil,
                 canBeRepliedTo: true, lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
         }
-        let half = MatrixMapping.message(
-            makeItem(
-                local: .notSentYet(
-                    progress: MediaUploadProgress(index: 0, progress: AbstractProgress(current: 50, total: 100)))),
-            roomID: "!r", ownUserID: "@alice:example.org")
-        #expect(half?.uploadProgress == 0.5)
-
-        let zeroTotal = MatrixMapping.message(
-            makeItem(
-                local: .notSentYet(
-                    progress: MediaUploadProgress(index: 0, progress: AbstractProgress(current: 10, total: 0)))),
-            roomID: "!r", ownUserID: "@alice:example.org")
-        #expect(zeroTotal?.uploadProgress == nil)
+        let halfState = EventSendState.notSentYet(
+            progress: MediaUploadProgress(index: 0, progress: AbstractProgress(current: 50, total: 100)))
+        let fullState = EventSendState.notSentYet(
+            progress: MediaUploadProgress(index: 0, progress: AbstractProgress(current: 90, total: 100)))
+        let zeroTotal = EventSendState.notSentYet(
+            progress: MediaUploadProgress(index: 0, progress: AbstractProgress(current: 10, total: 0)))
+        #expect(MatrixMapping.uploadProgress(from: halfState) == 0.5)
+        #expect(MatrixMapping.uploadProgress(from: zeroTotal) == nil)
+        // Progress ticks must NOT mutate ChatMessage so TimelineLayout and cached row heights stay untouched.
+        let m1 = MatrixMapping.message(makeItem(local: halfState), roomID: "!r", ownUserID: "@alice:example.org")
+        let m2 = MatrixMapping.message(makeItem(local: fullState), roomID: "!r", ownUserID: "@alice:example.org")
+        #expect(m1 == m2)
 
         let editing = MatrixMapping.message(
             makeItem(edit: .notSentYet(progress: nil)), roomID: "!r", ownUserID: "@alice:example.org")

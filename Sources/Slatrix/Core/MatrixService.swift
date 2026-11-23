@@ -178,6 +178,30 @@ private struct SendQueueTracker {
     }
 }
 
+/// Tracks fractional upload progress (0...1) per local media transaction outside `ChatMessage`, so progress ticks
+/// redraw only the attachment's overlay bar without diffing `messages` or invalidating timeline row heights.
+@MainActor @Observable final class UploadProgressStore {
+    private var values: [SendQueueMessageKey: Double] = [:]
+
+    func progress(roomID: String, messageID: String) -> Double? {
+        values[SendQueueMessageKey(roomID: roomID, messageID: messageID)]
+    }
+
+    func set(_ progress: Double?, roomID: String, messageID: String) {
+        let key = SendQueueMessageKey(roomID: roomID, messageID: messageID)
+        let clamped = progress.map { min(1, max(0, $0)) }
+        if values[key] != clamped { values[key] = clamped }
+    }
+
+    func clear(roomID: String, messageID: String) {
+        set(nil, roomID: roomID, messageID: messageID)
+    }
+
+    func reset() {
+        if !values.isEmpty { values = [:] }
+    }
+}
+
 struct SignOutWarning: Equatable {
     let title: String
     let message: String
@@ -217,7 +241,8 @@ struct SendCancelPrompt: Equatable {
         if offline {
             return Self(
                 title: "Cancel sending this message?",
-                message: "You’re offline, so this message hasn’t been sent yet.",
+                message:
+                    "You’re offline. If it didn’t reach the server earlier, cancelling stops it from sending when you reconnect.",
                 action: "Cancel sending", cancel: "Keep sending")
         }
         return Self(
@@ -615,18 +640,18 @@ enum MatrixMapping {
         result.readBy = Array(item.readReceipts.keys)
         if let state = item.localSendState {
             switch state {
-            case .notSentYet(let progress):
-                result.sendState = "sending"
-                if let progress, progress.progress.total > 0 {
-                    result.uploadProgress = min(
-                        1, max(0, Double(progress.progress.current) / Double(progress.progress.total)))
-                }
+            case .notSentYet: result.sendState = "sending"
             case .sendingFailed: result.sendState = "failed"
             case .sent: result.sendState = "sent"
             }
         }
         result.pendingChange = pendingChange(edit: item.editSendState, redaction: item.redactionSendState)
         return result
+    }
+
+    static func uploadProgress(from state: EventSendState?) -> Double? {
+        guard case .notSentYet(let progress?) = state, progress.progress.total > 0 else { return nil }
+        return min(1, max(0, Double(progress.progress.current) / Double(progress.progress.total)))
     }
 
     private static func pendingChange(edit: EventSendState?, redaction: EventSendState?) -> ChatMessage.PendingChange? {
@@ -846,6 +871,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     let presence = PresenceService()
     let sharedFiles = SharedFilesService()
     let avatarImages = AvatarImageCache()
+    let uploadProgress = UploadProgressStore()
     /// Decoded inline images and posters by event and source, so a row that comes back draws its picture at once.
     let mediaImages: NSCache<NSString, CGImage> = {
         let cache = NSCache<NSString, CGImage>()
@@ -1782,6 +1808,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         queuedSendCount = 0
         pendingSendActions = []
         retryingSendKeys = []
+        uploadProgress.reset()
         let oldPersistence = persistence
         persistence = nil
         await Task.detached(priority: .userInitiated) { oldPersistence?.deactivate() }.value
@@ -2344,9 +2371,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private func showTimeline(_ snapshot: (items: [TimelineItem], revision: Int), roomID: String) {
         guard snapshot.revision > timelineRevision else { return }
         timelineRevision = snapshot.revision
-        messages = Performance.measure(.timelineProject, ["items": snapshot.items.count]) {
+        let projected = Performance.measure(.timelineProject, ["items": snapshot.items.count]) {
             project(snapshot.items, roomID: roomID)
         }
+        if projected != messages { messages = projected }
         if !messages.isEmpty { Performance.finish(.roomTimeline, ["messages": messages.count]) }
     }
 
@@ -2473,6 +2501,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         var eventOrTransactionId: EventOrTransactionId?
         var isRemote = false
         var failure: MessageSendFailure?
+        var uploadProgress: Double?
         var forwardMedia: ForwardMediaRevision?
         var media: MediaSource?
         /// Images, files and videos say whether they have a thumbnail; other kinds leave the lookup alone.
@@ -2495,6 +2524,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         result.eventOrTransactionId = event.eventOrTransactionId
         result.isRemote = event.isRemote
         result.failure = MessageSendFailure.failure(event.localSendState)
+        result.uploadProgress = MatrixMapping.uploadProgress(from: event.localSendState)
         if case .msgLike(let content) = event.content, case .message(let message) = content.kind {
             result.forwardMedia = (try? ForwardMessageContent(message))?.mediaRevision
             switch message.msgType {
@@ -2544,6 +2574,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             eventIDs[id] = eventOrTransactionId
             if let failure = projection.failure {
                 failures[SendQueueMessageKey(roomID: roomID, messageID: id)] = failure
+                uploadProgress.clear(roomID: roomID, messageID: id)
+            } else if let progress = projection.uploadProgress {
+                uploadProgress.set(progress, roomID: roomID, messageID: id)
+            } else if projection.isRemote {
+                uploadProgress.clear(roomID: roomID, messageID: id)
             }
             forwardMedia[id] = projection.forwardMedia
             if let media = projection.media { mediaSources[id] = media }
@@ -3949,7 +3984,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         switch update {
         case .sendError(let id, _, _), .sentEvent(let id, _), .cancelledLocalEvent(let id):
             retryingSendKeys.remove(SendQueueMessageKey(roomID: roomID, messageID: id))
-        case .newLocalEvent, .replacedLocalEvent, .retryEvent, .mediaUpload:
+            uploadProgress.clear(roomID: roomID, messageID: id)
+        case .mediaUpload(let relatedTo, _, _, let progress):
+            if progress.total > 0 {
+                uploadProgress.set(
+                    Double(progress.current) / Double(progress.total), roomID: roomID, messageID: relatedTo)
+            }
+        case .newLocalEvent, .replacedLocalEvent, .retryEvent:
             break
         }
         if globalSendQueue.failures != previousFailures { persistSendQueueFailures() }

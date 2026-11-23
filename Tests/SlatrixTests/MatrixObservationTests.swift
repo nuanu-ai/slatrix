@@ -1,3 +1,4 @@
+import MatrixRustSDK
 import Observation
 import Testing
 
@@ -89,5 +90,32 @@ struct MatrixObservationTests {
 
         service.threadMessages = []
         #expect(!service.hasLockedMessages)
+    }
+
+    @Test("Upload progress ticks update UploadProgressStore without invalidating timeline messages")
+    func uploadProgressDoesNotInvalidateMessages() {
+        let service = MatrixService.scratch()
+        var pending = ChatMessage(
+            id: "tx-1", roomID: "!open:example.org", senderID: "@me:example.org", senderName: "Me",
+            body: "photo.png", timestamp: .now)
+        pending.sendState = "sending"
+        service.messages = [pending]
+
+        let messageChanges = Recorder<Void>()
+        withObservationTracking {
+            _ = service.messages
+        } onChange: {
+            messageChanges.append(())
+        }
+        service.handleSendQueueUpdate(
+            roomID: "!open:example.org",
+            update: .mediaUpload(
+                relatedTo: "tx-1", file: nil, index: 0, progress: AbstractProgress(current: 40, total: 100)))
+        #expect(messageChanges.all.isEmpty)
+        #expect(service.uploadProgress.progress(roomID: "!open:example.org", messageID: "tx-1") == 0.4)
+
+        service.handleSendQueueUpdate(
+            roomID: "!open:example.org", update: .sentEvent(transactionId: "tx-1", eventId: "$sent"))
+        #expect(service.uploadProgress.progress(roomID: "!open:example.org", messageID: "tx-1") == nil)
     }
 }

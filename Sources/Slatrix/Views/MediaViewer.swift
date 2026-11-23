@@ -95,10 +95,14 @@ private struct MediaViewerPage: View {
                 VStack(spacing: m.sp16) {
                     FileTypeIcon(kind: attachment.fileKind, side: 96, glyph: .hero)
                     Text(attachment.name).font(m.font(.title3, .semibold)).foregroundStyle(colors.onMedia)
-                    Text("Available once sent.").font(m.font(.body)).foregroundStyle(colors.onMedia).opacity(0.75)
+                    if let notice = MediaViewerState.pendingNotice(for: message, hasCachedStill: false) {
+                        Text(notice).font(m.font(.body)).foregroundStyle(colors.onMedia).opacity(0.75)
+                    }
                 }
-            } else if message.kind == "m.video" || matrix.cachedMediaImage(message) == nil {
-                Text("Still sending…").font(m.font(.body)).foregroundStyle(colors.onMedia).opacity(0.8)
+            } else if let notice = MediaViewerState.pendingNotice(
+                for: message, hasCachedStill: matrix.cachedMediaImage(message) != nil)
+            {
+                Text(notice).font(m.font(.body)).foregroundStyle(colors.onMedia).opacity(0.8)
             }
         } else if !message.isViewerMedia, loaded?.lease == nil {
             VStack(spacing: m.sp16) {
