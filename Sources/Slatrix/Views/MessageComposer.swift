@@ -36,6 +36,9 @@ struct MessageComposer: View {
     var isPrimary = false
     /// In a thread's pane, whose messages' text starts nearer their avatars; the placeholder starts where it does.
     var isThread = false
+    /// Disables the composer input and buttons while keeping floating accessories (reply Retry/Cancel, draft status)
+    /// interactive.
+    var inputDisabled = false
     /// Floats at the very top of the composer's overlay stack (e.g. toasts), never overlapping suggestions or banners.
     var topOverlay: AnyView? = nil
     /// Floats directly above the composer frame (e.g. reply banner, attachment draft status), coordinated with mentions
@@ -55,6 +58,8 @@ struct MessageComposer: View {
     @State private var hasSelection = false
     /// Persistent Slack-style inline formatting bar toggled via the Aa button.
     @State private var showFormattingBar = false
+    /// Measured height of floating accessories so the timeline's "Jump to recent" pill lifts clear of them.
+    @State private var accessoryHeight: CGFloat = 0
     @State private var mention: MentionSearch.Suggestions?
     @State private var mentionIndex = 0
     @State private var typingTask: Task<Void, Never>?
@@ -80,7 +85,7 @@ struct MessageComposer: View {
     }
 
     private var canSend: Bool {
-        allowsSend && !sending && !preparingAttachments
+        allowsSend && !inputDisabled && !sending && !preparingAttachments
             && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || (!requiresTextForSend && !isEditing && !attachments.isEmpty))
     }
@@ -100,11 +105,14 @@ struct MessageComposer: View {
                 }.padding(.horizontal, m.sp12).padding(.top, m.sp8).padding(.bottom, m.sp4)
             }
             if showFormattingBar {
-                HStack(spacing: 0) {
-                    formattingButtons
-                    Spacer(minLength: 0)
+                ScrollView(.horizontal) {
+                    HStack(spacing: 0) {
+                        formattingButtons
+                    }
+                    .padding(.horizontal, m.sp8).padding(.vertical, m.sp4)
                 }
-                .padding(.horizontal, m.sp8).padding(.vertical, m.sp4).disabled(sending)
+                .scrollIndicators(.hidden)
+                .disabled(sending)
                 .accessibilityElement(children: .contain).accessibilityLabel("Message formatting")
                 Divider().overlay(colors.border)
             }
@@ -127,8 +135,10 @@ struct MessageComposer: View {
                     ComposerNativeEditor(
                         text: $text, state: editor, members: members, mentionText: NSColor(colors.mentionText),
                         mentionFill: NSColor(colors.mentionFill), textColor: NSColor(colors.textBody),
-                        linkColor: NSColor(colors.accent), enabled: !sending, reachable: isEnabled,
-                        acceptsAttachments: !sending && !isEditing && !preparingAttachments, onTextChange: changed,
+                        linkColor: NSColor(colors.accent), enabled: !sending && !inputDisabled,
+                        reachable: isEnabled && !inputDisabled,
+                        acceptsAttachments: !sending && !inputDisabled && !isEditing && !preparingAttachments,
+                        onTextChange: changed,
                         onSelectionChange: { text, range in
                             if hasSelection != (range.length > 0) { hasSelection = range.length > 0 }
                             updateMention(text, range)
@@ -187,10 +197,17 @@ struct MessageComposer: View {
                     .allowsHitTesting(false)
             }
         }
+        // Only the composer box itself disables on `inputDisabled`; floating accessories (reply Retry/Cancel, draft
+        // status, toasts) stay live above it.
+        .disabled(inputDisabled)
         // Suggestions, errors, toasts and reply/attachment cards float in one stack above the composer.
         .overlay(alignment: .topLeading) {
             floating.alignmentGuide(.top) { $0[.bottom] + m.sp8 }
         }
+        .preference(
+            key: ComposerAccessoryHeightKey.self,
+            value: accessories != nil && accessoryHeight > 0 ? accessoryHeight + m.sp8 : 0
+        )
         .onAppear { isActive = true }
         // Once as an edit opens; opened under a cover, the editor takes the keyboard as it would after any cover.
         .task(id: isEditing || requiresTextForSend) {
@@ -216,7 +233,9 @@ struct MessageComposer: View {
             onTyping(false)
         }
         .onReceive(NotificationCenter.default.publisher(for: .menuAction)) { notification in
-            guard notification.userInfo?["action"] as? String == "attach", !isEditing, isEnabled else { return }
+            guard notification.userInfo?["action"] as? String == "attach", !isEditing, isEnabled, !inputDisabled else {
+                return
+            }
             let focused = NSApp.keyWindow?.firstResponder
             if focused === editor.textView || (isPrimary && !(focused is ComposerTextView)) { chooseFiles() }
         }
@@ -227,19 +246,22 @@ struct MessageComposer: View {
                 onCancelEdit?()
             }
         }
-        .uploadIntake(isEnabled && !sending && !isEditing && !preparingAttachments ? queueInput as UploadIntake : nil)
+        .uploadIntake(
+            isEnabled && !inputDisabled && !sending && !isEditing && !preparingAttachments
+                ? queueInput as UploadIntake : nil)
     }
 
     private var floating: some View {
-        let showsSelectionBar = hasSelection && editor.isFocused && linkDraft == nil && !showFormattingBar
+        let showsSelectionBar =
+            hasSelection && editor.isFocused && !inputDisabled && linkDraft == nil && !showFormattingBar
         let showsReplyHint = requiresTextForSend && !attachments.isEmpty
         return VStack(alignment: .leading, spacing: m.sp8) {
             if let topOverlay {
                 topOverlay.frame(maxWidth: .infinity)
             }
             if showsSelectionBar { formattingToolbar.transition(.opacity) }
-            if let draft = Binding($linkDraft) { linkCard(draft).transition(.opacity) }
-            if !mentionMatches.isEmpty { mentionSuggestions.transition(.opacity) }
+            if let draft = Binding($linkDraft) { linkCard(draft).disabled(inputDisabled).transition(.opacity) }
+            if !mentionMatches.isEmpty && !inputDisabled { mentionSuggestions.transition(.opacity) }
             Group {
                 if let errorMessage {
                     HStack(alignment: .firstTextBaseline) {
@@ -266,7 +288,10 @@ struct MessageComposer: View {
             .padding(.horizontal, m.sp12).padding(.vertical, m.sp8)
             .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
             .elevation(.e2, cornerRadius: m.radiusLarge)
-            if let accessories { accessories }
+            if let accessories {
+                accessories
+                    .onGeometryChange(for: CGFloat.self, of: \.size.height) { accessoryHeight = $0 }
+            }
         }
         .animation(
             Motion.overlay,

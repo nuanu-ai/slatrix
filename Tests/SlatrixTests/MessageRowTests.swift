@@ -181,4 +181,31 @@ struct MessageRowTests {
             mixedCompact < mixedComfortable,
             "Compact mixed (\(mixedCompact)) must be shorter than comfortable (\(mixedComfortable))")
     }
+
+    @Test("Compact mode gives attachments full row width regardless of sender name length")
+    func compactAttachmentsKeepFullWidth() {
+        let saved = UserDefaults.standard.object(forKey: "appearance.density")
+        defer { UserDefaults.standard.set(saved, forKey: "appearance.density") }
+        let appearance = AppearanceStore()
+        appearance.density = .compact
+        let matrix = MatrixService.scratch()
+        func rowHeight(senderName: String) -> CGFloat {
+            let attachment = MessageAttachment(
+                name: "chart.png", url: "mxc://example.org/chart", mimeType: "image/png", width: 800, height: 600)
+            let message = ChatMessage(
+                id: "$att-\(senderName)", roomID: "!room:example.org", senderID: "@a:example.org",
+                senderName: senderName, body: "chart.png", timestamp: Date(timeIntervalSince1970: 1_800_000_000),
+                kind: "m.image", attachment: attachment)
+            let view = AttachmentView(matrix: matrix, message: message, attachment: attachment)
+            return NSHostingView(
+                rootView: MessageRow(message: message, grouped: false, timeLabel: "10:00", attachment: view)
+                    .frame(width: 420).environmentObject(appearance).environment(\.metrics, m)
+            ).fittingSize.height
+        }
+        let shortName = rowHeight(senderName: "Bo")
+        let longName = rowHeight(senderName: "Alexandria Bartholomew-Wellington")
+        #expect(
+            abs(shortName - longName) < 1,
+            "Long sender name squeezed compact attachment: short=\(shortName) long=\(longName)")
+    }
 }

@@ -811,7 +811,7 @@ struct RootView: View {
                                 if paneCovers {
                                     inspector(room).overlay(alignment: .top) { Divider().overlay(colors.border) }
                                         .padding(.top, m.paneHeader)
-                                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                                        .transition(.opacity)
                                 }
                             }
                             .animation(Motion.pane, value: paneCovers)
@@ -840,10 +840,9 @@ struct RootView: View {
                                 Sized(widths, width: { m(paneWidth($0) ?? Self.paneWidth) }) {
                                     inspector(room).layoutIsolated()
                                 }
-                                .transition(.move(edge: .trailing).combined(with: .opacity))
                             }
-                        }.animation(Motion.pane, value: paneOpen && paneBeside)
-                            .frameCard(colors.theme.framed, leading: sidebarCollapsed)
+                        }
+                        .frameCard(colors.theme.framed, leading: sidebarCollapsed)
                     }
                     .covered(coverage.drawer)
                     .overlay(alignment: .leading) { drawer }
@@ -1241,14 +1240,13 @@ struct RootView: View {
                                     requiresTextForSend: scopedReply(roomID: room.id) != nil,
                                     onConversationKey: { conversationKey($0, room: room, threadRootID: nil) },
                                     isPrimary: true,
+                                    inputDisabled: !localReady || !attachmentDrafts.ready,
                                     topOverlay: AnyView(ToastHost(toasts: toasts)),
                                     accessories: hasComposerAccessories(reply: reply, drafts: draftAddress)
                                         ? AnyView(composerAccessories(reply: reply, drafts: draftAddress)) : nil
                                 )
                             }
-                            .disabled(!localReady || !attachmentDrafts.ready).id(
-                                "composer-\(composerGeneration)-\(room.id)"
-                            )
+                            .id("composer-\(composerGeneration)-\(room.id)")
                             .padding(.top, m.sp4).padding(.bottom, m.sp12)
                         }
                     }
@@ -1397,14 +1395,13 @@ struct RootView: View {
                             requiresTextForSend: scopedReply(roomID: room.id, threadID: root.eventID) != nil,
                             onConversationKey: { conversationKey($0, room: room, threadRootID: root.eventID) },
                             isThread: true,
+                            inputDisabled: !localReady || !attachmentDrafts.ready || threadReadyID != root.eventID
+                                || matrix.selectedRoomID != root.roomID,
                             accessories: hasComposerAccessories(reply: reply, drafts: draftAddress)
                                 ? AnyView(composerAccessories(reply: reply, drafts: draftAddress)) : nil
                         )
                     }
                     .id("thread-composer-\(composerGeneration)-\(root.eventID)").padding(.top, m.sp4)
-                    .disabled(
-                        !localReady || !attachmentDrafts.ready || threadReadyID != root.eventID
-                            || matrix.selectedRoomID != root.roomID)
                     let withFiles = hasQueuedFiles(roomID: room.id, threadID: root.eventID)
                     Toggle(
                         isOn: Binding(

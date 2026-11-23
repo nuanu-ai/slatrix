@@ -145,4 +145,47 @@ struct WindowButtonsCenteringTests {
         _ = clear.accessibilityPerformPress?()
         #expect(await eventually { bar.text.isEmpty })
     }
+
+    @Test("Moving focus to Clear search keeps SearchBarField open and clears the query")
+    func clearSearchFocusKeepsMenuOpen() async throws {
+        _ = NSApplication.shared
+        UserDefaults.standard.register(defaults: ["NSAutoFillHeuristicsEnabled": false])
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+        let m = Metrics(zoom: 1)
+        let appearance = AppearanceStore()
+        let matrix = MatrixService.scratch()
+        let bar = SearchBar()
+        bar.text = "deploy"
+        let window = offscreenWindow(NSSize(width: 320, height: 200), key: true)
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        let hosting = NSHostingView(
+            rootView: SearchBarField(
+                bar: bar, prompt: "Search", matrix: matrix, recents: [], visited: [], onPick: { _ in }
+            )
+            .frame(width: 240)
+            .environmentObject(appearance).environment(\.metrics, m))
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        func allViews(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(allViews) }
+        #expect(
+            await eventually {
+                hosting.layoutSubtreeIfNeeded()
+                return !allViews(hosting).compactMap { $0 as? NSTextField }.isEmpty
+                    && !accessible("Clear search", in: hosting).isEmpty
+            })
+        let textField = try #require(allViews(hosting).compactMap { $0 as? NSTextField }.first)
+        window.makeFirstResponder(textField)
+        #expect(await eventually { bar.menuOpen })
+        let clear = try #require(accessible("Clear search", in: hosting).first)
+        clear.setAccessibilityFocused?(true)
+        await drainMainActor()
+        #expect(bar.menuOpen, "Focusing Clear search closed the search bar")
+        _ = clear.accessibilityPerformPress?()
+        #expect(await eventually { bar.text.isEmpty })
+        #expect(bar.menuOpen, "Pressing Clear search closed the search bar")
+    }
 }

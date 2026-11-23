@@ -105,7 +105,7 @@ struct ButtonChrome<Label: View>: View {
     private func fill(_ colors: AppColors) -> Color {
         switch kind {
         case .primary: colors.accentFill
-        case .destructive: colors.destructive
+        case .destructive: colors.destructiveFill
         case .secondary, .link: colors.control
         }
     }

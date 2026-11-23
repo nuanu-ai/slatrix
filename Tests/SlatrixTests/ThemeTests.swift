@@ -27,7 +27,11 @@ struct ThemeTests {
             #expect(contrast(colors.textTertiary, surface) >= 4.5, "\(theme) dark=\(dark) textTertiary")
         }
         #expect(contrast(colors.onAccent, colors.accentFill) >= 4.5, "\(theme) dark=\(dark) onAccent/accentFill")
-        #expect(contrast(colors.onAccent, colors.destructive) >= 4.5, "\(theme) dark=\(dark) onAccent/destructive")
+        #expect(
+            contrast(colors.onAccent, colors.destructiveFill) >= 4.5, "\(theme) dark=\(dark) onAccent/destructiveFill")
+        for surface in [colors.canvas, colors.raised, colors.overlay] {
+            #expect(contrast(colors.destructive, surface) >= 4.5, "\(theme) dark=\(dark) destructive text")
+        }
         for surface in [colors.canvas, colors.raised] {
             #expect(contrast(colors.warning, surface) >= 4.5, "\(theme) dark=\(dark) warning")
             #expect(contrast(colors.success, surface) >= 4.5, "\(theme) dark=\(dark) success")

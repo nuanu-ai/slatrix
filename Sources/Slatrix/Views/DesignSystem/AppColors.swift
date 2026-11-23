@@ -219,7 +219,10 @@ struct AppColors {
     var onAccent: Color { Color(hex: neutrals.onAccent) }
     /// Done and verified marks.
     var success: Color { Color(hex: dark ? 0x30d158 : 0x1e7a34) }
-    var destructive: Color { Color(hex: dark ? 0xde2c2c : 0xd70015) }
+    /// Destructive text, icons and inline errors, bright enough to read on dark canvas and overlay surfaces.
+    var destructive: Color { Color(hex: dark ? 0xff6961 : 0xd70015) }
+    /// Destructive button fill under white `onAccent` text.
+    var destructiveFill: Color { Color(hex: dark ? 0xde2c2c : 0xd70015) }
     /// Connection trouble and recoverable failures.
     var warning: Color { Color(hex: dark ? 0xff9f0a : 0x9a4f00) }
     /// An @Name pill in a message or the composer. Deeper than the accent in light mode, so it reads on its tint.

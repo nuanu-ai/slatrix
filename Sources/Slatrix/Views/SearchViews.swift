@@ -34,9 +34,12 @@ struct SearchBarField: View {
     let recents: [String]
     let visited: [String]
     let onPick: (SearchSuggestion) -> Void
-    @FocusState private var focused: Bool
+    private enum FocusField: Hashable { case field, clear }
+    @FocusState private var focused: FocusField?
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
+
+    private var isFocused: Bool { focused != nil }
 
     private var items: [SearchSuggestion] {
         SearchSuggestions.items(query: bar.text, recents: recents, rooms: matrix.rooms, visited: visited)
@@ -48,7 +51,8 @@ struct SearchBarField: View {
         HStack(spacing: m.sp8) {
             Image(systemName: "magnifyingglass").font(m.font(.body)).foregroundStyle(colors.textSecondary)
                 .accessibilityHidden(true)
-            TextField(prompt, text: $bar.text).textFieldStyle(.plain).font(m.font(.body)).focused($focused)
+            TextField(prompt, text: $bar.text).textFieldStyle(.plain).font(m.font(.body))
+                .focused($focused, equals: .field)
                 .onKeyPress(.upArrow) { move(-1) }
                 .onKeyPress(.downArrow) { move(1) }
                 .onSubmit {
@@ -60,27 +64,28 @@ struct SearchBarField: View {
                 }
             if !bar.text.isEmpty {
                 IconButton(symbol: "xmark.circle.fill", label: "Clear search", role: .body, side: 20) {
+                    focused = .field
                     bar.text = ""
-                }.foregroundStyle(colors.textTertiary)
+                }.focused($focused, equals: .clear).foregroundStyle(colors.textTertiary)
             }
         }
         .padding(.horizontal, m.sp12).frame(height: m.control)
         .foregroundStyle(colors.textPrimary)
         .glass(colors.control, in: Capsule(), cornerRadius: m.control / 2)
-        .overlay { if focused { Capsule().strokeBorder(colors.accentFill, lineWidth: 1) } }
+        .overlay { if isFocused { Capsule().strokeBorder(colors.accentFill, lineWidth: 1) } }
         .onGeometryChange(for: CGRect.self) {
             $0.frame(in: .named(SearchBar.space))
         } action: {
             bar.frame = $0
         }
-        .onChange(of: focused) { _, focused in
-            if focused { bar.menuOpen = true } else { bar.close() }
+        .onChange(of: focused) { _, newFocus in
+            if newFocus != nil { bar.menuOpen = true } else { bar.close() }
         }
-        .onChange(of: bar.menuOpen) { _, open in if !open { focused = false } }
-        .onChange(of: bar.focusRequests) { _, _ in focused = true }
+        .onChange(of: bar.menuOpen) { _, open in if !open { focused = nil } }
+        .onChange(of: bar.focusRequests) { _, _ in focused = .field }
         .onChange(of: bar.text) { _, _ in
             bar.selection = 0
-            if focused { bar.menuOpen = true }
+            if isFocused { bar.menuOpen = true }
         }
     }
 

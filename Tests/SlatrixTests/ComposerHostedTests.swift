@@ -514,7 +514,14 @@ struct ComposerHostedTests {
         let attrs = try #require(view.textStorage?.attributes(at: 0, effectiveRange: nil))
         let paragraph = try #require(attrs[.paragraphStyle] as? NSParagraphStyle)
         let font = try #require(attrs[.font] as? NSFont)
-        #expect(abs(paragraph.lineSpacing - font.pointSize / 5) < 0.1, "got \(paragraph.lineSpacing)")
+        let timeline = NativeSelectableMessageText.attributed(
+            [MessageBodyRun(text: "First line\nSecond line")], fontSize: Double(font.pointSize),
+            textColor: NSColor(appearance.colors.textBody), linkColor: NSColor(appearance.colors.accent))
+        let timelineParagraph = try #require(
+            timeline.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
+        #expect(
+            abs(paragraph.lineSpacing - timelineParagraph.lineSpacing) < 0.1,
+            "composer=\(paragraph.lineSpacing) vs timeline=\(timelineParagraph.lineSpacing)")
         let ink = try #require((attrs[.foregroundColor] as? NSColor)?.usingColorSpace(.sRGB))
         let expected = try #require(NSColor(appearance.colors.textBody).usingColorSpace(.sRGB))
         #expect(
@@ -538,36 +545,167 @@ struct ComposerHostedTests {
         #expect(await eventually { !accessible("Bold", in: hosting).isEmpty })
     }
 
-    @Test("Mention suggestions stack cleanly above composer accessories without overlapping")
-    func overlaysNeverCollide() async throws {
+    @Test("The inline formatting bar fits within the minimum 248 pt thread composer width without overflowing")
+    func inlineFormattingBarFitsMinimumThreadWidth() async throws {
         _ = NSApplication.shared
         VoiceOver.listen()
         defer { VoiceOver.done() }
         let draft = Draft()
-        let members = [
-            ChatUser(id: "@alice:example.org", name: "Alice"),
-            ChatUser(id: "@alex:example.org", name: "Alex"),
-        ]
+        let (hosting, window) = host(
+            MessageComposer(
+                text: Binding(get: { draft.text }, set: { draft.text = $0 }), placeholder: "Reply",
+                members: [], onSend: { _, _ in }, onTyping: { _ in }
+            ).frame(width: 248))
+        defer { close(window) }
+        #expect(await eventually { !accessible("Formatting", in: hosting).isEmpty })
+        let toggle = try #require(accessible("Formatting", in: hosting).first)
+        _ = toggle.accessibilityPerformPress?()
+        #expect(await eventually { !accessible("Bold", in: hosting).isEmpty })
+        hosting.layoutSubtreeIfNeeded()
+        #expect(
+            hosting.fittingSize.width <= 248.5,
+            "Inline formatting bar overflowed 248 pt thread width: \(hosting.fittingSize.width)")
+    }
+
+    @Test("Disabling composer input leaves reply Retry and Cancel buttons interactive")
+    func disabledInputKeepsReplyAccessoriesInteractive() async throws {
+        _ = NSApplication.shared
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+        let draft = Draft()
+        var retried = false
+        var cancelled = false
         let (hosting, window) = host(
             VStack {
                 Spacer()
                 MessageComposer(
-                    text: Binding(get: { draft.text }, set: { draft.text = $0 }), placeholder: "Message #team",
-                    members: members, onSend: { _, _ in }, onTyping: { _ in },
+                    text: Binding(get: { draft.text }, set: { draft.text = $0 }), placeholder: "Reply",
+                    members: [], onSend: { _, _ in }, onTyping: { _ in }, inputDisabled: true,
+                    accessories: AnyView(
+                        HStack {
+                            Button("Retry") { retried = true }.buttonStyle(.textLink)
+                            Button("Cancel reply") { cancelled = true }.buttonStyle(.row)
+                        }.frame(maxWidth: .infinity, minHeight: 36)))
+            }.frame(width: 360, height: 320))
+        defer { close(window) }
+        func allViews(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(allViews) }
+        let view = try #require(allViews(hosting).compactMap { $0 as? NSTextView }.first)
+        #expect(!view.isEditable)
+        #expect(await eventually { !accessible("Retry", in: hosting).isEmpty })
+        let retry = try #require(accessible("Retry", in: hosting).first)
+        let cancel = try #require(accessible("Cancel reply", in: hosting).first)
+        #expect(retry.isAccessibilityEnabled?() == true)
+        #expect(cancel.isAccessibilityEnabled?() == true)
+        _ = retry.accessibilityPerformPress?()
+        _ = cancel.accessibilityPerformPress?()
+        #expect(await eventually { retried && cancelled })
+    }
+
+    @Test("Jump to recent stays above floating composer accessories without overlapping them")
+    func jumpToRecentClearsComposerAccessories() async throws {
+        _ = NSApplication.shared
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+        let matrix = MatrixService.scratch()
+        let room = ChatRoom(id: "!jump:example.org", name: "general")
+        let messages = (0..<6).map { i in
+            ChatMessage(
+                id: "$m\(i)", roomID: room.id, senderID: "@alice:example.org", senderName: "Alice",
+                body: "Message \(i)", timestamp: Date(timeIntervalSince1970: 1_800_000_000 + Double(i) * 60))
+        }
+        matrix.rooms = [room]
+        matrix.selectedRoomID = room.id
+        matrix.messages = messages
+        matrix.focusedEventID = messages.first?.id
+        let draft = Draft()
+        let (hosting, window) = host(
+            TimelineUnderBars { insets in
+                TimelineView(
+                    matrix: matrix, room: room, savedIDs: [], onThread: { _ in }, onReply: { _ in }, onEdit: { _ in },
+                    onSave: { _ in }, insets: insets)
+            } header: {
+                Color.clear.frame(height: 44)
+            } footer: {
+                MessageComposer(
+                    text: Binding(get: { draft.text }, set: { draft.text = $0 }), placeholder: "Message #general",
+                    members: [], onSend: { _, _ in }, onTyping: { _ in },
                     accessories: AnyView(
                         HStack {
                             Text("Replying to Alice")
                             Spacer()
                             Button("Cancel reply") {}.buttonStyle(.row)
-                        }.frame(maxWidth: .infinity, minHeight: 40))
-                )
-            }.frame(width: 360, height: 360))
+                        }.frame(maxWidth: .infinity, minHeight: 44))
+                ).conversationRow(Metrics(zoom: 1), isThread: false)
+            }
+            .frame(width: 900, height: 500))
         defer { close(window) }
+        #expect(
+            await eventually(timeout: .seconds(10)) {
+                !accessible("Jump to recent", in: hosting).isEmpty && !accessible("Cancel reply", in: hosting).isEmpty
+            })
+        let jump = try #require(accessible("Jump to recent", in: hosting).first)
+        let banner = try #require(accessible("Cancel reply", in: hosting).first)
+        #expect(
+            await eventually(timeout: .seconds(5)) {
+                let jumpFrame = jump.accessibilityFrame?() ?? .zero
+                let bannerFrame = banner.accessibilityFrame?() ?? .zero
+                return !jumpFrame.isEmpty && !bannerFrame.isEmpty && !jumpFrame.intersects(bannerFrame)
+                    && jumpFrame.minY >= bannerFrame.maxY - 1
+            })
+    }
+
+    @Test("Mention suggestions stack cleanly above RootView composer banners without overlapping")
+    func overlaysNeverCollide() async throws {
+        _ = NSApplication.shared
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+        let local = try TemporaryDirectory()
+        let sample = local.url.appendingPathComponent("report.txt")
+        try Data("hello".utf8).write(to: sample)
+        let vaultKey: @Sendable (String) async throws -> Data = { _ in Data(repeating: 0x5a, count: 32) }
+        let store = ProtectedLocalStateStore(directory: local.url, keyProvider: vaultKey)
+        let files = AttachmentDraftStore(
+            directory: AttachmentDraftStore.directory(in: local.url), keyProvider: vaultKey)
+        let room = FakeOpenRoom("!overlay:example.org", cached: [])
+        let address = AttachmentDraftAddress(roomID: room.id())
+        let access = try await files.open(accountID: "@me:example.org")
+        _ = try await files.save(urls: [sample], address: address, access: access, revision: 1)
+        try await files.markSending(url: sample, address: address, access: access, revision: 2)
+        await files.close(access: access)
+
+        let matrix = MatrixService.scratch()
+        matrix.configureRoomOpenForChecks(
+            client: FakeClient(rooms: [room]), roomList: FakeRoomListService(),
+            user: ChatUser(id: "@me:example.org", name: "Me"))
+        matrix.status = .ready
+        matrix.rooms = [ChatRoom(id: room.id(), name: "team")]
+        matrix.roomsLoaded = true
+        UserDefaults.standard.removeObject(forKey: "room.@me:example.org")
+        let hosting = NSHostingView(
+            rootView: AnyView(
+                RootView(matrix: matrix, localStore: store, attachmentDrafts: files)
+                    .environmentObject(AppearanceStore())
+                    .environment(\.metrics, Metrics(zoom: 1))))
+        let window = offscreenWindow(NSSize(width: 1_000, height: 700), key: true)
+        window.contentView = hosting
+        window.orderFrontRegardless()
+        defer { close(window) }
+
+        await matrix.selectRoom(room.id())
+        matrix.members = [
+            ChatUser(id: "@alice:example.org", name: "Alice"),
+            ChatUser(id: "@alex:example.org", name: "Alex"),
+        ]
+        #expect(
+            await eventually(timeout: .seconds(10)) {
+                hosting.layoutSubtreeIfNeeded()
+                return !accessible("Send anyway", in: hosting).isEmpty && (try? editor(in: hosting).isEditable) == true
+            })
         let view = try editor(in: hosting)
         window.makeFirstResponder(view)
         type(view, "@Al")
-        #expect(await eventually { !accessible("Alice", in: hosting).isEmpty })
-        let banner = try #require(accessible("Cancel reply", in: hosting).first)
+        #expect(await eventually(timeout: .seconds(5)) { !accessible("Alice", in: hosting).isEmpty })
+        let banner = try #require(accessible("Send anyway", in: hosting).first)
         let suggestion = try #require(accessible("Alice", in: hosting).first)
         let bannerFrame = banner.accessibilityFrame?() ?? .zero
         let suggestionFrame = suggestion.accessibilityFrame?() ?? .zero

@@ -50,6 +50,7 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
     /** Initials and icons on the shared avatar and file colors, whatever the accent. */
     val onAvatar = roles.getValue("onAvatar")
     val destructive = roles.getValue("destructive")
+    val destructiveFill = roles.getValue("destructiveFill")
     val warning = roles.getValue("warning")
     /** Your own avatar's dot: filled while connected, a hollow ring once the connection is lost. */
     val presenceActive = roles.getValue("presenceActive")
@@ -186,7 +187,7 @@ fun SlatrixTheme(
             surfaceTint = colors.accent,
             inverseSurface = colors.tooltip,
             inverseOnSurface = colors.onTooltip,
-            error = colors.destructive,
+            error = colors.destructiveFill,
             onError = colors.onAccent,
             errorContainer = colors.mentionYouFill,
             onErrorContainer = colors.textPrimary,
