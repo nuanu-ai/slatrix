@@ -58,6 +58,11 @@ struct SearchBarField: View {
                 .onExitCommand {
                     if bar.text.isEmpty { bar.close() } else { bar.text = "" }
                 }
+            if !bar.text.isEmpty {
+                IconButton(symbol: "xmark.circle.fill", label: "Clear search", role: .body, side: 20) {
+                    bar.text = ""
+                }.foregroundStyle(colors.textTertiary)
+            }
         }
         .padding(.horizontal, m.sp12).frame(height: m.control)
         .foregroundStyle(colors.textPrimary)
@@ -104,28 +109,33 @@ struct SearchMenu: View {
 
     var body: some View {
         let colors = appearance.colors
-        ZStack(alignment: .topLeading) {
-            if bar.menuOpen {
-                let items = SearchSuggestions.items(
-                    query: bar.text, recents: recents, rooms: matrix.rooms, visited: visited)
-                // A button, not a tap gesture, so the click outside lands however the window was activated.
-                Button(action: bar.close) { Color.clear.contentShape(Rectangle()) }.buttonStyle(.row)
-                    .focusable(false).accessibilityHidden(true).padding(.top, top)
-                if !items.isEmpty {
-                    let width = max(bar.frame.width, m(360))
-                    VStack(spacing: 0) {
-                        ForEach(Array(items.enumerated()), id: \.element) { index, item in
-                            row(item, selected: index == bar.selection)
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                if bar.menuOpen {
+                    let items = SearchSuggestions.items(
+                        query: bar.text, recents: recents, rooms: matrix.rooms, visited: visited)
+                    // A button, not a tap gesture, so the click outside lands however the window was activated.
+                    Button(action: bar.close) { Color.clear.contentShape(Rectangle()) }.buttonStyle(.row)
+                        .focusable(false).accessibilityHidden(true).padding(.top, top)
+                    if !items.isEmpty {
+                        let margin = m.sp8
+                        let available = max(0, proxy.size.width - 2 * margin)
+                        let width = min(max(bar.frame.width, m(360)), available)
+                        let x = max(margin, min(bar.frame.maxX - width, proxy.size.width - width - margin))
+                        VStack(spacing: 0) {
+                            ForEach(Array(items.enumerated()), id: \.element) { index, item in
+                                row(item, selected: index == bar.selection)
+                            }
                         }
+                        .padding(m(6)).frame(width: width)
+                        .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+                        .elevation(.e2, cornerRadius: m.radiusLarge)
+                        .offset(x: x, y: bar.frame.maxY + m.sp4)
                     }
-                    .padding(m(6)).frame(width: width)
-                    .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
-                    .elevation(.e2, cornerRadius: m.radiusLarge)
-                    .offset(x: bar.frame.maxX - width, y: bar.frame.maxY + m.sp4)
                 }
             }
+            .animation(Motion.overlay, value: bar.menuOpen)
         }
-        .animation(Motion.overlay, value: bar.menuOpen)
     }
 
     @ViewBuilder private func row(_ item: SearchSuggestion, selected: Bool) -> some View {
@@ -224,13 +234,13 @@ struct SearchResultsView: View {
                 Image(systemName: "magnifyingglass").font(m.font(.title3)).foregroundStyle(colors.textSecondary)
                 Text(query.text.isEmpty ? "Search" : query.text).font(m.font(.title3, .bold))
                     .foregroundStyle(colors.textPrimary).lineLimit(1).accessibilityAddTraits(.isHeader)
-            }.padding(.horizontal, m.sp24).frame(height: m.paneHeader)
+            }.padding(.horizontal, m.sp20).frame(height: m.paneHeader)
             TabBar(
                 tabs: [
                     .init(value: Tab.messages, title: "Messages"), .init(value: Tab.files, title: "Files"),
                     .init(value: Tab.channels, title: "Channels"), .init(value: Tab.people, title: "People"),
                 ], selection: $tab
-            ).padding(.horizontal, m.sp24)
+            ).padding(.horizontal, m.sp20)
             Divider().overlay(colors.border)
             switch tab {
             case .messages: messagesTab
@@ -251,7 +261,7 @@ struct SearchResultsView: View {
 
     private var messagesTab: some View {
         VStack(spacing: 0) {
-            filters.padding(.horizontal, m.sp24).padding(.vertical, m.sp12)
+            filters.padding(.horizontal, m.sp20).padding(.vertical, m.sp12)
             messageResults.frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider().overlay(colors.border)
             indexingFooter
@@ -342,17 +352,19 @@ struct SearchResultsView: View {
                         HStack(spacing: m.sp8) {
                             InlineErrorView(message: searchError)
                             Button("Try again") { retry += 1 }.buttonStyle(.textLink).disabled(searchBusy || paging)
-                        }.padding(.horizontal, m.sp24).padding(.top, m.sp12)
+                        }.padding(.horizontal, m.sp20).padding(.top, m.sp12)
                     }
                     ForEach(messages) { message in
                         MessageResultRow(
                             matrix: matrix, message: message, query: query, action: { onOpenMessage(message) })
-                        Divider().overlay(colors.border).padding(.horizontal, m.sp24)
+                        Divider().overlay(colors.border).padding(.horizontal, m.sp20)
                     }
                     if matrix.searchHasMore {
                         loadMoreButton.frame(maxWidth: .infinity).padding(.vertical, m.sp16)
                     }
                 }
+                .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
         }
     }
@@ -391,7 +403,7 @@ struct SearchResultsView: View {
                     .font(m.font(.subheadline, .medium)).disabled(indexBusy || matrix.isPreview)
             }
         }
-        .buttonStyle(.textLink).padding(.horizontal, m.sp24).padding(.vertical, m.sp12).background(colors.raised)
+        .buttonStyle(.textLink).padding(.horizontal, m.sp20).padding(.vertical, m.sp12).background(colors.raised)
     }
 
     private func search(_ run: Run) async {
@@ -439,7 +451,7 @@ struct SearchResultsView: View {
     private var filesTab: some View {
         let files = messages.filter { $0.attachment != nil }
         return VStack(spacing: 0) {
-            filters.padding(.horizontal, m.sp24).padding(.vertical, m.sp12)
+            filters.padding(.horizontal, m.sp20).padding(.vertical, m.sp12)
             if files.isEmpty && query.sdkQuery() != nil && (searchBusy || activeRun != run) {
                 SkeletonRows(interval: .searchLoading)
             } else if files.isEmpty {
@@ -464,7 +476,9 @@ struct SearchResultsView: View {
                         if matrix.searchHasMore {
                             loadMoreButton.frame(maxWidth: .infinity).padding(.vertical, m.sp16)
                         }
-                    }.padding(.horizontal, m.sp12).padding(.vertical, m.sp8)
+                    }.padding(.horizontal, m.sp8).padding(.vertical, m.sp8)
+                        .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
+                        .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -481,9 +495,11 @@ struct SearchResultsView: View {
                 LazyVStack(spacing: 0) {
                     ForEach(rooms) { room in
                         ChannelResultRow(matrix: matrix, room: room) { onOpenRoom(room.id) }
-                        Divider().overlay(colors.border).padding(.horizontal, m.sp24)
+                        Divider().overlay(colors.border).padding(.horizontal, m.sp20)
                     }
                 }
+                .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
         }
     }
@@ -513,7 +529,9 @@ struct SearchResultsView: View {
                                         ? ChatUser(id: person.id, name: person.name, avatarURL: person.avatarURL) : nil)
                             }
                         }
-                    }.padding(.horizontal, m.sp12).padding(.vertical, m.sp8)
+                    }.padding(.horizontal, m.sp8).padding(.vertical, m.sp8)
+                        .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
+                        .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -560,7 +578,7 @@ private struct MessageResultRow: View {
                     }
                 }
             }
-            .padding(.horizontal, m.sp24).padding(.vertical, m.sp12).frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, m.sp20).padding(.vertical, m.sp12).frame(maxWidth: .infinity, alignment: .leading)
             .background(hovering ? colors.hover : .clear)
         }
         .buttonStyle(.row).onHover { hovering = $0 }
@@ -608,7 +626,7 @@ private struct ChannelResultRow: View {
                 }.lineLimit(1)
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, m.sp24).frame(height: m.personRow + m.sp8)
+            .padding(.horizontal, m.sp20).frame(height: m.personRow + m.sp8)
             .background(hovering ? colors.hover : .clear)
         }
         .buttonStyle(.row).onHover { hovering = $0 }

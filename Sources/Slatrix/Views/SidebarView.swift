@@ -60,7 +60,7 @@ struct SidebarView: View {
                     Spacer()
                     IconButton(symbol: "sidebar.left", label: "Hide sidebar", role: .body, action: onHide)
                         .foregroundStyle(colors.textSecondary)
-                }.frame(height: m.paneHeader - (appearance.theme.framed ? 0 : m.sidebarInset))
+                }.frame(height: m.paneHeader - (appearance.theme.framed ? 0 : 2 * m.sidebarInset))
                     .background(WindowDragArea())
                 if route == .directMessages {
                     DirectMessagesColumn(
@@ -72,8 +72,7 @@ struct SidebarView: View {
                 }
             }
             .padding(.horizontal, m.sp8)
-            // The list fades out above you.
-            .fadeOut(bottom: m.sidebarFade)
+            Divider().overlay(colors.border)
             footer
         }
         .background(panel ? colors.sidebar : .clear)
@@ -107,7 +106,7 @@ struct SidebarView: View {
                     Button("New message…") { onCreate(.directMessage) }
                     Button("Browse people…") { route = .directory }
                 }
-            }.padding(.top, m.sp8).padding(.bottom, m.sidebarFade)
+            }.padding(.top, m.sp8).padding(.bottom, m.sp8)
         }.scrollIndicators(.hidden)
             .loadingInterval(.sidebarLoading, while: !matrix.roomsLoaded)
             .onChange(of: matrix.rooms.isEmpty, initial: true) { _, empty in
@@ -127,7 +126,7 @@ struct SidebarView: View {
             Spacer(minLength: m.sp2)
             IconButton(symbol: "square.and.pencil", label: "New message", role: .body) { onCreate(.directMessage) }
                 .foregroundStyle(colors.textSecondary)
-        }.padding(.leading, m.sp8).frame(height: m.control)
+        }.padding(.leading, m.sp2).frame(height: m.control)
     }
 
     /// You, with your status, Preferences and signing out; and an update or the preview's way out beside you.
@@ -156,7 +155,7 @@ struct SidebarView: View {
             if let accessory {
                 Button(accessory.title, action: accessory.action).buttonStyle(.primary).controlSize(.small)
             }
-        }.padding(.horizontal, m.sp8).padding(.bottom, m.sp8)
+        }.padding(.horizontal, m.sp8).padding(.vertical, m.sp8)
     }
 
     private func shortcut(_ item: AppRoute, label: String, badge: Int = 0, count: Int = 0) -> some View {
@@ -264,9 +263,11 @@ private struct SpacesMenu: View {
                     Circle().fill(colors.accentFill).frame(width: m(6), height: m(6))
                 }
             }
+            .padding(.horizontal, m(6)).frame(height: m.row)
+            .modifier(SidebarRowFill(selected: false))
         }
         // A borderless-button menu hands its label to AppKit, which moves the chevron before the name.
-        .menuStyle(.button).buttonStyle(.row).menuIndicator(.hidden).fixedSize()
+        .menuStyle(.button).buttonStyle(.row).menuIndicator(.hidden).fixedSize(horizontal: false, vertical: true)
         .help("Switch space")
         .accessibilityLabel(
             "\(current?.name ?? "All conversations"), switch space"

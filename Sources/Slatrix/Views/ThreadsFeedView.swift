@@ -55,6 +55,8 @@ struct ThreadsFeedView: View {
                             ).loadingInterval(.threadsLoading)
                         }
                     }.padding(.horizontal, m.sp2)
+                        .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
+                        .frame(maxWidth: .infinity)
                 }
             }
             coverage

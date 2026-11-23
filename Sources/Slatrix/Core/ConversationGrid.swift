@@ -1,10 +1,12 @@
 import Foundation
 
-/// The conversation's one column, in points at 100% zoom: the header's title and buttons, the messages and the
-/// composer all keep between its edges, the avatars' left edge and the end of the text.
+/// The conversation's one column, in points at 100% zoom: the messages, the composer and the jump pill all keep
+/// between its edges, the avatars' left edge and the end of the text.
 enum ConversationGrid {
     /// A conversation's rows stop at this width, centered in a wider pane; a thread's rows fill its pane.
     static let rowWidth: CGFloat = 744
+    /// Collection feeds (Activity, Threads, Later, Drafts, Search) cap prose and cards here on ultrawide displays.
+    static let collectionWidth: CGFloat = 920
     /// From a row's edge to the avatar, and from the end of the text to the row's other edge.
     static func inset(thread: Bool) -> CGFloat { thread ? 16 : 20 }
     /// Between the avatar and the text: a thread's pane is narrow, so its rows give the text more of it.

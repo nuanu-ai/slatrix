@@ -331,6 +331,7 @@ struct RootView: View {
 
     var body: some View {
         ModalHost(
+            top: m.paneHeader + (colors.theme.framed ? m.sidebarInset : 0),
             onCovered: { shown in
                 modalShown = shown
                 // A notification that arrived while a modal was open opens once it closes.
@@ -1257,7 +1258,7 @@ struct RootView: View {
         channelPanel = panel
     }
     private func channelHeader(_ room: ChatRoom) -> some View {
-        toolbar(grid: true) {
+        toolbar(grid: false) {
             ChannelHeader.Title(matrix: matrix, room: room) { headerAction($0, room: room) }
         } trailing: {
             // In the toolbar, so it never covers or moves a message.
@@ -1522,9 +1523,11 @@ struct RootView: View {
                                     roomID: address.roomID, body: draftSummary(address),
                                     thread: address.threadRootID != nil)
                             }.buttonStyle(.row)
-                            Divider().overlay(colors.border).padding(.leading, m.sp24)
+                            Divider().overlay(colors.border).padding(.leading, m.sp20)
                         }
                     }
+                    .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
+                    .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -1591,7 +1594,8 @@ struct RootView: View {
                 Image(systemName: "chevron.right").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
             }
             Text(body).font(m.font(.body)).foregroundStyle(colors.textSecondary).lineLimit(3)
-        }.padding(m.sp24).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+        }.padding(.horizontal, m.sp20).padding(.vertical, m.sp16).frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
     }
     private func openThreadDraft(_ address: ThreadDraftAddress) {
         let identity = composerIdentity
@@ -3129,7 +3133,9 @@ private struct TitleSearch<Field: View>: View {
                 // Opened from the button, ⌘G or ⌘F: the field was not there to take the cursor, so it takes it now.
                 field().onAppear { if open { bar.focus() } }
             } else {
-                IconButton(symbol: "magnifyingglass", label: "Search", role: .body) { open = true }
+                ToolbarCapsule {
+                    IconButton(symbol: "magnifyingglass", label: "Search", role: .body) { open = true }
+                }
             }
         }
         .onChange(of: bar.focusRequests) { _, _ in if !fits { open = true } }

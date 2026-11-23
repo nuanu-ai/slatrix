@@ -115,24 +115,29 @@ struct TimelineView: View {
                 Divider().overlay(colors.border).padding(.top, insets.top)
             }
         }
-        .overlay(alignment: .bottomTrailing) {
+        .overlay(alignment: .bottom) {
             if jumpVisible && !messages.isEmpty {
-                Button {
-                    if matrix.focusedEventID != nil {
-                        if let onJumpToLatest {
-                            onJumpToLatest()
+                HStack {
+                    Spacer(minLength: 0)
+                    Button {
+                        if matrix.focusedEventID != nil {
+                            if let onJumpToLatest {
+                                onJumpToLatest()
+                            } else {
+                                Task { await matrix.selectRoom(room.id) }
+                            }
                         } else {
-                            Task { await matrix.selectRoom(room.id) }
+                            scroller.scrollToBottom()
                         }
-                    } else {
-                        scroller.scrollToBottom()
-                    }
-                } label: {
-                    Label("Jump to recent", systemImage: "arrow.down").font(m.font(.subheadline, .semibold))
-                        .padding(.horizontal, m.sp16).padding(.vertical, m.sp8)
-                        .background(colors.raised, in: Capsule())
-                        .elevation(.e2, cornerRadius: m.sp20)
-                }.buttonStyle(.row).padding(m.sp20).padding(.bottom, insets.bottom).transition(.opacity)
+                    } label: {
+                        Label("Jump to recent", systemImage: "arrow.down").font(m.font(.subheadline, .semibold))
+                            .padding(.horizontal, m.sp16).padding(.vertical, m.sp8)
+                            .background(colors.raised, in: Capsule())
+                            .elevation(.e2, cornerRadius: m.sp20)
+                    }.buttonStyle(.row)
+                }
+                .padding(.horizontal, m.conversationInset(thread: thread)).padding(.bottom, m.sp16 + insets.bottom)
+                .conversationRow(m, isThread: thread).transition(.opacity)
             }
         }
         .animation(Motion.overlay, value: jumpVisible)

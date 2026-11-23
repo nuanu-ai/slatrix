@@ -38,7 +38,7 @@ struct DirectMessagesColumn: View {
                         }.buttonStyle(.row)
                             .accessibilityAddTraits(room.id == openID ? .isSelected : [])
                     }
-                }.padding(.bottom, m.sidebarFade)
+                }.padding(.bottom, m.sp8)
             }.scrollIndicators(.hidden)
         }
     }
