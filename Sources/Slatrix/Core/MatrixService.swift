@@ -610,7 +610,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             let locked = messages.contains { $0.kind == "m.room.encrypted" }
             if locked != hasLockedMessages { hasLockedMessages = locked }
             if messages.first?.id != oldValue.first?.id { blankPages = 0 }
-            if let root = conversationRoot(), root != threadMessages.first { threadMessages[0] = root }
+            if let root = conversationRoot(), let shown = threadMessages.first,
+                root != Self.threadRootCopy(shown, id: root.id)
+            {
+                threadMessages[0] = root
+            }
             countThreadReplies()
         }
     }
@@ -681,7 +685,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var recentEmoji: [String] = []
     var selectedRoomID: String? { didSet { updateSelectedRoom() } }
     /// The open conversation's entry in `rooms`, apart so its readers are not redrawn by changes to other rooms.
-    /// Without its unread state, which changes with every message in it; the sidebar shows that from `rooms`.
+    /// Without its unread state or latest-message preview, which change with every message in it; the sidebar shows
+    /// those from `rooms`.
     private(set) var selectedRoom: ChatRoom?
     private func updateSelectedRoom() {
         var room = rooms.first { $0.id == selectedRoomID }
@@ -694,6 +699,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         room?.isMarkedUnread = false
         room?.mentions = 0
         room?.fullyReadEventID = nil
+        room?.latest = nil
         if room != selectedRoom { selectedRoom = room }
     }
     var typingUsers: [String] = []
@@ -842,6 +848,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         reach?.cancel()
         reach = rootID.map { root in Task { [weak self] in await self?.reachJump(inThread: root) } }
     }
+    /// Whether a signed-in client is active and not stopping.
+    var isAuthenticated: Bool { client != nil && connectionStopTask == nil }
     var messageActionContext: MessageActionTarget.Context {
         MessageActionTarget.Context(
             sessionID: sessionGeneration, userID: user?.id, roomID: selectedRoomID,
@@ -1003,11 +1011,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private var mainForwardMedia: [String: ForwardMediaRevision] = [:]
     private var threadForwardMedia: [String: ForwardMediaRevision] = [:]
     /// Remote, undeleted attachments each open timeline shows, by event ID.
-    private struct ShownMedia {
+    private struct ShownMedia: Equatable {
         let source: MediaSource
         let attachment: MessageAttachment
         /// The full source, encryption key included; an edit can keep the URL and change the key.
         let identity: String
+        static func == (a: Self, b: Self) -> Bool { a.attachment == b.attachment && a.identity == b.identity }
     }
     private var mainMedia: [String: ShownMedia] = [:]
     /// A live timeline with what its conversation last showed, so coming back to it rebuilds nothing.
@@ -1935,9 +1944,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private func showTimeline(_ snapshot: (items: [TimelineItem], revision: Int), roomID: String) {
         guard snapshot.revision > timelineRevision else { return }
         timelineRevision = snapshot.revision
-        messages = Performance.measure(.timelineProject, ["items": snapshot.items.count]) {
+        let projected = Performance.measure(.timelineProject, ["items": snapshot.items.count]) {
             project(snapshot.items, roomID: roomID)
         }
+        if projected != messages { messages = projected }
         if !messages.isEmpty { Performance.finish(.roomTimeline, ["messages": messages.count]) }
     }
 
@@ -1995,8 +2005,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         mainProjections = [:]
         threadProjections = [:]
         mediaFiles.removeAll()
-        mainMedia = [:]
-        threadMedia = [:]
+        if !mainMedia.isEmpty { mainMedia = [:] }
+        if !threadMedia.isEmpty { threadMedia = [:] }
         mainForwardMedia = [:]
         threadForwardMedia = [:]
         replyPreviewLoads.removeAll()
@@ -2006,20 +2016,20 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         thumbnailSources.removeAll()
         mainSendFailures = [:]
         threadSendFailures = [:]
-        sendFailures = [:]
+        if !sendFailures.isEmpty { sendFailures = [:] }
         selectedRoomID = id
         focusedEventID = eventID
-        messages = []
-        threadMessages = []
+        if !messages.isEmpty { messages = [] }
+        if !threadMessages.isEmpty { threadMessages = [] }
         threadOpening = nil
-        members = []
-        canMentionRoom = false
-        typingUsers = []
+        if !members.isEmpty { members = [] }
+        if canMentionRoom { canMentionRoom = false }
+        if !typingUsers.isEmpty { typingUsers = [] }
         errorMessage = nil
         hasMoreHistory = true
         blankPages = 0
         hasMoreThreadHistory = true
-        firstUnreadEventID = nil
+        if firstUnreadEventID != nil { firstUnreadEventID = nil }
         lastAutomaticReceipt = nil
         readyThreadReadSelection = nil
         lastThreadReceipt = nil
@@ -2138,17 +2148,19 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
         if inThread {
             threadProjections = projections
-            threadMedia = shownMedia
+            if shownMedia != threadMedia { threadMedia = shownMedia }
             threadForwardMedia = forwardMedia
             threadSendFailures = failures
         } else {
             mainProjections = projections
-            mainMedia = shownMedia
+            if shownMedia != mainMedia { mainMedia = shownMedia }
             mainForwardMedia = forwardMedia
             mainSendFailures = failures
-            firstUnreadEventID = UnreadMapping.firstUnreadEventID(in: marks)
+            let unread = UnreadMapping.firstUnreadEventID(in: marks)
+            if unread != firstUnreadEventID { firstUnreadEventID = unread }
         }
-        sendFailures = mainSendFailures.merging(threadSendFailures) { _, latest in latest }
+        let mergedFailures = mainSendFailures.merging(threadSendFailures) { _, latest in latest }
+        if mergedFailures != sendFailures { sendFailures = mergedFailures }
         return projected
     }
 
@@ -2404,20 +2416,30 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         var replies = Performance.measure(.timelineProject, ["items": items.count]) {
             project(items, roomID: root.roomID, inThread: true)
         }
-        var own = replies.last { $0.eventID == root.eventID }
-        own?.id = root.eventID
+        let own = replies.last { $0.eventID == root.eventID }.map { Self.threadRootCopy($0, id: root.eventID) }
         replies.removeAll { $0.eventID == root.eventID }
         threadHoldsRoot = own != nil
-        let shown = threadMessages.first { $0.eventID == root.eventID } ?? root
-        threadMessages = [conversationRoot() ?? own ?? shown] + replies
+        let shown =
+            threadMessages.first { $0.eventID == root.eventID }.map { Self.threadRootCopy($0, id: root.eventID) }
+            ?? Self.threadRootCopy(root, id: root.eventID)
+        let next = [conversationRoot() ?? own ?? shown] + replies
+        if next != threadMessages { threadMessages = next }
+    }
+    /// A thread pane never renders the channel's replies bar, so reply-summary churn on the channel copy must not
+    /// rewrite `threadMessages[0]` or invalidate the thread pane.
+    private static func threadRootCopy(_ message: ChatMessage, id: String) -> ChatMessage {
+        var copy = message
+        copy.id = id
+        copy.replyCount = nil
+        copy.lastReply = nil
+        return copy
     }
     /// The open thread's root as the conversation shows it, while the conversation holds it.
     private func conversationRoot() -> ChatMessage? {
         guard let rootID = threadOpening?.rootID, let shown = threadMessages.first,
-            var root = messages.last(where: { $0.eventID == rootID && $0.roomID == shown.roomID })
+            let root = messages.last(where: { $0.eventID == rootID && $0.roomID == shown.roomID })
         else { return nil }
-        root.id = rootID
-        return root
+        return Self.threadRootCopy(root, id: rootID)
     }
 
     func loadMoreThread(rootID: String) async throws -> Bool {
@@ -2453,17 +2475,17 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     func loadThread(_ root: ChatMessage, openedWith: Int? = nil) async throws {
         try assertDestination(root.roomID)
         threadProjections = [:]
-        threadMedia = [:]
+        if !threadMedia.isEmpty { threadMedia = [:] }
         threadForwardMedia = [:]
         readyThreadReadSelection = nil
         lastThreadReceipt = nil
         threadHandle?.cancel()
         // The root keeps one identity in the pane from the moment it opens, whichever timeline it came from.
-        var opening = root
-        opening.id = root.eventID
+        let opening = Self.threadRootCopy(root, id: root.eventID)
         threadHoldsRoot = false
         threadOpening = (root.eventID, openedWith)
-        threadMessages = [conversationRoot() ?? opening]
+        let initialThread = [conversationRoot() ?? opening]
+        if initialThread != threadMessages { threadMessages = initialThread }
         threadRevision = 0
         threadTimeline = nil
         threadSnapshot = nil
@@ -2481,7 +2503,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
         let threadToken = threadSelection
         threadSendFailures = [:]
-        sendFailures = mainSendFailures
+        if mainSendFailures != sendFailures { sendFailures = mainSendFailures }
         if let ready = await ahead?.value {
             guard token == selection, threadToken == threadSelection else { return ready.listener.cancel() }
             threadTimeline = ready.timeline
@@ -3538,8 +3560,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             }.value
             let canNotify = (try? await room.getPowerLevels().canOwnUserTriggerRoomNotification()) ?? false
             if token == selection {
-                members = result
-                canMentionRoom = canNotify
+                if result != members { members = result }
+                if canNotify != canMentionRoom { canMentionRoom = canNotify }
             }
         } catch { if token == selection { errorMessage = Self.safeError(error) } }
     }

@@ -2235,6 +2235,97 @@ struct TimelineRowHeightTests {
         await drainMainActor()
         #expect(table.rect(ofRow: row).height == height)
     }
+
+    @Test("Recycled cells drop their hosted SwiftUI rootView so idle cells do not retain or observe old timelines")
+    func recycledCellsDropRootView() throws {
+        let context = TimelineRowContext()
+        context.appearance = AppearanceStore()
+        let coordinator = TimelineTableCoordinator()
+        let scrollView = coordinator.makeView()
+        scrollView.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
+        coordinator.update(
+            TimelineTable(
+                entries: [TimelineEntry(id: "day", kind: .day("Today"))], context: context, live: true,
+                bottomAligned: true, focusedEventID: nil, jumpID: nil, startsAtUnread: false, memoryKey: nil,
+                canLoadOlder: false, canLoadNewer: false, scroller: TimelineScroller(), onLoadOlder: {},
+                onLoadNewer: {}, onScroll: { _, _, _, _ in }))
+        scrollView.tile()
+        let table = try #require(scrollView.documentView as? NSTableView)
+        let cell = try #require(table.view(atColumn: 0, row: 1, makeIfNecessary: true) as? TimelineCell)
+        #expect(cell.row != nil)
+        coordinator.recycleCells()
+        #expect(cell.row == nil)
+    }
+
+    @Test("Resizing a wide conversation pane keeps cached row heights when the row column width is unchanged")
+    func widePaneResizePreservesCachedRowHeights() throws {
+        let matrix = MatrixService.scratch()
+        let key = TimelineMemory.Key(
+            sessionID: matrix.notificationSessionID, roomID: "!wide:example.org", threadRootID: nil)
+        defer { TimelineMemory.heights.removeAll { $0.key == key } }
+        let appearance = AppearanceStore()
+        let topic = String(
+            repeating: "A long channel topic that wraps across several lines inside the column. ", count: 6)
+        let welcome = TimelineWelcome(
+            name: "Wide", topic: topic, isDirect: false, isPrivate: false, isEncrypted: false)
+        let entries: [TimelineEntry] =
+            [TimelineEntry(id: "welcome", kind: .welcome(welcome))]
+            + (0..<40).map { index in
+                let message = ChatMessage(
+                    id: "$w\(index)", roomID: "!wide:example.org", senderID: "@a:example.org", senderName: "Alice",
+                    body: "Message \(index)", timestamp: Date(timeIntervalSince1970: Double(index) * 60))
+                return TimelineEntry(
+                    id: message.id,
+                    kind: .message(
+                        TimelineMessageEntry(
+                            message: message, grouped: false, time: "10:00 AM", saved: false, pinned: false,
+                            highlighted: false, sendBusy: false)))
+            }
+
+        func makeCoordinator(width: CGFloat) -> (TimelineTableCoordinator, NSScrollView, NSTableView) {
+            let context = TimelineRowContext()
+            context.matrix = matrix
+            context.appearance = appearance
+            let coordinator = TimelineTableCoordinator()
+            let scrollView = coordinator.makeView()
+            scrollView.frame = NSRect(x: 0, y: 0, width: width, height: 300)
+            coordinator.update(
+                TimelineTable(
+                    entries: entries, context: context, live: true, bottomAligned: true, focusedEventID: nil,
+                    jumpID: nil, startsAtUnread: false, memoryKey: key, canLoadOlder: false, canLoadNewer: false,
+                    scroller: TimelineScroller(), onLoadOlder: {}, onLoadNewer: {}, onScroll: { _, _, _, _ in }))
+            scrollView.tile()
+            let table = scrollView.documentView as! NSTableView
+            return (coordinator, scrollView, table)
+        }
+
+        // First open at 1100 pt (> conversationRow = 744): scroll to top so welcome is measured, then hold heights.
+        let (first, scroll1, table1) = makeCoordinator(width: 1100)
+        scroll1.contentView.scroll(to: .zero)
+        scroll1.reflectScrolledClipView(scroll1.contentView)
+        // Trigger exact measurement of the welcome row at row 1 (under spacer row 0).
+        let welcomeCell = try #require(table1.view(atColumn: 0, row: 1, makeIfNecessary: true) as? TimelineCell)
+        let measuredWelcome = ceil(welcomeCell.height(width: 1100))
+        // Force coordinator to measure welcome via scroll-top settle.
+        first.update(
+            TimelineTable(
+                entries: entries,
+                context: {
+                    let c = TimelineRowContext()
+                    c.matrix = matrix
+                    c.appearance = appearance
+                    return c
+                }(), live: true, bottomAligned: true, focusedEventID: nil, jumpID: nil, startsAtUnread: false,
+                memoryKey: key, canLoadOlder: false, canLoadNewer: false, scroller: TimelineScroller(), onLoadOlder: {},
+                onLoadNewer: {}, onScroll: { _, _, _, _ in }))
+        // Only hold heights once row 1 has its real measured height.
+        #expect(abs(table1.rect(ofRow: 1).height - measuredWelcome) < 1)
+        first.holdHeights()
+
+        // Reopen at 900 pt (still > conversationRow = 744): off-screen welcome row keeps its measured height.
+        let (_, _, table2) = makeCoordinator(width: 900)
+        #expect(abs(table2.rect(ofRow: 1).height - measuredWelcome) < 1)
+    }
 }
 
 /// The timeline's pointer tracking on its own: no window needed.
@@ -2321,5 +2412,86 @@ struct ReplyPreviewLayoutTests {
         #expect(height(loaded) == loading)
         #expect(height(ChatReplyPreview(state: .failed, eventID: "$original")) == loading)
         #expect(height(ChatReplyPreview(state: .unavailable, eventID: "$original")) == loading)
+    }
+
+    @Test("A channel copy of a thread reply keeps its label and height steady when its skeleton bar appears")
+    func threadCopyHeightHolds() async throws {
+        final class SlowOriginRoom: Room, @unchecked Sendable {
+            let gate = Gate()
+            init() { super.init(noHandle: .init()) }
+            required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+            override func id() -> String { "!room:example.org" }
+            override func loadOrFetchEvent(eventId: String) async throws -> TimelineEvent {
+                await gate.wait()
+                throw URLError(.cancelled)
+            }
+        }
+        let zoom = Metrics(zoom: 1.25)
+        let slowRoom = SlowOriginRoom()
+        slowRoom.gate.arm()
+        defer { slowRoom.gate.release() }
+        let matrix = MatrixService.scratch()
+        matrix.configureRoomOpenForChecks(
+            client: FakeClient(rooms: [slowRoom]), roomList: FakeRoomListService(),
+            user: ChatUser(id: "@reader:example.org", name: "Reader"))
+        let appearance = AppearanceStore()
+        var copy = ChatMessage(
+            id: "$copy", roomID: "!room:example.org", senderID: "@reader:example.org", senderName: "Reader",
+            body: "Also in channel", timestamp: Date(timeIntervalSince1970: 0))
+        copy.repliedToThread = true
+        let normal = ChatMessage(
+            id: "$reply", roomID: "!room:example.org", senderID: "@reader:example.org", senderName: "Reader",
+            body: "Normal reply", timestamp: Date(timeIntervalSince1970: 0))
+        let ready = ChatReplyPreview(
+            state: .ready, eventID: "$original", senderID: "@alice:example.org", senderName: "Alice", body: "Original")
+        func host(_ message: ChatMessage) -> NSHostingController<AnyView> {
+            NSHostingController(
+                rootView: AnyView(
+                    ReplyPreviewView(matrix: matrix, message: message, preview: ready, origin: nil)
+                        .environmentObject(appearance).environment(\.metrics, zoom)))
+        }
+        let copyHost = host(copy)
+        let readyHost = host(normal)
+        let size = copyHost.sizeThatFits(in: CGSize(width: 500, height: 10_000))
+        let readyHeight = readyHost.sizeThatFits(in: CGSize(width: 500, height: 10_000)).height
+        #expect(size.height == readyHeight)
+
+        let window = offscreenWindow(NSSize(width: 500, height: size.height))
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        copyHost.view.frame = NSRect(origin: .zero, size: NSSize(width: 500, height: size.height))
+        window.contentView = copyHost.view
+        copyHost.view.layoutSubtreeIfNeeded()
+        func pixels() -> NSBitmapImageRep? {
+            guard let rep = copyHost.view.bitmapImageRepForCachingDisplay(in: copyHost.view.bounds) else { return nil }
+            copyHost.view.cacheDisplay(in: copyHost.view.bounds, to: rep)
+            return rep
+        }
+        let before = try #require(pixels())
+        func diff() -> (yRange: ClosedRange<Int>, width: CGFloat)? {
+            guard let after = pixels(), let old = before.bitmapData, let new = after.bitmapData else { return nil }
+            let stride = after.bytesPerRow
+            let bpp = after.bitsPerPixel / 8
+            var minY: Int?
+            var maxY: Int?
+            var minX = stride
+            var maxX = -1
+            for y in 0..<after.pixelsHigh where memcmp(old + y * stride, new + y * stride, stride) != 0 {
+                minY = minY ?? y
+                maxY = y
+                minX = min(minX, (0..<stride).first { old[y * stride + $0] != new[y * stride + $0] }!)
+                maxX = max(maxX, (0..<stride).last { old[y * stride + $0] != new[y * stride + $0] }!)
+            }
+            guard let low = minY, let high = maxY, maxX >= minX else { return nil }
+            let span = CGFloat(maxX / bpp - minX / bpp + 1) * copyHost.view.bounds.width / CGFloat(after.pixelsWide)
+            return (low...high, span)
+        }
+        #expect(await eventually { (diff()?.width ?? 0) >= zoom(240) - 2 })
+        #expect(copyHost.sizeThatFits(in: CGSize(width: 500, height: 10_000)).height == readyHeight)
+        // Only the second-line skeleton bar may appear; the top half ("replied to a thread:") must stay completely still.
+        let changed = try #require(diff())
+        #expect(changed.yRange.lowerBound >= before.pixelsHigh / 2)
     }
 }

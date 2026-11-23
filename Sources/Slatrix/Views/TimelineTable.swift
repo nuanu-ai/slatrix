@@ -49,6 +49,8 @@ struct TimelineMessageEntry: Hashable {
     var threadRootID: String?
     /// Live pin permission, read lazily when a row's menu opens so async permission loads never invalidate row heights.
     var canPin = false
+    /// Session-level action eligibility, read by resting rows without observing messages or action context.
+    var canAct = false
     var metrics = Metrics()
     var appearance: AppearanceStore?
     var openURL = OpenURLAction { _ in .systemAction }
@@ -406,9 +408,10 @@ struct TimelineTable: NSViewRepresentable {
         }
         prepared = [:]
         spares = []
-        for cell in cells where Self.recycled.count < Self.recycledCells {
+        for cell in cells {
+            cell.clear()
             cell.removeFromSuperview()
-            Self.recycled.append(cell)
+            if Self.recycled.count < Self.recycledCells { Self.recycled.append(cell) }
         }
     }
 
@@ -463,6 +466,7 @@ struct TimelineTable: NSViewRepresentable {
     private func releasePrepared(outside near: NSRange) {
         for (id, cell) in prepared where index[id].map({ !NSLocationInRange($0, near) }) ?? true {
             prepared[id] = nil
+            cell.clear()
             if spares.count < Self.spareCells { spares.append(cell) }
         }
     }
@@ -1021,11 +1025,11 @@ struct TimelineTable: NSViewRepresentable {
         }
     }
 
-    /// What a row's height depends on: the row, and the table's width, settings and pane.
+    /// What a row's height depends on: the row, and the row column width, settings and pane.
     private func fingerprint(_ row: TimelineEntry) -> Int {
         var hasher = Hasher()
         hasher.combine(row)
-        hasher.combine(width)
+        hasher.combine(rowWidth)
         hasher.combine(settings)
         hasher.combine(configuration?.context.isThread)
         return hasher.finalize()
@@ -1228,6 +1232,12 @@ final class TimelineCell: NSView {
         self.commands = commands
     }
 
+    /// Drops the hosted row so idle spare and recycled cells neither retain old contexts nor stay subscribed.
+    func clear() {
+        host.rootView = nil
+        commands = nil
+    }
+
     /// The row's height at `width`, from the same views it is drawn with.
     func height(width: CGFloat) -> CGFloat { host.sizeThatFits(in: CGSize(width: width, height: 0)).height }
 
@@ -1313,7 +1323,6 @@ struct TimelineRow: View, Equatable {
         case .message(let row):
             if let matrix = context.matrix {
                 let message = row.message
-                let target = context.actionTarget(for: message)
                 MessageRow(
                     message: message, grouped: row.grouped, isThread: context.isThread,
                     own: message.senderID == matrix.user?.id, highlighted: row.highlighted, isSaved: row.saved,
@@ -1333,17 +1342,19 @@ struct TimelineRow: View, Equatable {
                         AvatarView(
                             name: $0.senderName, size: metrics.avatarSmall, matrix: matrix, source: $0.avatarURL)
                     },
-                    replyPreview: message.replyPreview.map {
-                        ReplyPreviewView(
-                            matrix: matrix, message: message, preview: $0, origin: target, onOpen: context.onShowReply,
-                            onOpenThread: context.onThread)
+                    replyPreview: message.replyPreview.map { preview in
+                        let needsOrigin = preview.state == .unavailable || preview.state == .failed
+                        return ReplyPreviewView(
+                            matrix: matrix, message: message, preview: preview,
+                            origin: needsOrigin ? context.actionTarget(for: message) : nil,
+                            onOpen: context.onShowReply, onOpenThread: context.onThread)
                     },
                     attachment: message.attachment.map {
                         AttachmentView(
                             matrix: matrix, message: message, attachment: $0, collapsed: row.mediaCollapsed,
-                            actions: context.attachmentActions(for: message, target: target))
+                            actions: context.rowAttachmentActions(for: message))
                     },
-                    actions: context.actions(for: row, target: target),
+                    actions: context.rowActions(for: row),
                     reactionFrame: { context.onReactionFrame(entry.id, $0, $1) })
             }
         }

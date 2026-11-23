@@ -37,9 +37,9 @@ struct TimelineView: View {
     var onOpenMedia: ((ChatMessage) -> Void)? = nil
     /// The window's one inline video player.
     var inlineVideo: InlineVideo? = nil
-    /// Messages scrolled up under the header, which then gets its line. Held by the pane, so a conversation switched
-    /// to keeps the line until its own messages say otherwise.
-    var contentAbove: Binding<Bool> = .constant(false)
+    /// Messages scrolled up under the header, which then gets its line. Held by the pane in an isolated observable
+    /// state so toggling the hairline never redraws the window or timeline shell.
+    var scrollEdge: ScrollEdgeState? = nil
     /// The header's and the composer's heights, which float over the timeline's ends.
     var insets = EdgeInsets()
     @State private var loadingHistory = false
@@ -85,7 +85,7 @@ struct TimelineView: View {
             || TimelineMemory.positions[memoryKey] != nil || jumpTarget != nil
     }
     /// The intro tops a conversation loaded back to its start, or one with nothing else to show.
-    private var reachedStart: Bool { matrix.isPreview || !matrix.hasMoreHistory }
+    var reachedStart: Bool { !thread && (matrix.isPreview || !matrix.hasMoreHistory) }
     /// The message jumped to, when this pane shows it.
     private var jumpTarget: String? {
         thread ? threadRootID.flatMap { matrix.jump?.eventID(inThread: $0) } : matrix.jump?.eventID(inThread: nil)
@@ -119,7 +119,9 @@ struct TimelineView: View {
             onScroll: { atBottom, showsJump, scrolled, report in
                 self.atBottom = atBottom
                 jumpVisible = showsJump
-                if let scrolled, scrolled != contentAbove.wrappedValue { contentAbove.wrappedValue = scrolled }
+                if let scrolled, let scrollEdge, scrolled != scrollEdge.contentAbove {
+                    scrollEdge.contentAbove = scrolled
+                }
                 onReport?(report)
             }, readKey: readKey, insets: insets, barInsets: barInsets
         )
@@ -137,9 +139,7 @@ struct TimelineView: View {
             }
         }
         .overlay(alignment: .top) {
-            if contentAbove.wrappedValue {
-                Divider().overlay(colors.border).padding(.top, insets.top)
-            }
+            if let scrollEdge { ScrollEdgeHairline(state: scrollEdge, top: insets.top) }
         }
         .overlay(alignment: .bottomTrailing) {
             if jumpVisible && !messages.isEmpty {
@@ -323,6 +323,7 @@ struct TimelineView: View {
         context.isThread = thread
         context.threadRootID = threadRootID
         context.canPin = canPinMessages
+        context.canAct = !matrix.isPreview && room.membership == "join" && matrix.user != nil && matrix.isAuthenticated
         context.metrics = m
         context.appearance = appearance
         context.openURL = openURL
@@ -1095,6 +1096,68 @@ extension TimelineRowContext {
         return commands
     }
 
+    private func canAct(on message: ChatMessage) -> Bool {
+        canAct && message.eventID.hasPrefix("$") && message.sendState == "sent" && !message.isRedacted
+    }
+
+    /// Actions for a resting row: captures the SDK action target only when the user actually interacts or opens a menu,
+    /// so evaluating `TimelineRow.body` never subscribes cells to `messages`, `threadMessages` or action context.
+    func rowActions(for row: TimelineMessageEntry) -> MessageRowActions {
+        let message = row.message
+        let actionable = canAct(on: message)
+        var actions = MessageRowActions(
+            openProfile: onOpenProfile.map { open in
+                {
+                    open(
+                        message.senderID,
+                        ChatUser(id: message.senderID, name: message.senderName, avatarURL: message.avatarURL))
+                }
+            },
+            thread: { self.onThread(message) }, openReplies: { self.onOpenReplies(message) },
+            prepareThread: { self.matrix?.prepareThread(message) },
+            reply: { self.onReply(message) }, save: { self.onSave(message) },
+            react: actionable
+                ? { emoji in
+                    guard let target = self.actionTarget(for: message) else { return }
+                    self.onReact(target, emoji)
+                } : nil,
+            openReactions: actionable
+                ? {
+                    guard let target = self.actionTarget(for: message),
+                        self.matrix?.isCurrentMessageAction(target) == true
+                    else { return }
+                    self.onPickEmoji(EmojiPick { self.onReact(target, $0) })
+                } : nil,
+            forward: onForward.flatMap { send in
+                guard actionable, ForwardMessageContent.supports(message) else { return nil }
+                return {
+                    guard let target = self.actionTarget(for: message) else { return }
+                    send(target)
+                }
+            },
+            retrySend: { self.onRetrySend(message) }, cancelSend: { self.onCancelSend(message) })
+        actions.menu = {
+            let target = self.actionTarget(for: message)
+            return self.actions(for: row, target: target).menu()
+        }
+        return actions
+    }
+
+    func rowAttachmentActions(for message: ChatMessage) -> AttachmentActions {
+        let actionable = canAct(on: message)
+        return AttachmentActions(
+            open: { self.onOpenMedia(message) },
+            forward: actionable && ForwardMessageContent.supports(message)
+                ? onForward.map { send in
+                    {
+                        guard let target = self.actionTarget(for: message) else { return }
+                        send(target)
+                    }
+                } : nil,
+            copyLink: { if let link = self.permalinkTarget(for: message) { self.onCopyLink(link) } },
+            inlineVideo: matrix.flatMap { matrix in inlineVideo?.slot(message, matrix: matrix, in: self) })
+    }
+
     func attachmentActions(for message: ChatMessage, target: MessageActionTarget?) -> AttachmentActions {
         AttachmentActions(
             open: { self.onOpenMedia(message) },
@@ -1114,6 +1177,22 @@ extension TimelineRowContext {
             surface = .conversation
         }
         return matrix.captureMessagePermalink(message: message, surface: surface)
+    }
+}
+
+/// Isolated scroll-edge hairline state held by the pane so scrolling across the header never redraws the window.
+@Observable @MainActor final class ScrollEdgeState {
+    var contentAbove = false
+}
+
+private struct ScrollEdgeHairline: View {
+    let state: ScrollEdgeState
+    let top: CGFloat
+    @ThemeColors private var colors
+    var body: some View {
+        if state.contentAbove {
+            Divider().overlay(colors.border).padding(.top, top)
+        }
     }
 }
 

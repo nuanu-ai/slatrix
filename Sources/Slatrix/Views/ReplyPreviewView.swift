@@ -33,7 +33,11 @@ struct ReplyPreviewView: View {
                                 Text(thread.preview).font(m.font(.subheadline, .medium))
                                     .foregroundStyle(appearance.colors.accent)
                             } else {
-                                SkeletonLines(widths: [240])
+                                // Over the reserve rather than beside it so the label stays on line 1 before the bars
+                                // appear and at every zoom.
+                                Text(" ").font(m.font(.subheadline, .medium)).hidden()
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .overlay(alignment: .leading) { SkeletonLines(widths: [240]) }
                             }
                         }.lineLimit(1).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                     }.buttonStyle(.row).disabled(thread == nil || onOpenThread == nil).help("View thread")

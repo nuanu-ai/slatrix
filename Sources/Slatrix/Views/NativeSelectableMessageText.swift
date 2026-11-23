@@ -153,17 +153,23 @@ struct NativeSelectableMessageText: NSViewRepresentable {
     }
 
     func updateNSView(_ view: MessageTextView, context: Context) {
-        context.coordinator.sizes = [:]
-        context.coordinator.onOpenURL = onOpenURL
-        view.menuCommands = menuCommands
-        view.textContainer?.maximumNumberOfLines = max(0, lineLimit ?? 0)
-        view.textContainer?.lineBreakMode = lineLimit == nil ? .byWordWrapping : .byTruncatingTail
-        // Each run styles its own link, so a mention pill isn't underlined until the pointer is over it.
-        view.linkTextAttributes = [.cursor: NSCursor.pointingHand]
-        if context.coordinator.runs != runs || context.coordinator.fontSize != fontSize
+        let maxLines = max(0, lineLimit ?? 0)
+        let limitChanged = context.coordinator.maximumNumberOfLines != maxLines
+        let textChanged =
+            context.coordinator.runs != runs || context.coordinator.fontSize != fontSize
             || context.coordinator.textColor != textColor || context.coordinator.linkColor != linkColor
             || context.coordinator.mentions != mentions || context.coordinator.suffix != suffix
-        {
+        if textChanged || limitChanged { context.coordinator.sizes = [:] }
+        context.coordinator.onOpenURL = onOpenURL
+        view.menuCommands = menuCommands
+        if limitChanged {
+            view.textContainer?.maximumNumberOfLines = maxLines
+            view.textContainer?.lineBreakMode = lineLimit == nil ? .byWordWrapping : .byTruncatingTail
+            context.coordinator.maximumNumberOfLines = maxLines
+        }
+        // Each run styles its own link, so a mention pill isn't underlined until the pointer is over it.
+        view.linkTextAttributes = [.cursor: NSCursor.pointingHand]
+        if textChanged {
             let attributed = NSMutableAttributedString(
                 attributedString: Self.attributed(
                     runs, fontSize: fontSize, textColor: textColor, linkColor: linkColor, mentions: mentions))
@@ -208,6 +214,7 @@ struct NativeSelectableMessageText: NSViewRepresentable {
         var textColor: NSColor?
         var linkColor: NSColor?
         var mentions: MentionPalette?
+        var maximumNumberOfLines: Int?
         var suffix: NSAttributedString?
         /// Laid-out sizes by width for the current text; a timeline row is measured at one or two widths, many times.
         var sizes: [CGFloat: CGSize] = [:]
