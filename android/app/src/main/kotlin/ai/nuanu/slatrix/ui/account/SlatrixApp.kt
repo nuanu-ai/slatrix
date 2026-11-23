@@ -248,8 +248,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         // Bottom to top: each page is pushed over the ones before it in this order.
                         LiveWorkspace(listOfNotNull(
                             selected?.let { WorkspaceCover(it.room.id) {
-                                LiveConversation(it, workspace, workspace, jump, rooms, media, saved, setSaved, people, { id, name -> person = id to name }) { root, row, openedWith ->
-                                    threads?.open(it.room, root, root = row, openedWith = openedWith)
+                                LiveConversation(it, workspace, workspace, jump, rooms, media, saved, setSaved, people, { id, name -> person = id to name }) { root, row, openedWith, replying ->
+                                    threads?.open(it.room, root, root = row, openedWith = openedWith, replying = replying)
                                 }
                             } },
                             thread?.let { WorkspaceCover("${it.room.id} ${it.threadRoot}") {
@@ -347,8 +347,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
 private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?,
     jump: (RoomSummary, String, String?) -> Unit, rooms: MatrixRooms?, media: MatrixMedia, saved: List<SavedMessage>,
     onSetSaved: (String, String, Boolean) -> Unit, people: MatrixPeople?, onPerson: (userId: String, name: String?) -> Unit,
-    /** Opens a thread, with the reply count the opener showed: only the replies bar shows one. */
-    onOpenThread: (root: String, row: ConversationMessage?, openedWith: Int?) -> Unit = { _, _, _ -> }) {
+    /** Opens a thread, with the reply count the opener showed, which only the replies bar does, to read it or to reply. */
+    onOpenThread: (root: String, row: ConversationMessage?, openedWith: Int?, replying: Boolean) -> Unit = { _, _, _, _ -> }) {
     val context = LocalContext.current
     // The room as the list follows it, so a change of name, topic or permissions shows while it's open; read only
     // below, so other rooms' updates don't recompose the conversation.
@@ -417,7 +417,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             },
             { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.retry(open) },
             { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
-            { root -> onOpenThread(root, row(root), null) },
+            { root -> onOpenThread(root, row(root), null, false) },
             open.threadRoot, rememberMessageActions(conversation, composer, main, room).let { actions ->
                 val savedHere = remember(saved, open.room.id) { saved.filter { it.roomId == open.room.id }.map { it.eventId }.toSet() }
                 remember(actions, savedHere, open.threadRoot) {
@@ -442,7 +442,9 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             { openAttachment(context, media, it) }, { media.file(it) }, { counterpart?.let { onPerson(it.id, it.name) } ?: run { details = true } },
             typing = open.typing?.others?.collectAsState(emptyList())?.value.orEmpty(), onPerson = profile,
             loadThreadOrigin = { conversation?.threadOrigin(it) }, onSendShown = { conversation?.sendShown() },
-            onOpenReplies = { root, replies -> onOpenThread(root, row(root), replies) })
+            onOpenReplies = { root, replies -> onOpenThread(root, row(root), replies, false) }, replying = open.replying,
+            // Slack opens the thread ready to type after Reply in thread.
+            onReplyInThread = { root -> onOpenThread(root, row(root), null, true) })
         }
         }
         forwarding?.let { (message, content) ->

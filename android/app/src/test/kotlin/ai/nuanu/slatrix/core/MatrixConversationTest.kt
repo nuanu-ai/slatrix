@@ -377,8 +377,96 @@ class MatrixConversationTest {
         ), messages.map { it.replyTo })
         // The SDK finds the reply in the timeline and fetches what it quotes, so it is asked by each reply's own ID.
         assertEquals(setOf("\$b", "\$c"), setOf(timeline.fetched.receive(), timeline.fetched.receive()))
+        // This SDK never answers, so asking stops and both quotes say so.
+        val settled = listOf(ReplyPreview.State.Ready, ReplyPreview.State.Unavailable, ReplyPreview.State.Unavailable)
+        suspend fun settles(seenBy: List<String>) = withContext(Dispatchers.Default) {
+            withTimeout(2_000) {
+                conversation.state.first { state -> state.rows.messages.map { it.replyTo?.state } == settled && state.rows.messages[1].readBy == seenBy }
+            }
+        }
+        settles(emptyList())
+        // The reply changes, here by being read, with its parent still missing: the quote keeps saying so, never blank again.
+        val asked = CompletableDeferred<Unit>()
+        timeline.onFetch = { asked.complete(Unit); kotlinx.coroutines.awaitCancellation() }
+        timeline.emit(listOf(TimelineDiff.Set(1u, conversationItem("b", "\$b", "Yes", content = reply("\$old", EmbeddedEventDetails.Unavailable),
+            readBy = listOf("@sam:example.org")))))
+        asked.await()
+        settles(listOf("@sam:example.org"))
         conversation.close()
-        assertTrue("Asked once for each reply", timeline.fetched.tryReceive().isFailure)
+    }
+
+    // capability: message.reply-preview
+    @Test fun aReplyTheTimelineBuildsAgainAsksForItsQuoteAgain() = runTest {
+        val waiting = quoting(EmbeddedEventDetails.Unavailable)
+        val timeline = ConversationTimeline(listOf(waiting))
+        var asks = 0
+        timeline.onFetch = {
+            val answer = if (++asks == 1) EmbeddedEventDetails.Error("offline") else quotedParent
+            timeline.emit(listOf(TimelineDiff.Set(0u, quoting(answer))))
+        }
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        suspend fun quote(state: ReplyPreview.State) = withContext(Dispatchers.Default) {
+            withTimeout(2_000) { conversation.state.first { it.rows.messages.singleOrNull()?.replyTo?.state == state } }
+        }.rows.messages.single().replyTo
+        quote(ReplyPreview.State.Unavailable)
+        // A reset or a late decryption builds the reply again, and the SDK then holds no parent for it.
+        timeline.emit(listOf(TimelineDiff.Reset(listOf(waiting))))
+        assertEquals(ReplyPreview("\$p", ReplyPreview.State.Ready, "Sam Okafor", "Ship it?"), quote(ReplyPreview.State.Ready))
+        conversation.close()
+    }
+
+    // capability: message.reply-preview
+    @Test fun aReplyBuiltAgainWhileItsQuoteLoadsIsAskedForItAgain() = runTest {
+        val waiting = quoting(EmbeddedEventDetails.Unavailable)
+        val timeline = ConversationTimeline(listOf(waiting))
+        var asks = 0
+        // The first request ends with the reply built again, so the copy the timeline now holds was never asked for.
+        timeline.onFetch = {
+            timeline.emit(listOf(if (++asks == 1) TimelineDiff.Reset(listOf(waiting)) else TimelineDiff.Set(0u, quoting(quotedParent))))
+        }
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        withContext(Dispatchers.Default) {
+            withTimeout(2_000) { conversation.state.first { it.rows.messages.singleOrNull()?.replyTo?.state == ReplyPreview.State.Ready } }
+        }
+        conversation.close()
+    }
+
+    // capability: message.reply-preview
+    @Test fun aQuoteTheSdkStopsLoadingSaysItIsUnavailable() = runTest {
+        val timeline = ConversationTimeline(listOf(quoting(EmbeddedEventDetails.Unavailable)))
+        val givesUp = CompletableDeferred<Unit>()
+        // The SDK marks the parent as loading, then gives up on one it can't show without saying so in the reply.
+        timeline.onFetch = {
+            timeline.emit(listOf(TimelineDiff.Set(0u, quoting(EmbeddedEventDetails.Pending))))
+            givesUp.await()
+            throw IllegalStateException("unsupported event")
+        }
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        suspend fun quote(state: ReplyPreview.State) = withContext(Dispatchers.Default) {
+            withTimeout(2_000) { conversation.state.first { it.rows.messages.singleOrNull()?.replyTo?.state == state } }
+        }
+        assertEquals("\$b", timeline.fetched.receive())
+        quote(ReplyPreview.State.Loading)
+        givesUp.complete(Unit)
+        quote(ReplyPreview.State.Unavailable)
+        conversation.close()
+    }
+
+    // capability: message.reply-preview
+    @Test fun aConversationOpenedAtAMessageLoadsTheQuotesItShows() = runTest {
+        val live = ConversationTimeline(listOf(conversationItem("new", "\$new", "Latest")))
+        val around = ConversationTimeline(listOf(conversationItem("old", "\$old", "Earlier"), quoting(EmbeddedEventDetails.Unavailable)))
+        around.onFetch = { around.emit(listOf(TimelineDiff.Set(1u, quoting(quotedParent)))) }
+        // Only the timeline around the message holds this copy of the reply; a request anywhere else answers nothing.
+        live.onFetch = { kotlinx.coroutines.awaitCancellation() }
+        val conversation = MatrixConversation(backgroundScope, JumpRoom(live, around), at = "\$old")
+        val shown = withContext(Dispatchers.Default) {
+            withTimeout(2_000) {
+                conversation.state.first { it.focused && it.rows.messages.lastOrNull()?.replyTo?.state == ReplyPreview.State.Ready }
+            }
+        }
+        assertEquals(listOf("Earlier", "Yes"), shown.rows.messages.map { it.body })
+        conversation.close()
     }
 
     // capability: thread.send-to-channel
@@ -1424,17 +1512,21 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
         pins.send(eventId to false)
         return true
     }
+    /** The items as the timeline holds them now, each event's latest copy last. */
+    private val items = cached.toMutableList()
     override suspend fun getEventTimelineItemByEventId(eventId: String): EventTimelineItem =
-        checkNotNull(cached.firstNotNullOfOrNull { item -> item.asEvent()?.takeIf {
+        checkNotNull(synchronized(items) { items.toList() }.asReversed().firstNotNullOfOrNull { item -> item.asEvent()?.takeIf {
             (it.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId == eventId } })
     /** Completes when the server's member list is in. */
     var memberFetch = CompletableDeferred(Unit)
     override suspend fun fetchMembers() = memberFetch.await()
     val fetched = Channel<String>(Channel.UNLIMITED)
-    override suspend fun fetchDetailsForEvent(eventId: String) { fetched.send(eventId) }
+    /** What the SDK does with a reply asked for its parent, before the request returns. */
+    var onFetch: suspend (String) -> Unit = {}
+    override suspend fun fetchDetailsForEvent(eventId: String) { fetched.send(eventId); onFetch(eventId) }
     override suspend fun addListener(listener: TimelineListener): TaskHandle {
         listeners += listener
-        listener.onUpdate(listOf(TimelineDiff.Reset(cached)))
+        listener.onUpdate(listOf(TimelineDiff.Reset(synchronized(items) { items.toList() })))
         return object : TaskHandle(NoHandle) { override fun cancel() { listenerCancelled.complete(Unit) } }
     }
     var pageFailure: Exception? = null
@@ -1466,6 +1558,7 @@ private class ConversationTimeline(private val cached: List<TimelineItem>) : Tim
     fun emit(diff: List<TimelineDiff>) {
         // Some checks send changes no real timeline would, to see the conversation survive them.
         runCatching { diff.forEach { held.applyDiff(it, ::eventIdOf) } }
+        runCatching { synchronized(items) { diff.forEach { change -> items.applyDiff(change) { it } } } }
         listeners.forEach { it.onUpdate(diff) }
     }
     override fun createMessageContent(msgType: MessageType): RoomMessageEventContentWithoutRelation = ConversationContent(msgType)
@@ -1501,6 +1594,20 @@ private class ConversationContent(val type: MessageType) : RoomMessageEventConte
         return this
     }
 }
+
+/** The parent a quote shows once the SDK has it. */
+private val quotedParent = EmbeddedEventDetails.Ready(
+    TimelineItemContent.MsgLike(MsgLikeContent(
+        MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent("Ship it?", null)), "Ship it?", false, null)), null, null, null)),
+    "@sam:example.org", ProfileDetails.Ready("Sam Okafor", false, null, null, null), 1_700_000_000_000u, EventOrTransactionId.EventId("\$p"))
+
+/** The reply `$b`, "Yes", with what the SDK holds of its parent `$p`. */
+private fun quoting(parent: EmbeddedEventDetails) = conversationItem("b", "\$b", "Yes", content = TimelineItemContent.MsgLike(MsgLikeContent(
+    MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent("Yes", null)), "Yes", false, null)),
+    object : InReplyToDetails(NoHandle) {
+        override fun eventId(): String = "\$p"
+        override fun event(): EmbeddedEventDetails = parent
+    }, null, null)))
 
 internal fun conversationItem(
     stableId: String,

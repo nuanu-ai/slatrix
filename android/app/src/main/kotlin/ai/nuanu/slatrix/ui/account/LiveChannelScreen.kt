@@ -136,7 +136,11 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     /** Told once what the reader sent is in view. */
     onSendShown: () -> Unit = {},
     /** Opens a thread from its replies bar, with the count the bar shows. */
-    onOpenReplies: (rootEventId: String, replies: Int) -> Unit = { _, _ -> }) {
+    onOpenReplies: (rootEventId: String, replies: Int) -> Unit = { _, _ -> },
+    /** Opened to reply, so the field takes the keyboard, as Slack's thread does after Reply in thread. */
+    replying: Boolean = false,
+    /** Opens a thread to reply in it, from a message's menu; [onOpenThread] opens one to read. */
+    onReplyInThread: (rootEventId: String) -> Unit = onOpenThread) {
     val colors = SlatrixTheme.colors
     val list = rememberLazyListState()
     val videos = rememberVideoPlayback(loadFile)
@@ -287,7 +291,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     LaunchedEffect(sheetTop != null) { if (sheetTop != null) focus.animateTo(1f, Motion.pane()) else focus.snapTo(0f) }
     // Inside a thread, Reply has nowhere further to go.
     menu?.let { pressed ->
-        MessageActionsHost(pressed.message, actions, onOpenThread.takeIf { threadRoot == null }, onRetrySend, onDeleteUnsent,
+        MessageActionsHost(pressed.message, actions, onReplyInThread.takeIf { threadRoot == null }, onRetrySend, onDeleteUnsent,
             { sheetTop = it }) { menu = null }
     }
     var reacted by remember { mutableStateOf<ConversationMessage?>(null) }
@@ -336,7 +340,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                     else -> "Message #${room.name}"
                 }
                 val senders = remember(state.rows) { state.rows.asReversed().mapNotNull { (it as? ConversationMessage)?.senderId } }
-                if (room.canPost) MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders,
+                if (room.canPost) MessageComposer(placeholder, composer, onDraft, onSend, composerActions, senders, replying,
                     aboveField = if (threadRoot != null && composer.target !is ComposerTarget.Edit) {
                         { AlsoSendTo(room, composer.alsoToChannel, composerActions.onAlsoToChannel) }
                     } else null) else CannotPost()

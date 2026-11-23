@@ -32,6 +32,8 @@ data class OpenChannel(
     val root: ConversationMessage? = null,
     /** [root] is Threads' row, which the thread's own replaces once it loads. */
     val listedRoot: Boolean = false,
+    /** Opened to reply, so the reply field takes the keyboard. */
+    val replying: Boolean = false,
     /** [at] is where its unread messages start, which it opens at without a highlight. */
     val resume: Boolean = false,
     /** The reply count the thread's opener showed, such as a Threads item's. */
@@ -123,10 +125,10 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
 
     /** Opens [room]; a channel opened without [at] opens where its unread messages start, as on the Mac. */
     fun open(room: RoomSummary, threadRoot: String? = null, at: String? = null, root: ConversationMessage? = null,
-        openedWith: Int? = null, listedRoot: Boolean = false) {
+        openedWith: Int? = null, listedRoot: Boolean = false, replying: Boolean = false) {
         val resume = room.resumeAt?.takeIf { at == null && threadRoot == null }
         select(OpenChannel(room, threadRoot = threadRoot, at = at ?: resume, root = root, listedRoot = listedRoot,
-            resume = resume != null, openedWith = openedWith))
+            resume = resume != null, openedWith = openedWith, replying = replying))
     }
 
     /** Opens a thread from its Threads [thread] item. */
@@ -135,7 +137,7 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
 
     /** Opens [open] again, as it was asked for, after it failed to. */
     fun retry(open: OpenChannel) =
-        open(open.room, open.threadRoot, open.at.takeUnless { open.resume }, open.root, open.openedWith, open.listedRoot)
+        open(open.room, open.threadRoot, open.at.takeUnless { open.resume }, open.root, open.openedWith, open.listedRoot, open.replying)
 
     /**
      * Opens [room] at [eventId], highlighted; a reply in the thread [threadRoot] opens the channel at the root, for the
