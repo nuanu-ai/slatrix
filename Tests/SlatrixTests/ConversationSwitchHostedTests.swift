@@ -505,4 +505,38 @@ struct ConversationSwitchHostedTests {
         #expect(insets.top > 0 && insets.bottom > 0, "firstInsets=\(insets), moved=\(moved)")
         #expect(moved.isEmpty, "moved=\(moved), firstInsets=\(insets)")
     }
+
+    @Test("Switching from a room with a multi-line draft to a held room with an empty composer moves no rows")
+    func warmSwitchDifferentComposerHeight() async throws {
+        let harness = try Harness()
+        defer { harness.close() }
+        try #require(await harness.settled(on: 0))
+        // Visit Room 1 so it is held in recentTimelines, then return to Room 0.
+        harness.menu("next-conversation")
+        try #require(await harness.settled(on: 1))
+        harness.menu("back")
+        try #require(await harness.settled(on: 0))
+        // Type a 5-line draft into Room 0's composer so its footer is much taller than Room 1's.
+        let editor = try #require(
+            Harness.views(in: harness.hosting).compactMap { $0 as? NSTextView }.first {
+                $0.window != nil && $0.isEditable
+            })
+        editor.string = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5"
+        editor.didChangeText()
+        let scrollBefore = try #require(
+            Harness.views(in: harness.hosting).compactMap { $0 as? TimelineScrollView }.first)
+        let tallBottom = scrollBefore.contentInsets.bottom
+        #expect(
+            await eventually {
+                harness.hosting.layoutSubtreeIfNeeded()
+                return scrollBefore.contentInsets.bottom > tallBottom + 20
+            })
+        await harness.idle()
+        harness.record()
+        harness.menu("next-conversation")
+        #expect(await harness.settled(on: 1))
+        let frames = await harness.stop()
+        let faults = Self.faults(frames, to: harness.name(1), held: true)
+        #expect(faults.isEmpty, Self.report(faults, frames))
+    }
 }

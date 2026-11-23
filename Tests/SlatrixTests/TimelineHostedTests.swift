@@ -52,6 +52,8 @@ struct TimelineHostedTests {
         var zoom: CGFloat = 1
         var thread = false
         var threadRootID: String?
+        var canPinMessages = false
+        var onTogglePin: ((ChatMessage) -> Void)? = nil
         /// A new timeline of the same conversation, as the app opens one at an older message and back.
         var timeline = 0
         var unreadAnchor: String?
@@ -59,7 +61,8 @@ struct TimelineHostedTests {
             TimelineView(
                 matrix: service, room: room, thread: thread, threadRootID: threadRootID, savedIDs: [],
                 onThread: { _ in },
-                onReply: { _ in }, onEdit: { _ in }, onSave: { _ in }, onReport: onReport,
+                onReply: { _ in }, onEdit: { _ in }, onSave: { _ in }, canPinMessages: canPinMessages,
+                onTogglePin: onTogglePin, onReport: onReport,
                 unreadAnchor: unreadAnchor, insets: TimelineHostedTests.insets
             )
             // As the app's room pane, a table per timeline the service opens.
@@ -1507,6 +1510,64 @@ struct TimelineHostedTests {
         pick.action("🎉")
         #expect(await eventually { harness.timeline.reactions.all == ["🎉 $Message-4"] })
     }
+
+    @Test("Flipping pin permission or thread action context never wipes cached row heights or re-measures rows")
+    func actionContextAndPinPermissionDoNotRemeasureRows() async throws {
+        let harness = Harness(messages: Self.actionable(0..<20))
+        defer { harness.close() }
+        harness.window.orderFrontRegardless()
+        var fixture = harness.fixture(Self.room)
+        fixture.onTogglePin = { _ in }
+        harness.hosting.rootView = fixture
+        await settle(harness) { harness.cell(showing: "$Message-19") != nil }
+        // Let background prefetch finish measuring every row so later measurements are strictly from our mutations.
+        var passes = 0
+        let counter = CFRunLoopObserverCreateWithHandler(
+            nil, CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.max
+        ) { _, _ in MainActor.assumeIsolated { passes += 1 } }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), counter, .commonModes)
+        defer { CFRunLoopObserverInvalidate(counter) }
+        for _ in 0..<10 {
+            let check = Date()
+            let start = passes
+            _ = await eventually { passes >= start + 6 }
+            if !(await performanceMessages(since: check).contains { $0.message.hasPrefix("interval=rows.measure ") }) {
+                break
+            }
+        }
+
+        let since = Date()
+        // Flip pin permission as loadPinPermission does asynchronously.
+        fixture.canPinMessages = true
+        harness.hosting.rootView = fixture
+        harness.layout()
+        // Mutate messageActionContext as opening and closing a thread does.
+        harness.service.setMessageActionThread(rootID: "$Message-19")
+        harness.layout()
+        harness.service.setMessageActionThread(rootID: nil)
+        harness.layout()
+        let settledStart = passes
+        _ = await eventually { passes >= settledStart + 6 }
+
+        let measured = await performanceMessages(since: since).filter {
+            $0.message.hasPrefix("interval=rows.measure ")
+        }
+        #expect(measured.isEmpty, "Unexpected row re-measurements: \(measured.map(\.message))")
+
+        // The context menu still reflects the live pin permission without having rebuilt rows.
+        let cell = try #require(harness.cell(showing: "$Message-19"))
+        let event = try #require(
+            NSEvent.mouseEvent(
+                with: .rightMouseDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: harness.window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        let pinItem = try #require(cell.menu(for: event)?.items.first { $0.title == "Pin to conversation" })
+        #expect(pinItem.isEnabled)
+        fixture.canPinMessages = false
+        harness.hosting.rootView = fixture
+        harness.layout()
+        let disabledPin = try #require(cell.menu(for: event)?.items.first { $0.title == "Pin to conversation" })
+        #expect(!disabledPin.isEnabled)
+    }
 }
 
 extension TimelineHostedTests {
@@ -1740,7 +1801,7 @@ extension TimelineHostedTests {
                 kind: .message(
                     TimelineMessageEntry(
                         message: message, grouped: false, time: "10:00 AM", saved: false, pinned: false,
-                        canPin: false, highlighted: false, sendBusy: false)))
+                        highlighted: false, sendBusy: false)))
         }
         let entries = [
             TimelineEntry(id: "day", kind: .day("Today")), message(0), message(1),
@@ -1789,7 +1850,7 @@ extension TimelineHostedTests {
                 kind: .message(
                     TimelineMessageEntry(
                         message: message, grouped: false, time: "10:00 AM", saved: false, pinned: false,
-                        canPin: false, highlighted: false, sendBusy: false)))
+                        highlighted: false, sendBusy: false)))
         }
         var above: Bool?
         var reports: [Bool] = []
@@ -1839,7 +1900,7 @@ extension TimelineHostedTests {
                     kind: .message(
                         TimelineMessageEntry(
                             message: message, grouped: false, time: "10:00 AM", saved: false, pinned: false,
-                            canPin: false, highlighted: false, sendBusy: false)))
+                            highlighted: false, sendBusy: false)))
             }
         var asked = 0
         func table(landed: Int, canLoadOlder: Bool) -> TimelineTable {

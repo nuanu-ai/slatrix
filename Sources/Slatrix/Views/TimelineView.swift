@@ -242,7 +242,6 @@ struct TimelineView: View {
             unreadAnchor: unreadAnchor, me: matrix.user?.id,
             groups: appearance.density != .compact, threadRootEventID: thread ? threadRootID : nil,
             repliesLine: thread ? matrix.threadRepliesLine : nil)
-        let context = matrix.messageActionContext
         let offline = matrix.connectionState == .offline
         let failures = matrix.sendFailures.compactMapValues { $0.shown(offline: offline) }
         let showOlder = thread ? (hasOlder && showThreadOlder) : hasOlder
@@ -251,11 +250,11 @@ struct TimelineView: View {
             hasNewer: hasNewer,
             loadingHistory: loadingOlder, welcome: welcome,
             pinned: room.pinnedEventIDs,
-            canPin: canPinMessages, savedIDs: savedIDs, highlighted: highlighted,
+            savedIDs: savedIDs, highlighted: highlighted,
             sendFailures: failures, pendingSendActions: matrix.pendingSendActions, sendActions: sendActions,
-            context: context, collapsedMedia: matrix.collapsedMedia)
+            collapsedMedia: matrix.collapsedMedia)
         return layout.entries(for: inputs) {
-            buildEntries(rows, showOlder: showOlder, context: context, failures: failures)
+            buildEntries(rows, showOlder: showOlder, failures: failures)
         }
     }
 
@@ -266,7 +265,7 @@ struct TimelineView: View {
     }
 
     private func buildEntries(
-        _ rows: [TimelineLayout.Row], showOlder: Bool, context: MessageActionTarget.Context,
+        _ rows: [TimelineLayout.Row], showOlder: Bool,
         failures: [SendQueueMessageKey: MessageSendFailure]
     ) -> [TimelineEntry] {
         var entries: [TimelineEntry] = []
@@ -303,13 +302,12 @@ struct TimelineView: View {
                                 saved: !savedIDs.isEmpty
                                     && savedIDs.contains(
                                         SavedMessageReference(roomID: message.roomID, eventID: message.eventID).id),
-                                pinned: pinned.contains(message.eventID), canPin: canPinMessages,
+                                pinned: pinned.contains(message.eventID),
                                 highlighted: highlighted == message.eventID,
                                 sendFailure: failures.isEmpty ? nil : failures[key],
                                 sendBusy: !pending.isEmpty && pending.contains(key) || sendActions.contains(message.id),
                                 seenBy: seen[row.id],
-                                mediaCollapsed: !collapsed.isEmpty && collapsed.contains(message.eventID),
-                                context: context))))
+                                mediaCollapsed: !collapsed.isEmpty && collapsed.contains(message.eventID)))))
             }
         }
         if showOlder {
@@ -324,6 +322,7 @@ struct TimelineView: View {
         context.matrix = matrix
         context.isThread = thread
         context.threadRootID = threadRootID
+        context.canPin = canPinMessages
         context.metrics = m
         context.appearance = appearance
         context.openURL = openURL
@@ -470,13 +469,11 @@ struct TimelineView: View {
         var loadingHistory: Bool
         var welcome: TimelineWelcome
         var pinned: [String]
-        var canPin: Bool
         var savedIDs: Set<String>
         var highlighted: String?
         var sendFailures: [SendQueueMessageKey: MessageSendFailure]
         var pendingSendActions: Set<SendQueueMessageKey>
         var sendActions: Set<String>
-        var context: MessageActionTarget.Context
         var collapsedMedia: Set<String>
     }
     private var entryInputs: EntryInputs?
@@ -1065,7 +1062,7 @@ extension TimelineRowContext {
             commands.append(
                 MessageMenuCommand(
                     id: "pin", title: row.pinned ? "Unpin from conversation" : "Pin to conversation",
-                    isEnabled: row.canPin && (row.pinned || !message.isRedacted) && message.eventID.hasPrefix("$"),
+                    isEnabled: self.canPin && (row.pinned || !message.isRedacted) && message.eventID.hasPrefix("$"),
                     perform: { onTogglePin(message) }))
         }
         let link = permalinkTarget(for: message)

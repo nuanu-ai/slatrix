@@ -33,7 +33,6 @@ struct TimelineMessageEntry: Hashable {
     var time: String
     var saved: Bool
     var pinned: Bool
-    var canPin: Bool
     var highlighted: Bool
     var sendFailure: MessageSendFailure?
     var sendBusy: Bool
@@ -41,8 +40,6 @@ struct TimelineMessageEntry: Hashable {
     var seenBy: [String]? = nil
     /// The reader collapsed this message's image or video.
     var mediaCollapsed = false
-    /// Rows capture their action target from it, so a new context redraws them.
-    var context: MessageActionTarget.Context?
 }
 
 /// What every row of one timeline shares: the session and the actions rows call back into.
@@ -50,6 +47,8 @@ struct TimelineMessageEntry: Hashable {
     var matrix = MatrixService?.none
     var isThread = false
     var threadRootID: String?
+    /// Live pin permission, read lazily when a row's menu opens so async permission loads never invalidate row heights.
+    var canPin = false
     var metrics = Metrics()
     var appearance: AppearanceStore?
     var openURL = OpenURLAction { _ in .systemAction }
