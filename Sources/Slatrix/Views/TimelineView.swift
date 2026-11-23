@@ -46,6 +46,8 @@ struct TimelineView: View {
     /// In a thread, the loading row sits between the root and replies; show it only after the loading delay so short
     /// threads never open with a 40 pt blank gap that snaps replies up when history ends.
     @State private var showThreadOlder = false
+    /// True once this thread pane has rendered its entries, so retries or errors never re-hide an already-visible root.
+    @State private var showedThreadEntries = false
     @State private var deleting: MessageActionTarget?
     @State private var cancelling: ChatMessage?
     /// Retries and cancellations started here and not yet finished, by message ID.
@@ -81,7 +83,8 @@ struct TimelineView: View {
     /// fetched before locking the opening position.
     private var awaitingThreadTarget: Bool {
         guard thread, !matrix.isPreview, let rootID = threadRootID, matrix.threadOpening?.rootID == rootID,
-            !matrix.isBuildingThreadTimeline, matrix.loadsMoreThreadHistory, matrix.threadPageError == nil
+            !matrix.isBuildingThreadTimeline, matrix.threadPageError == nil,
+            matrix.loadsMoreThreadHistory || matrix.searchingThreadTargetSelection == matrix.threadSelection
         else { return false }
         if let target = jumpTarget {
             guard !messages.contains(where: { $0.eventID == target }) else { return false }
@@ -99,14 +102,16 @@ struct TimelineView: View {
     }
     private var threadAnchorSearchKey: String? {
         guard thread, !matrix.isPreview, let rootID = threadRootID, let target = rememberedThreadEventID,
-            matrix.loadsMoreThreadHistory, matrix.threadOpening?.rootID == rootID
+            matrix.loadsMoreThreadHistory, matrix.threadPageError == nil,
+            matrix.threadAnchorSearchDoneSelection != matrix.threadSelection,
+            matrix.threadOpening?.rootID == rootID
         else { return nil }
         return "\(rootID):\(matrix.threadSelection):\(target)"
     }
     /// Holds back the synthetic `[root]` row while replies or a remembered/jumped position are still arriving so a
-    /// tall thread never flashes its root and teleports off-screen.
+    /// tall thread never flashes its root and teleports off-screen. Once shown, never re-hides an already-visible root.
     private var holdsThreadEntries: Bool {
-        guard awaitingThreadReplies else { return false }
+        guard !showedThreadEntries, awaitingThreadReplies else { return false }
         return matrix.isBuildingThreadTimeline || matrix.threadExpectsReplies
             || TimelineMemory.positions[memoryKey] != nil || jumpTarget != nil
     }
@@ -197,6 +202,9 @@ struct TimelineView: View {
         .task(id: threadAnchorSearchKey) {
             guard let rootID = threadRootID, let target = rememberedThreadEventID else { return }
             matrix.reachThreadAnchor(target, inThread: rootID)
+        }
+        .onChange(of: thread && !holdsThreadEntries && !messages.isEmpty, initial: true) { _, visible in
+            if visible { showedThreadEntries = true }
         }
         .task(id: thread && hasOlder && loadingOlder && matrix.connectionState != .offline) {
             showThreadOlder = false
@@ -355,7 +363,9 @@ struct TimelineView: View {
         context.isThread = thread
         context.threadRootID = threadRootID
         context.canPin = canPinMessages
-        context.canAct = !matrix.isPreview && room.membership == "join" && matrix.user != nil && matrix.isAuthenticated
+        context.canAct =
+            !matrix.isPreview && room.membership == "join" && matrix.user != nil && matrix.isAuthenticated
+            && (!thread || matrix.hasThreadTimeline(for: threadRootID))
         context.metrics = m
         context.appearance = appearance
         context.openURL = openURL

@@ -234,6 +234,18 @@ struct ThreadPaneHostedTests {
         await harness.idle()
         #expect(!harness.matrix.isBuildingThreadTimeline)
         #expect(await eventually { threadRows(harness)[rootID] != nil })
+        // Without a built thread timeline, actions on the cached root must stay disabled rather than no-oping on click.
+        let threadPane = try #require(
+            Harness.views(in: harness.hosting)
+                .filter { $0.window != nil && !$0.isHiddenOrHasHiddenAncestor }
+                .compactMap { $0 as? TimelineScrollView }
+                .max { $0.convert($0.bounds, to: nil).minX < $1.convert($1.bounds, to: nil).minX })
+        let rootCell = try #require(
+            Harness.views(in: threadPane).compactMap { $0 as? TimelineCell }.first { cell in
+                if case .message(let entry) = cell.entry?.kind { return entry.message.eventID == rootID }
+                return false
+            })
+        #expect(rootCell.row?.context.canAct == false)
     }
 
     @Test("Retrying a failed first thread page keeps the already-visible root on screen")
@@ -295,5 +307,40 @@ struct ThreadPaneHostedTests {
         try #require(await eventually { harness.matrix.threadMessages.contains { $0.eventID == "$p2-10" } })
         #expect(await eventually { threadRows(harness)["$p2-10"] != nil })
         #expect(threadRows(harness)["$p2-59"] == nil)
+    }
+
+    @Test("Reopening a remembered thread whose prepared first page failed keeps the root visible without auto-retrying")
+    func reopeningRememberedThreadWithFailedPreparedPageKeepsRootVisible() async throws {
+        let harness = try Harness()
+        defer { harness.close() }
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+        try #require(await harness.settled(on: 0))
+        let room = harness.rooms[0]
+        let rootID = "$s0-39"
+        let root = try #require(harness.matrix.messages.first { $0.eventID == rootID })
+        room.threadItems = []
+
+        // Seed a remembered reply and pre-warm the thread with a failing first page.
+        let key = TimelineMemory.Key(
+            sessionID: harness.matrix.notificationSessionID, roomID: room.id(), threadRootID: rootID)
+        TimelineMemory.positions[key] = TimelineMemory.Anchor(eventID: "$mem-10", offset: 0)
+        defer { TimelineMemory.positions[key] = nil }
+
+        room.pageGate.arm()
+        harness.matrix.prepareThread(root)
+        try #require(await eventually { room.timelines.all.count == 2 && room.pageGate.isWaiting })
+        let prepared = try #require(room.timelines.all.last)
+        prepared.pageFailure = URLError(.notConnectedToInternet)
+        room.pageGate.release()
+        try #require(await eventually { !room.pageGate.isWaiting })
+        await drainMainActor()
+        #expect(prepared.paginations.all.count == 1)
+
+        try openThreadMenu(for: rootID, in: harness)
+        try #require(await eventually { !accessible("Retry", in: harness.hosting).isEmpty })
+        await harness.idle()
+        #expect(prepared.paginations.all.count == 1)
+        #expect(threadRows(harness)[rootID] != nil)
     }
 }

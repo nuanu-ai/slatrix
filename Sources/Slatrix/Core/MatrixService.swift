@@ -785,7 +785,16 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private var threadRevealedSelection: UUID?
     /// Thread selection whose bounded search for a remembered reply beyond page 1 has finished.
     private(set) var threadAnchorSearchDoneSelection: UUID?
+    /// Thread selection currently awaiting older pages or a concurrent end-of-history diff for a remembered/jumped
+    /// target, keeping the pane from opening prematurely when `endReached` beats the listener diff.
+    private(set) var searchingThreadTargetSelection: UUID?
     @ObservationIgnored private var threadAnchorSearchTask: Task<Void, Never>?
+    @ObservationIgnored private var threadDiffWaiters: [UUID: () -> Void] = [:]
+    /// True once the open thread's SDK timeline is loaded for `rootID`, so actions on thread rows are live.
+    func hasThreadTimeline(for rootID: String?) -> Bool {
+        guard let rootID else { return false }
+        return threadTimeline != nil && loadedThreadRootID == rootID
+    }
     /// Brief settle window when an empty-cache room reports `endReached == true` before any messages arrive, so a
     /// concurrent SDK diff listener callback lands before `hasMoreHistory` clears.
     var emptyEndReachedSettle: Duration = .milliseconds(120)
@@ -1439,6 +1448,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         threadBuildFailedSelection = nil
         threadRevealedSelection = nil
         threadAnchorSearchDoneSelection = nil
+        searchingThreadTargetSelection = nil
+        wakeThreadDiffWaiters()
         mainProjections = [:]
         threadProjections = [:]
         timelineHandle = nil
@@ -2046,6 +2057,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         threadBuildFailedSelection = nil
         threadRevealedSelection = nil
         threadAnchorSearchDoneSelection = nil
+        searchingThreadTargetSelection = nil
+        wakeThreadDiffWaiters()
         mainProjections = [:]
         threadProjections = [:]
         mediaFiles.removeAll()
@@ -2488,7 +2501,50 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 else { return }
                 self.threadRevision = revision
                 self.showThread(items, root: root)
+                self.wakeThreadDiffWaiters()
             }
+        }
+    }
+
+    private func wakeThreadDiffWaiters() {
+        guard !threadDiffWaiters.isEmpty else { return }
+        let waiters = Array(threadDiffWaiters.values)
+        for wake in waiters { wake() }
+    }
+
+    /// Waits briefly for a concurrent SDK thread listener diff to advance past `revision`, waking immediately
+    /// when `threadObserver` delivers an update or after `emptyEndReachedSettle` if none arrives.
+    private func waitForThreadDiff(after revision: Int, token: UUID, rootID: String) async {
+        guard !Task.isCancelled, threadSelection == token, loadedThreadRootID == rootID,
+            (threadSnapshot?.snapshot.revision ?? threadRevision) <= revision
+        else { return }
+        let waiterID = UUID()
+        let delay = emptyEndReachedSettle
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                var resumed = false
+                @MainActor func finish() {
+                    guard !resumed else { return }
+                    resumed = true
+                    self.threadDiffWaiters[waiterID] = nil
+                    continuation.resume()
+                }
+                self.threadDiffWaiters[waiterID] = finish
+                if (self.threadSnapshot?.snapshot.revision ?? self.threadRevision) > revision {
+                    finish()
+                    return
+                }
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: delay)
+                    if let self {
+                        self.threadDiffWaiters[waiterID]?()
+                    } else {
+                        finish()
+                    }
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.threadDiffWaiters[waiterID]?() }
         }
     }
     /// The pane's rows: its root, then the replies the thread's own timeline holds. The root shows the conversation's
@@ -2578,8 +2634,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         threadBuildFailedSelection = nil
         threadRevealedSelection = nil
         threadAnchorSearchDoneSelection = nil
+        searchingThreadTargetSelection = nil
         threadAnchorSearchTask?.cancel()
         threadAnchorSearchTask = nil
+        wakeThreadDiffWaiters()
         hasMoreThreadHistory = true
         let token = selection
         var ahead: Task<PreparedTimeline?, Never>?
@@ -2607,6 +2665,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 readyThreadReadSelection = threadToken
             case .failure(let error):
                 threadRevealedSelection = threadToken
+                threadAnchorSearchDoneSelection = threadToken
                 threadPageError = Self.safeError(error)
             }
             // Updates that came before the pane opened were dropped; its snapshot holds them.
@@ -2643,6 +2702,28 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         Task { _ = try? await loadMoreThread(rootID: root.eventID) }
     }
 
+    /// Fetches one older thread page and, if `endReached` returns before the listener diff advances the snapshot,
+    /// waits briefly so a late final-page diff containing the target is never missed.
+    private func loadThreadPageForTarget(
+        inThread rootID: String, token: UUID, holds: @MainActor () -> Bool
+    ) async -> Bool? {
+        let beforeRevision = threadSnapshot?.snapshot.revision ?? threadRevision
+        guard let endReached = try? await loadMoreThread(rootID: rootID) else { return nil }
+        if endReached, threadSelection == token, loadedThreadRootID == rootID, !holds(),
+            (threadSnapshot?.snapshot.revision ?? threadRevision) <= beforeRevision
+        {
+            await waitForThreadDiff(after: beforeRevision, token: token, rootID: rootID)
+            if threadSelection == token, loadedThreadRootID == rootID,
+                let snapshot = threadSnapshot?.snapshot, snapshot.revision > threadRevision,
+                let root = threadMessages.first
+            {
+                threadRevision = snapshot.revision
+                showThread(snapshot.items, root: root)
+            }
+        }
+        return endReached
+    }
+
     /// A jump to a reply beyond its thread's first page reads back to it while the thread's pane shows, ten pages past
     /// the first at most. Out of reach, the thread opens as it would, with nothing highlighted.
     private func reachJump(inThread rootID: String) async {
@@ -2650,13 +2731,19 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             let observer = threadSnapshot
         else { return }
         let token = threadSelection
-        func current() -> Bool { !Task.isCancelled && threadSelection == token && jump?.id == jumpID }
+        searchingThreadTargetSelection = token
+        defer { if searchingThreadTargetSelection == token { searchingThreadTargetSelection = nil } }
+        @MainActor func current() -> Bool { !Task.isCancelled && threadSelection == token && jump?.id == jumpID }
         // What the timeline holds, whether or not the pane has shown it yet.
-        func holds() -> Bool { Self.contains(observer.snapshot.items, target) }
+        @MainActor func holds() -> Bool {
+            threadMessages.contains { $0.eventID == target } || Self.contains(observer.snapshot.items, target)
+        }
         // The first page, which the thread asks for as it opens.
-        if readyThreadReadSelection != token { _ = try? await loadMoreThread(rootID: rootID) }
-        for _ in 0..<10 where current() && !holds() && hasMoreThreadHistory {
-            guard (try? await loadMoreThread(rootID: rootID)) == false else { break }
+        if readyThreadReadSelection != token, threadPageError == nil {
+            _ = await loadThreadPageForTarget(inThread: rootID, token: token, holds: holds)
+        }
+        for _ in 0..<10 where current() && !holds() && hasMoreThreadHistory && threadPageError == nil {
+            guard await loadThreadPageForTarget(inThread: rootID, token: token, holds: holds) == false else { break }
         }
         guard current(), !holds() else { return }
         jump?.landed.insert(rootID)
@@ -2666,7 +2753,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// or a page fails, so reopening a tall thread restores a remembered position beyond page 1.
     func reachThreadAnchor(_ eventID: String, inThread rootID: String, maxPages: Int = 5) {
         guard !isPreview, let opening = threadOpening, opening.rootID == rootID,
-            loadedThreadRootID == rootID, threadTimeline != nil,
+            loadedThreadRootID == rootID, threadTimeline != nil, threadPageError == nil,
             threadAnchorSearchDoneSelection != threadSelection
         else { return }
         let token = threadSelection
@@ -2675,8 +2762,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             return
         }
         threadAnchorSearchTask?.cancel()
+        searchingThreadTargetSelection = token
         threadAnchorSearchTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            defer { if self.searchingThreadTargetSelection == token { self.searchingThreadTargetSelection = nil } }
             @MainActor func current() -> Bool {
                 !Task.isCancelled && self.threadSelection == token && self.loadedThreadRootID == rootID
             }
@@ -2684,9 +2773,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 self.threadMessages.contains { $0.eventID == eventID }
                     || self.threadSnapshot.map { Self.contains($0.snapshot.items, eventID) } == true
             }
-            if readyThreadReadSelection != token { _ = try? await loadMoreThread(rootID: rootID) }
+            if readyThreadReadSelection != token, threadPageError == nil {
+                _ = await loadThreadPageForTarget(inThread: rootID, token: token, holds: holds)
+            }
             for _ in 0..<maxPages where current() && !holds() && hasMoreThreadHistory && threadPageError == nil {
-                guard (try? await loadMoreThread(rootID: rootID)) == false else { break }
+                guard await loadThreadPageForTarget(inThread: rootID, token: token, holds: holds) == false else {
+                    break
+                }
             }
             if current() {
                 if let snapshot = threadSnapshot?.snapshot, snapshot.revision > threadRevision,
@@ -3125,6 +3218,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         threadBuildFailedSelection = nil
         threadRevealedSelection = nil
         threadAnchorSearchDoneSelection = nil
+        searchingThreadTargetSelection = nil
+        wakeThreadDiffWaiters()
         threadOpening = nil
         threadSelection = UUID()
     }

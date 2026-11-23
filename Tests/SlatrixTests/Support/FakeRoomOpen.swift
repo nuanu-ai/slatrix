@@ -40,6 +40,8 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
     private var failure: Error?
     /// Read receipts sent through this timeline, as "read:" or "fully:" and the event.
     let receipts = Recorder<String>()
+    /// Each `paginateBackwards` call made on this timeline.
+    let paginations = Recorder<Void>()
     /// False until a listener is added: a timeline still being set up is not closed.
     var allListenersCancelled: Bool { lock.withLock { !handles.isEmpty && handles.allSatisfy(\.isCancelled) } }
     init(_ cached: [TimelineItem], pageGate: Gate = Gate(), forwardGate: Gate = Gate()) {
@@ -61,6 +63,7 @@ final class FakeLiveTimeline: Timeline, @unchecked Sendable {
     private var paging = false
     /// One older page at a time: asking for another while one is on its way fails, as a busy paginator would.
     override func paginateBackwards(numEvents: UInt16) async throws -> Bool {
+        paginations.append(())
         try lock.withLock {
             if paging { throw URLError(.cancelled) }
             paging = true
