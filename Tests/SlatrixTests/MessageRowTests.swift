@@ -32,7 +32,7 @@ struct MessageRowTests {
             id: message.id,
             kind: .message(
                 TimelineMessageEntry(
-                    message: message, grouped: false, time: "10:00 AM", saved: false, pinned: false, canPin: false,
+                    message: message, grouped: false, time: "10:00 AM", saved: false, pinned: false,
                     highlighted: false, sendBusy: false)))
         return TimelineRow(entry: entry, hovered: hovered, context: context)
     }

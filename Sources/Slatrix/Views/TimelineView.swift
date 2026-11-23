@@ -4,6 +4,7 @@ import SwiftUI
 struct TimelineView: View {
     @Environment(\.metrics) private var m
     @Environment(\.openURL) private var openURL
+    @Environment(\.timelineBarInsets) private var barInsets
     let matrix: MatrixService
     @EnvironmentObject var appearance: AppearanceStore
     @Environment(Popovers.self) private var popovers: Popovers?
@@ -36,12 +37,17 @@ struct TimelineView: View {
     var onOpenMedia: ((ChatMessage) -> Void)? = nil
     /// The window's one inline video player.
     var inlineVideo: InlineVideo? = nil
-    /// Messages scrolled up under the header, which then gets its line. Held by the pane, so a conversation switched
-    /// to keeps the line until its own messages say otherwise.
-    var contentAbove: Binding<Bool> = .constant(false)
+    /// Messages scrolled up under the header, which then gets its line. Held by the pane in an isolated observable
+    /// state so toggling the hairline never redraws the window or timeline shell.
+    var scrollEdge: ScrollEdgeState? = nil
     /// The header's and the composer's heights, which float over the timeline's ends.
     var insets = EdgeInsets()
     @State private var loadingHistory = false
+    /// In a thread, the loading row sits between the root and replies; show it only after the loading delay so short
+    /// threads never open with a 40 pt blank gap that snaps replies up when history ends.
+    @State private var showThreadOlder = false
+    /// True once this thread pane has rendered its entries, so retries or errors never re-hide an already-visible root.
+    @State private var showedThreadEntries = false
     @State private var deleting: MessageActionTarget?
     @State private var cancelling: ChatMessage?
     /// Retries and cancellations started here and not yet finished, by message ID.
@@ -62,10 +68,55 @@ struct TimelineView: View {
     /// A thread's page loads for whoever asked for it: its loading row, Retry, or a jump reading back.
     private var loadingOlder: Bool { thread ? matrix.isLoadingThreadPage : loadingHistory }
     private var hasOlder: Bool {
-        !matrix.isPreview && (thread ? matrix.hasMoreThreadHistory : matrix.loadsMoreHistory)
+        !matrix.isPreview
+            && (thread ? matrix.loadsMoreThreadHistory : (matrix.loadsMoreHistory || matrix.settlingEndReached))
+    }
+    private var memoryKey: TimelineMemory.Key {
+        TimelineMemory.Key(
+            sessionID: matrix.notificationSessionID, roomID: room.id, threadRootID: thread ? threadRootID : nil)
+    }
+    private var rememberedThreadEventID: String? {
+        guard thread, jumpTarget == nil else { return nil }
+        return TimelineMemory.positions[memoryKey]?.eventID
+    }
+    /// True while reopening a thread with a remembered or jumped reply beyond page 1 and older pages are still being
+    /// fetched before locking the opening position.
+    private var awaitingThreadTarget: Bool {
+        guard thread, !matrix.isPreview, let rootID = threadRootID, matrix.threadOpening?.rootID == rootID,
+            !matrix.isBuildingThreadTimeline, matrix.threadPageError == nil,
+            matrix.loadsMoreThreadHistory || matrix.searchingThreadTargetSelection == matrix.threadSelection
+        else { return false }
+        if let target = jumpTarget {
+            guard !messages.contains(where: { $0.eventID == target }) else { return false }
+            return matrix.jump?.landed.contains(rootID) != true
+        }
+        guard let target = rememberedThreadEventID, !messages.contains(where: { $0.eventID == target }) else {
+            return false
+        }
+        return matrix.threadAnchorSearchDoneSelection != matrix.threadSelection
+    }
+    /// True while a cold thread open is still awaiting its timeline, first page, or a target reply beyond page 1.
+    private var awaitingThreadReplies: Bool {
+        guard thread, let rootID = threadRootID, matrix.threadOpening?.rootID == rootID else { return false }
+        return matrix.isOpeningThread || awaitingThreadTarget
+    }
+    private var threadAnchorSearchKey: String? {
+        guard thread, !matrix.isPreview, let rootID = threadRootID, let target = rememberedThreadEventID,
+            matrix.loadsMoreThreadHistory, matrix.threadPageError == nil,
+            matrix.threadAnchorSearchDoneSelection != matrix.threadSelection,
+            matrix.threadOpening?.rootID == rootID
+        else { return nil }
+        return "\(rootID):\(matrix.threadSelection):\(target)"
+    }
+    /// Holds back the synthetic `[root]` row while replies or a remembered/jumped position are still arriving so a
+    /// tall thread never flashes its root and teleports off-screen. Once shown, never re-hides an already-visible root.
+    private var holdsThreadEntries: Bool {
+        guard !showedThreadEntries, awaitingThreadReplies else { return false }
+        return matrix.isBuildingThreadTimeline || matrix.threadExpectsReplies
+            || TimelineMemory.positions[memoryKey] != nil || jumpTarget != nil
     }
     /// The intro tops a conversation loaded back to its start, or one with nothing else to show.
-    private var reachedStart: Bool { matrix.isPreview || !matrix.hasMoreHistory }
+    var reachedStart: Bool { !thread && (matrix.isPreview || !matrix.hasMoreHistory) }
     /// The message jumped to, when this pane shows it.
     private var jumpTarget: String? {
         thread ? threadRootID.flatMap { matrix.jump?.eventID(inThread: $0) } : matrix.jump?.eventID(inThread: nil)
@@ -78,16 +129,18 @@ struct TimelineView: View {
     var body: some View {
         TimelineTable(
             entries: entries, context: updatedContext, live: live, bottomAligned: !thread,
+            canOpen: !awaitingThreadReplies,
             focusedEventID: thread ? jumpTarget : jumpTarget ?? matrix.focusedEventID,
             jumpID: jumpTarget == nil ? nil : matrix.jump?.id,
             sends: matrix.sends[Conversation(roomID: room.id, threadRootID: thread ? threadRootID : nil)] ?? 0,
             startsAtUnread: unreadAnchor != nil,
-            memoryKey: TimelineMemory.Key(
-                sessionID: matrix.notificationSessionID, roomID: room.id, threadRootID: thread ? threadRootID : nil),
-            timelineID: thread ? nil : matrix.shownTimelineID,
+            memoryKey: memoryKey,
+            timelineID: thread ? matrix.threadSelection : matrix.shownTimelineID,
             pagesLanded: thread ? matrix.threadPagesLanded : 0,
-            // A thread whose page failed asks again when the reader retries or the connection returns.
-            canLoadOlder: hasOlder && !loadingOlder && !(thread && matrix.threadPageError != nil),
+            // A thread whose page failed asks again when the reader retries or the connection returns; a main timeline
+            // settling an empty `endReached` does not trigger redundant older pages.
+            canLoadOlder: hasOlder && !loadingOlder
+                && !(thread ? matrix.threadPageError != nil : matrix.settlingEndReached),
             canLoadNewer: hasNewer && !loadingHistory && !matrix.isLoadingForwardHistory,
             scroller: scroller, onLoadOlder: { loadHistory() }, onLoadNewer: { loadHistory(forward: true) },
             onLand: { jump in
@@ -99,9 +152,11 @@ struct TimelineView: View {
             onScroll: { atBottom, showsJump, scrolled, report in
                 self.atBottom = atBottom
                 jumpVisible = showsJump
-                if let scrolled, scrolled != contentAbove.wrappedValue { contentAbove.wrappedValue = scrolled }
+                if let scrolled, let scrollEdge, scrolled != scrollEdge.contentAbove {
+                    scrollEdge.contentAbove = scrolled
+                }
                 onReport?(report)
-            }, readKey: readKey, insets: insets
+            }, readKey: readKey, insets: insets, barInsets: barInsets
         )
         .overlay(alignment: .bottom) {
             // A conversation still reading its first rows, after the loading delay, holds their place on the composer.
@@ -111,9 +166,13 @@ struct TimelineView: View {
             }
         }
         .overlay(alignment: .top) {
-            if contentAbove.wrappedValue {
-                Divider().overlay(colors.border).padding(.top, insets.top)
+            if thread && holdsThreadEntries {
+                SkeletonRows(count: 6).fixedSize(horizontal: false, vertical: true)
+                    .conversationRow(m, isThread: true).padding(.top, insets.top)
             }
+        }
+        .overlay(alignment: .top) {
+            if let scrollEdge { ScrollEdgeHairline(state: scrollEdge, top: insets.top) }
         }
         .overlay(alignment: .bottomTrailing) {
             if jumpVisible && !messages.isEmpty {
@@ -140,6 +199,20 @@ struct TimelineView: View {
             guard turnsLive else { return }
             await matrix.goLive { scroller.screenAnchorEventID }
         }
+        .task(id: threadAnchorSearchKey) {
+            guard let rootID = threadRootID, let target = rememberedThreadEventID else { return }
+            matrix.reachThreadAnchor(target, inThread: rootID)
+        }
+        .onChange(of: thread && !holdsThreadEntries && !messages.isEmpty, initial: true) { _, visible in
+            if visible { showedThreadEntries = true }
+        }
+        .task(id: thread && hasOlder && loadingOlder && matrix.connectionState != .offline) {
+            showThreadOlder = false
+            guard thread, hasOlder, loadingOlder, matrix.connectionState != .offline else { return }
+            try? await Task.sleep(for: LoadingPresentation.indicatorDelay)
+            if !Task.isCancelled { showThreadOlder = true }
+        }
+        .loadingInterval(.historyLoading, while: thread && hasOlder && loadingOlder)
         .task(id: landing) {
             // Held long enough to find, then faded by the row.
             guard landing != nil, (try? await Task.sleep(for: .seconds(1.5))) != nil else { return }
@@ -203,23 +276,26 @@ struct TimelineView: View {
     /// One row per layout row, plus what the row shows from the session; the layout itself changes only with the
     /// messages.
     private var entries: [TimelineEntry] {
+        if holdsThreadEntries { return [] }
         let rows = layout.rows(
             messages, firstUnreadEventID: thread ? nil : matrix.firstUnreadEventID,
             unreadAnchor: unreadAnchor, me: matrix.user?.id,
             groups: appearance.density != .compact, threadRootEventID: thread ? threadRootID : nil,
             repliesLine: thread ? matrix.threadRepliesLine : nil)
-        let context = matrix.messageActionContext
         let offline = matrix.connectionState == .offline
         let failures = matrix.sendFailures.compactMapValues { $0.shown(offline: offline) }
+        let showOlder = thread ? (hasOlder && showThreadOlder) : hasOlder
         let inputs = TimelineLayoutCache.EntryInputs(
-            rows: rows, hasOlder: hasOlder, reachedStart: reachedStart, reading: !thread && matrix.timelineLoading,
+            rows: rows, hasOlder: showOlder, reachedStart: reachedStart, reading: !thread && matrix.timelineLoading,
             hasNewer: hasNewer,
             loadingHistory: loadingOlder, welcome: welcome,
             pinned: room.pinnedEventIDs,
-            canPin: canPinMessages, savedIDs: savedIDs, highlighted: highlighted,
+            savedIDs: savedIDs, highlighted: highlighted,
             sendFailures: failures, pendingSendActions: matrix.pendingSendActions, sendActions: sendActions,
-            context: context, collapsedMedia: matrix.collapsedMedia)
-        return layout.entries(for: inputs) { buildEntries(rows, context: context, failures: failures) }
+            collapsedMedia: matrix.collapsedMedia)
+        return layout.entries(for: inputs) {
+            buildEntries(rows, showOlder: showOlder, failures: failures)
+        }
     }
 
     private var welcome: TimelineWelcome {
@@ -229,14 +305,14 @@ struct TimelineView: View {
     }
 
     private func buildEntries(
-        _ rows: [TimelineLayout.Row], context: MessageActionTarget.Context,
+        _ rows: [TimelineLayout.Row], showOlder: Bool,
         failures: [SendQueueMessageKey: MessageSendFailure]
     ) -> [TimelineEntry] {
         var entries: [TimelineEntry] = []
         entries.reserveCapacity(rows.count + 2)
         // A thread's older replies load under its root and the line counting them.
         var olderAt = 0
-        if !hasOlder && !thread && (reachedStart || rows.isEmpty && !matrix.timelineLoading) {
+        if !showOlder && !thread && (reachedStart || rows.isEmpty && !matrix.timelineLoading) {
             entries.append(
                 TimelineEntry(
                     id: "welcome",
@@ -266,16 +342,17 @@ struct TimelineView: View {
                                 saved: !savedIDs.isEmpty
                                     && savedIDs.contains(
                                         SavedMessageReference(roomID: message.roomID, eventID: message.eventID).id),
-                                pinned: pinned.contains(message.eventID), canPin: canPinMessages,
+                                pinned: pinned.contains(message.eventID),
                                 highlighted: highlighted == message.eventID,
                                 sendFailure: failures.isEmpty ? nil : failures[key],
                                 sendBusy: !pending.isEmpty && pending.contains(key) || sendActions.contains(message.id),
                                 seenBy: seen[row.id],
-                                mediaCollapsed: !collapsed.isEmpty && collapsed.contains(message.eventID),
-                                context: context))))
+                                mediaCollapsed: !collapsed.isEmpty && collapsed.contains(message.eventID)))))
             }
         }
-        if hasOlder { entries.insert(TimelineEntry(id: "older", kind: .loading(loadingOlder)), at: olderAt) }
+        if showOlder {
+            entries.insert(TimelineEntry(id: "older", kind: .loading(loadingOlder, immediate: thread)), at: olderAt)
+        }
         if hasNewer { entries.append(TimelineEntry(id: "newer", kind: .loading(loadingHistory))) }
         return entries
     }
@@ -285,6 +362,10 @@ struct TimelineView: View {
         context.matrix = matrix
         context.isThread = thread
         context.threadRootID = threadRootID
+        context.canPin = canPinMessages
+        context.canAct =
+            !matrix.isPreview && room.membership == "join" && matrix.user != nil && matrix.isAuthenticated
+            && (!thread || matrix.hasThreadTimeline(for: threadRootID))
         context.metrics = m
         context.appearance = appearance
         context.openURL = openURL
@@ -418,6 +499,10 @@ struct TimelineView: View {
     private var rows: [TimelineLayout.Row] = []
     private var unreadBoundary: String?
     private var opened = false
+    /// The newest confirmed (or only) event present when partial cached rows first arrived without their unread anchor,
+    /// plus its timestamp cutoff in case an opening local echo is later cancelled before backfill lands.
+    private var openedNewestEventID: String?
+    private var openedCutoff: Date?
     /// Everything a timeline's entries show besides the rows; the timeline redraws for many changes that touch none.
     struct EntryInputs: Equatable {
         var rows: [TimelineLayout.Row]
@@ -428,13 +513,11 @@ struct TimelineView: View {
         var loadingHistory: Bool
         var welcome: TimelineWelcome
         var pinned: [String]
-        var canPin: Bool
         var savedIDs: Set<String>
         var highlighted: String?
         var sendFailures: [SendQueueMessageKey: MessageSendFailure]
         var pendingSendActions: Set<SendQueueMessageKey>
         var sendActions: Set<String>
-        var context: MessageActionTarget.Context
         var collapsedMedia: Set<String>
     }
     private var entryInputs: EntryInputs?
@@ -455,12 +538,31 @@ struct TimelineView: View {
         groups: Bool, threadRootEventID: String? = nil, repliesLine: Int? = nil
     ) -> [TimelineLayout.Row] {
         if !opened, !messages.isEmpty {
-            opened = true
-            if let firstUnreadEventID, messages.contains(where: { $0.eventID == firstUnreadEventID }) {
+            if openedNewestEventID == nil {
+                let confirmed = messages.last { $0.eventID.hasPrefix("$") }
+                openedNewestEventID = confirmed?.eventID ?? messages.last?.eventID
+                openedCutoff = confirmed?.timestamp ?? messages.last?.timestamp
+            }
+            let ceiling: Int? =
+                openedNewestEventID.flatMap { id in messages.lastIndex { $0.eventID == id } }
+                ?? openedCutoff.flatMap { cutoff in messages.lastIndex { $0.timestamp <= cutoff } }
+            if let firstUnreadEventID,
+                let unreadIndex = messages.firstIndex(where: { $0.eventID == firstUnreadEventID }),
+                let ceiling, unreadIndex <= ceiling
+            {
+                opened = true
                 unreadBoundary = firstUnreadEventID
-            } else if let anchor = messages.firstIndex(where: { $0.eventID == unreadAnchor }) {
-                // The read marker can land after the messages; it would go before the next one someone else sent.
-                unreadBoundary = messages[(anchor + 1)...].first { $0.senderID != me }?.eventID
+            } else if let unreadAnchor {
+                if let anchor = messages.firstIndex(where: { $0.eventID == unreadAnchor }) {
+                    opened = true
+                    // The read marker can land after the messages; it would go before the next one someone else sent.
+                    let afterAnchor = anchor + 1
+                    if let ceiling, afterAnchor <= ceiling {
+                        unreadBoundary = messages[afterAnchor...ceiling].first { $0.senderID != me }?.eventID
+                    }
+                }
+            } else {
+                opened = true
             }
         }
         if let input, input.groups == groups, input.unread == unreadBoundary, input.repliesLine == repliesLine,
@@ -895,6 +997,8 @@ struct HoveredMessageToolbar: View {
     let context: TimelineRowContext
     var body: some View {
         if let matrix = context.matrix, let appearance = context.appearance {
+            // Observe async pin-permission updates only in the active hover toolbar so resting rows never redraw.
+            let _ = context.pinPermission.allowed
             let message = entry.message
             MessageToolbar(
                 quick: EmojiRecents.quick(matrix.recentEmoji), isThread: context.isThread, isSaved: entry.saved,
@@ -1008,7 +1112,7 @@ extension TimelineRowContext {
             commands.append(
                 MessageMenuCommand(
                     id: "pin", title: row.pinned ? "Unpin from conversation" : "Pin to conversation",
-                    isEnabled: row.canPin && (row.pinned || !message.isRedacted) && message.eventID.hasPrefix("$"),
+                    isEnabled: self.canPin && (row.pinned || !message.isRedacted) && message.eventID.hasPrefix("$"),
                     perform: { onTogglePin(message) }))
         }
         let link = permalinkTarget(for: message)
@@ -1041,6 +1145,68 @@ extension TimelineRowContext {
         return commands
     }
 
+    private func canAct(on message: ChatMessage) -> Bool {
+        canAct && message.eventID.hasPrefix("$") && message.sendState == "sent" && !message.isRedacted
+    }
+
+    /// Actions for a resting row: captures the SDK action target only when the user actually interacts or opens a menu,
+    /// so evaluating `TimelineRow.body` never subscribes cells to `messages`, `threadMessages` or action context.
+    func rowActions(for row: TimelineMessageEntry) -> MessageRowActions {
+        let message = row.message
+        let actionable = canAct(on: message)
+        var actions = MessageRowActions(
+            openProfile: onOpenProfile.map { open in
+                {
+                    open(
+                        message.senderID,
+                        ChatUser(id: message.senderID, name: message.senderName, avatarURL: message.avatarURL))
+                }
+            },
+            thread: { self.onThread(message) }, openReplies: { self.onOpenReplies(message) },
+            prepareThread: { self.matrix?.prepareThread(message) },
+            reply: { self.onReply(message) }, save: { self.onSave(message) },
+            react: actionable
+                ? { emoji in
+                    guard let target = self.actionTarget(for: message) else { return }
+                    self.onReact(target, emoji)
+                } : nil,
+            openReactions: actionable
+                ? {
+                    guard let target = self.actionTarget(for: message),
+                        self.matrix?.isCurrentMessageAction(target) == true
+                    else { return }
+                    self.onPickEmoji(EmojiPick { self.onReact(target, $0) })
+                } : nil,
+            forward: onForward.flatMap { send in
+                guard actionable, ForwardMessageContent.supports(message) else { return nil }
+                return {
+                    guard let target = self.actionTarget(for: message) else { return }
+                    send(target)
+                }
+            },
+            retrySend: { self.onRetrySend(message) }, cancelSend: { self.onCancelSend(message) })
+        actions.menu = {
+            let target = self.actionTarget(for: message)
+            return self.actions(for: row, target: target).menu()
+        }
+        return actions
+    }
+
+    func rowAttachmentActions(for message: ChatMessage) -> AttachmentActions {
+        let actionable = canAct(on: message)
+        return AttachmentActions(
+            open: { self.onOpenMedia(message) },
+            forward: actionable && ForwardMessageContent.supports(message)
+                ? onForward.map { send in
+                    {
+                        guard let target = self.actionTarget(for: message) else { return }
+                        send(target)
+                    }
+                } : nil,
+            copyLink: { if let link = self.permalinkTarget(for: message) { self.onCopyLink(link) } },
+            inlineVideo: matrix.flatMap { matrix in inlineVideo?.slot(message, matrix: matrix, in: self) })
+    }
+
     func attachmentActions(for message: ChatMessage, target: MessageActionTarget?) -> AttachmentActions {
         AttachmentActions(
             open: { self.onOpenMedia(message) },
@@ -1063,21 +1229,99 @@ extension TimelineRowContext {
     }
 }
 
+/// Isolated scroll-edge hairline state held by the pane so scrolling across the header never redraws the window.
+@Observable @MainActor final class ScrollEdgeState {
+    var contentAbove = false
+}
+
+private struct ScrollEdgeHairline: View {
+    let state: ScrollEdgeState
+    let top: CGFloat
+    @ThemeColors private var colors
+    var body: some View {
+        if state.contentAbove {
+            Divider().overlay(colors.border).padding(.top, top)
+        }
+    }
+}
+
+/// Measured heights of the floating header and composer bars over a timeline, pushed synchronously to the table in
+/// `TimelineUnderBars`'s layout pass before the table places or opens.
+@MainActor final class TimelineBarInsets {
+    private(set) var current = EdgeInsets()
+    private(set) var measured = false
+    var onChange: ((EdgeInsets) -> Void)?
+
+    func update(_ new: EdgeInsets) {
+        let changed = !measured || new.top != current.top || new.bottom != current.bottom
+        current = new
+        measured = true
+        if changed { onChange?(new) }
+    }
+}
+
+private struct TimelineBarInsetsKey: EnvironmentKey {
+    static let defaultValue: TimelineBarInsets? = nil
+}
+
+extension EnvironmentValues {
+    var timelineBarInsets: TimelineBarInsets? {
+        get { self[TimelineBarInsetsKey.self] }
+        set { self[TimelineBarInsetsKey.self] = newValue }
+    }
+}
+
+/// Measures the floating header and composer bars before placing the timeline under them, so the table receives its
+/// real insets synchronously before its first `open()`.
+private struct TimelineBarsLayout: Layout {
+    let onMeasure: @MainActor (EdgeInsets) -> Void
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let first = subviews.first else { return proposal.replacingUnspecifiedDimensions() }
+        return first.sizeThatFits(proposal)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count >= 3 else {
+            for subview in subviews { subview.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size)) }
+            return
+        }
+        let barProposal = ProposedViewSize(width: bounds.width, height: bounds.height)
+        let headerSize = subviews[1].sizeThatFits(barProposal)
+        let footerSize = subviews[2].sizeThatFits(barProposal)
+        if bounds.width > 0 && bounds.height > 0 {
+            let measured = EdgeInsets(top: headerSize.height, leading: 0, bottom: footerSize.height, trailing: 0)
+            MainActor.assumeIsolated { onMeasure(measured) }
+        }
+        subviews[0].place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+        subviews[1].place(
+            at: CGPoint(x: bounds.midX, y: bounds.minY), anchor: .top,
+            proposal: ProposedViewSize(width: bounds.width, height: headerSize.height))
+        subviews[2].place(
+            at: CGPoint(x: bounds.midX, y: bounds.maxY), anchor: .bottom,
+            proposal: ProposedViewSize(width: bounds.width, height: footerSize.height))
+    }
+}
+
 /// A timeline with its header over its top and its composer over its bottom, floating so rows scroll under both. Their
 /// heights, tracked here as the composer grows, keep the timeline's own view of the screen between them.
 struct TimelineUnderBars<Timeline: View, Header: View, Footer: View>: View {
     @State private var insets = EdgeInsets()
+    @State private var barInsets = TimelineBarInsets()
     let timeline: (EdgeInsets) -> Timeline
     @ViewBuilder let header: Header
     @ViewBuilder let footer: Footer
 
     var body: some View {
-        timeline(insets)
-            .overlay(alignment: .top) {
-                header.onGeometryChange(for: CGFloat.self, of: \.size.height) { insets.top = $0 }
-            }
-            .overlay(alignment: .bottom) {
-                footer.onGeometryChange(for: CGFloat.self, of: \.size.height) { insets.bottom = $0 }
-            }
+        TimelineBarsLayout(onMeasure: measured) {
+            timeline(insets).environment(\.timelineBarInsets, barInsets)
+            ZStack(alignment: .top) { header }
+            ZStack(alignment: .bottom) { footer }
+        }
+    }
+
+    private func measured(_ new: EdgeInsets) {
+        barInsets.update(new)
+        if insets != new { DispatchQueue.main.async { insets = new } }
     }
 }

@@ -467,4 +467,76 @@ struct ConversationSwitchHostedTests {
         #expect(await eventually(timeout: .seconds(20)) { harness.sample().rows["$reply"] != nil })
         #expect(harness.matrix.selectedRoomID == harness.rooms[1].id())
     }
+
+    @Test("Cold launch of the first conversation already has header and composer insets on its first frame with rows")
+    func coldLaunchZeroInsetJump() async throws {
+        let harness = try Harness()
+        defer { harness.close() }
+        var firstInsets: NSEdgeInsets?
+        var firstRows: [String: CGFloat]?
+        var moved: [String] = []
+        let observer = CFRunLoopObserverCreateWithHandler(
+            nil, CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.max
+        ) { _, _ in
+            MainActor.assumeIsolated {
+                let sample = harness.sample()
+                guard !sample.rows.isEmpty else { return }
+                if firstInsets == nil,
+                    let sv = Harness.views(in: harness.hosting).compactMap({ $0 as? TimelineScrollView }).first
+                {
+                    firstInsets = sv.contentInsets
+                }
+                if let baseline = firstRows {
+                    for (id, top) in sample.rows {
+                        if let before = baseline[id], abs(before - top) > 0.5 {
+                            moved.append("\(id): \(before) -> \(top)")
+                        }
+                    }
+                } else {
+                    firstRows = sample.rows
+                }
+            }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        defer { CFRunLoopObserverInvalidate(observer) }
+        try #require(await harness.settled(on: 0))
+        await harness.idle()
+        let insets = try #require(firstInsets)
+        #expect(insets.top > 0 && insets.bottom > 0, "firstInsets=\(insets), moved=\(moved)")
+        #expect(moved.isEmpty, "moved=\(moved), firstInsets=\(insets)")
+    }
+
+    @Test("Switching from a room with a multi-line draft to a held room with an empty composer moves no rows")
+    func warmSwitchDifferentComposerHeight() async throws {
+        let harness = try Harness()
+        defer { harness.close() }
+        try #require(await harness.settled(on: 0))
+        // Visit Room 1 so it is held in recentTimelines, then return to Room 0.
+        harness.menu("next-conversation")
+        try #require(await harness.settled(on: 1))
+        harness.menu("back")
+        try #require(await harness.settled(on: 0))
+        // Type a 5-line draft into Room 0's composer so its footer is much taller than Room 1's.
+        let editor = try #require(
+            Harness.views(in: harness.hosting).compactMap { $0 as? NSTextView }.first {
+                $0.window != nil && $0.isEditable
+            })
+        editor.string = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5"
+        editor.didChangeText()
+        let scrollBefore = try #require(
+            Harness.views(in: harness.hosting).compactMap { $0 as? TimelineScrollView }.first)
+        let tallBottom = scrollBefore.contentInsets.bottom
+        #expect(
+            await eventually {
+                harness.hosting.layoutSubtreeIfNeeded()
+                return scrollBefore.contentInsets.bottom > tallBottom + 20
+            })
+        await harness.idle()
+        harness.record()
+        harness.menu("next-conversation")
+        #expect(await harness.settled(on: 1))
+        let frames = await harness.stop()
+        let faults = Self.faults(frames, to: harness.name(1), held: true)
+        #expect(faults.isEmpty, Self.report(faults, frames))
+    }
 }

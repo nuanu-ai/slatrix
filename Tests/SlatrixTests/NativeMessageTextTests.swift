@@ -86,6 +86,53 @@ struct NativeMessageTextTests {
         #expect(!underlined(7))
     }
 
+    @Test("Text measurement cache survives unchanged updates and clears when lineLimit or text changes")
+    func sizeCacheSurvivesUnchangedUpdates() async throws {
+        struct Host: View {
+            var runs: [MessageBodyRun]
+            var lineLimit: Int?
+            var tick: Int
+            var body: some View {
+                NativeSelectableMessageText(
+                    runs: runs, fontSize: 14, textColor: .labelColor, linkColor: .systemBlue,
+                    menuCommands: { [] }, onOpenURL: { _ in }
+                )
+                .lineLimit(lineLimit)
+                .accessibilityIdentifier("\(tick)")
+            }
+        }
+        let longRuns = [MessageBodyRun(text: String(repeating: "Wrapping message text across lines. ", count: 12))]
+        let window = offscreenWindow(NSSize(width: 320, height: 300))
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        let hosting = NSHostingView(rootView: Host(runs: longRuns, lineLimit: nil, tick: 0))
+        window.contentView = hosting
+        hosting.layoutSubtreeIfNeeded()
+        func findTextView(_ view: NSView) -> MessageTextView? {
+            if let text = view as? MessageTextView { return text }
+            for child in view.subviews { if let found = findTextView(child) { return found } }
+            return nil
+        }
+        let textView = try #require(findTextView(hosting))
+        let coordinator = try #require(textView.delegate as? NativeSelectableMessageText.Coordinator)
+        let sentinel = CGSize(width: 999, height: 999)
+        coordinator.sizes[999] = sentinel
+
+        // An unrelated parent redraw keeps the cached layout sizes intact.
+        hosting.rootView = Host(runs: longRuns, lineLimit: nil, tick: 1)
+        hosting.layoutSubtreeIfNeeded()
+        #expect(coordinator.sizes[999] == sentinel)
+
+        // Changing lineLimit invalidates cached sizes and shrinks the laid-out height.
+        let unlimitedHeight = hosting.fittingSize.height
+        hosting.rootView = Host(runs: longRuns, lineLimit: 1, tick: 2)
+        hosting.layoutSubtreeIfNeeded()
+        #expect(coordinator.sizes[999] == nil)
+        #expect(hosting.fittingSize.height < unlimitedHeight)
+    }
+
     // capability: message.mention-pills
     @Test("A mention of someone else is a blue pill; one of you, or of the room, is yellow; none is underlined")
     func mentionPills() {

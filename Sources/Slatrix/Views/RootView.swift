@@ -100,8 +100,8 @@ struct RootView: View {
     @State private var pinPermission = false
     @State private var threadRoot: ChatMessage?
     /// Whether messages sit under the conversation's and the thread's headers, which then draw their lines.
-    @State private var conversationContentAbove = false
-    @State private var threadContentAbove = false
+    @State private var conversationScrollEdge = ScrollEdgeState()
+    @State private var threadScrollEdge = ScrollEdgeState()
     /// Threads left open in a conversation, by room, for this session: coming back opens them again, as in Slack.
     @State private var leftThreads: [String: ChatMessage] = [:]
     /// The thread whose "Also send to #channel" is checked; another thread starts unchecked, as in Slack.
@@ -422,6 +422,13 @@ struct RootView: View {
                 }
             }
             .background(ViewerInvalidation(matrix: matrix, viewer: viewer))
+            .background(
+                MessageActionInvalidation(matrix: matrix) {
+                    if let editActionTarget, !matrix.isCurrentMessageAction(editActionTarget) { cancelCurrentEdit() }
+                    cancelStaleForward()
+                    cancelStaleCaption()
+                }
+            )
             .background(layoutMeasurement)
     }
 
@@ -556,11 +563,6 @@ struct RootView: View {
                 cancelStaleCaption()
             }
             .onChange(of: matrix.timelineSelectionID) { _, _ in cancelStaleThreadOpen() }
-            .onChange(of: matrix.messageActionContext) { _, _ in
-                if let editActionTarget, !matrix.isCurrentMessageAction(editActionTarget) { cancelCurrentEdit() }
-                cancelStaleForward()
-                cancelStaleCaption()
-            }
             .onChange(of: editContext) { _, _ in
                 if let target = editTarget, !target.isCurrent(editTarget, in: editContext) { cancelCurrentEdit() }
                 if let target = replyTarget, target.threadID != nil, !replyOpening,
@@ -888,9 +890,11 @@ struct RootView: View {
                         Button("Cancel") { if pendingThreadOpen?.id == request.id { cancelThreadOpen() } }
                     }
                 } else {
-                    Banner(text: "Opening thread…", tone: .neutral) {
-                        Button("Cancel") { if pendingThreadOpen?.id == request.id { cancelThreadOpen() } }
-                    }.loadingInterval(.threadLoading)
+                    AfterLoadingDelay(active: true, hasContent: false, offline: false, interval: .threadLoading) {
+                        Banner(text: "Opening thread…", tone: .neutral) {
+                            Button("Cancel") { if pendingThreadOpen?.id == request.id { cancelThreadOpen() } }
+                        }
+                    }
                 }
             }
             ErrorBanner(matrix: matrix)
@@ -1167,7 +1171,7 @@ struct RootView: View {
                         editing: editTarget?.surface == .conversation, onForward: startForward,
                         onEditCaption: startCaption,
                         onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) },
-                        inlineVideo: viewer.inlineVideo, contentAbove: $conversationContentAbove, insets: insets
+                        inlineVideo: viewer.inlineVideo, scrollEdge: conversationScrollEdge, insets: insets
                     )
                     .id("\(room.id):\(matrix.shownTimelineID)")
                     // A pane in its place covers all but the toolbar.
@@ -1325,8 +1329,8 @@ struct RootView: View {
                 onReport: { [identity = matrix.threadReadIdentity] in matrix.record($0, thread: identity) },
                 readKey: matrix.threadReadIdentity, onForward: startForward, onEditCaption: startCaption,
                 onOpenMedia: { [viewer] in viewer.open($0, surface: .thread(rootID: root.eventID)) },
-                inlineVideo: viewer.inlineVideo, contentAbove: $threadContentAbove, insets: insets
-            ).id(root.eventID)
+                inlineVideo: viewer.inlineVideo, scrollEdge: threadScrollEdge, insets: insets
+            ).id("\(root.eventID):\(matrix.threadSelection)")
         } header: {
             PaneHeader(title: "Thread", subtitle: room.writtenName, closeLabel: "Close thread", onClose: closeThread)
                 .scrollEdge(.top, colors.canvas)
@@ -2027,6 +2031,10 @@ struct RootView: View {
         Performance.start(.threadOpen)
         cancelThreadOpen()
         cancelReply()
+        if let root = ThreadRootResolver.cached(roomID: message.roomID, rootID: rootID, candidates: candidates) {
+            openThread(root, room: root.roomID, openedWith: openedWith)
+            return
+        }
         navigationGeneration = UUID()
         let request = ThreadOpenRequest(
             message: message, owner: composerIdentity,
@@ -3241,6 +3249,16 @@ private struct ViewerInvalidation: View {
             .onChange(of: matrix.sharedFiles.items) {
                 if viewer.files != nil { viewer.update(from: matrix.sharedFiles.items.map(\.message)) }
             }
+    }
+}
+
+/// Drops stale edit, forward and caption flows when action context changes; on its own, so thread opens do not redraw
+/// the window.
+private struct MessageActionInvalidation: View {
+    let matrix: MatrixService
+    let onChange: () -> Void
+    var body: some View {
+        Color.clear.onChange(of: matrix.messageActionContext) { _, _ in onChange() }
     }
 }
 

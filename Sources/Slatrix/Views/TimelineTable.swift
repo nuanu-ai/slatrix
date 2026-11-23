@@ -7,7 +7,7 @@ struct TimelineEntry: Identifiable, Hashable {
         /// Fills a short conversation from the top, so its messages sit on the composer like Slack's.
         case spacer
         /// Room for a spinner while history beyond this end exists.
-        case loading(Bool)
+        case loading(Bool, immediate: Bool = false)
         case welcome(TimelineWelcome)
         case day(String)
         case unread
@@ -33,7 +33,6 @@ struct TimelineMessageEntry: Hashable {
     var time: String
     var saved: Bool
     var pinned: Bool
-    var canPin: Bool
     var highlighted: Bool
     var sendFailure: MessageSendFailure?
     var sendBusy: Bool
@@ -41,8 +40,11 @@ struct TimelineMessageEntry: Hashable {
     var seenBy: [String]? = nil
     /// The reader collapsed this message's image or video.
     var mediaCollapsed = false
-    /// Rows capture their action target from it, so a new context redraws them.
-    var context: MessageActionTarget.Context?
+}
+
+/// Isolated pin-permission state read only by the active hover toolbar and menus, never by resting rows.
+@Observable @MainActor final class PinPermissionState {
+    var allowed = false
 }
 
 /// What every row of one timeline shares: the session and the actions rows call back into.
@@ -50,6 +52,14 @@ struct TimelineMessageEntry: Hashable {
     var matrix = MatrixService?.none
     var isThread = false
     var threadRootID: String?
+    /// Live pin permission, read lazily when a row's menu opens or the hover toolbar updates, never by resting rows.
+    let pinPermission = PinPermissionState()
+    var canPin: Bool {
+        get { pinPermission.allowed }
+        set { if pinPermission.allowed != newValue { pinPermission.allowed = newValue } }
+    }
+    /// Session-level action eligibility, read by resting rows without observing messages or action context.
+    var canAct = false
     var metrics = Metrics()
     var appearance: AppearanceStore?
     var openURL = OpenURLAction { _ in .systemAction }
@@ -99,6 +109,8 @@ struct TimelineTable: NSViewRepresentable {
     var context: TimelineRowContext
     var live: Bool
     var bottomAligned: Bool
+    /// False while a cold thread holds only its root awaiting replies, so `open()` waits before locking position.
+    var canOpen = true
     var focusedEventID: String?
     /// New with each jump, so jumping to the message already focused scrolls back to it.
     var jumpID: UUID?
@@ -125,6 +137,8 @@ struct TimelineTable: NSViewRepresentable {
     var readKey: AnyHashable? = nil
     /// The header's and the composer's heights: rows scroll under both, and the reader sees only what is between.
     var insets = EdgeInsets()
+    /// Synchronous bar-height channel from `TimelineUnderBars`, measured before the table places or opens.
+    var barInsets: TimelineBarInsets? = nil
 
     func makeCoordinator() -> TimelineTableCoordinator { TimelineTableCoordinator() }
 
@@ -264,7 +278,12 @@ struct TimelineTable: NSViewRepresentable {
         {
             pendingFocus = configuration.focusedEventID
         }
-        inset(configuration.insets)
+        if let barInsets = configuration.barInsets {
+            barInsets.onChange = { [weak self] new in self?.inset(new) }
+            if barInsets.measured { inset(barInsets.current) }
+        } else {
+            inset(configuration.insets)
+        }
         // As in Slack, what you send brings a live conversation to it, however soon the server confirms it.
         if opened, configuration.live, let previous, previous.sends != configuration.sends {
             preservingPosition(keeping: .bottom) {}
@@ -279,7 +298,7 @@ struct TimelineTable: NSViewRepresentable {
     // MARK: Rows
 
     private func apply(_ entries: [TimelineEntry]) {
-        guard width > 0, let configuration else { return }
+        guard width > 0, let configuration, configuration.barInsets?.measured != false else { return }
         let settings = Settings(
             zoom: configuration.context.metrics.zoom,
             density: configuration.context.appearance?.density ?? .comfortable,
@@ -287,11 +306,12 @@ struct TimelineTable: NSViewRepresentable {
         let settingsChanged = settings != self.settings
         self.settings = settings
         // The timeline hands back the same array while nothing in it changed, which makes this check instant.
-        guard entries != applied || settingsChanged else { return }
+        let needsOpen = !opened && configuration.canOpen
+        guard entries != applied || settingsChanged || needsOpen else { return }
         applied = entries
         let next =
             [TimelineEntry(id: "spacer", kind: .spacer)] + entries + [TimelineEntry(id: "end", kind: .end)]
-        guard next != rows || settingsChanged else { return }
+        guard next != rows || settingsChanged || needsOpen else { return }
         let interval = Performance.begin(.timelineApply)
         defer { Performance.end(interval, ["rows": next.count]) }
         // Until rows with content open the table, there is nothing on screen to keep in place.
@@ -397,9 +417,10 @@ struct TimelineTable: NSViewRepresentable {
         }
         prepared = [:]
         spares = []
-        for cell in cells where Self.recycled.count < Self.recycledCells {
+        for cell in cells {
+            cell.clear()
             cell.removeFromSuperview()
-            Self.recycled.append(cell)
+            if Self.recycled.count < Self.recycledCells { Self.recycled.append(cell) }
         }
     }
 
@@ -454,6 +475,7 @@ struct TimelineTable: NSViewRepresentable {
     private func releasePrepared(outside near: NSRange) {
         for (id, cell) in prepared where index[id].map({ !NSLocationInRange($0, near) }) ?? true {
             prepared[id] = nil
+            cell.clear()
             if spares.count < Self.spareCells { spares.append(cell) }
         }
     }
@@ -650,10 +672,19 @@ struct TimelineTable: NSViewRepresentable {
         guard let first = messages.first ?? candidates.first else { return [] }
         let held = [first] + messages.drop { $0 <= first }
         // A thread's older replies land under its root and line: the first reply on screen holds still, not the root.
-        guard let older = index["older"], held.contains(where: { $0 > older && rows[$0].messageEventID != nil }) else {
+        let boundary: Int? =
+            if let older = index["older"] {
+                older
+            } else if let context = configuration?.context, context.isThread {
+                index["replies"]
+                    ?? context.threadRootID.flatMap { rootID in
+                        rows.firstIndex { $0.messageEventID == rootID }
+                    }
+            } else { nil }
+        guard let boundary, held.contains(where: { $0 > boundary && rows[$0].messageEventID != nil }) else {
             return held
         }
-        return held.filter { $0 > older }
+        return held.filter { $0 > boundary }
     }
 
     private func screenAnchor() -> String? {
@@ -707,7 +738,7 @@ struct TimelineTable: NSViewRepresentable {
             applying = false
             afterScroll()
         }
-        guard hasContent else {
+        guard hasContent && configuration.canOpen else {
             scroll(to: .bottom)
             return settle(keeping: .bottom)
         }
@@ -829,17 +860,25 @@ struct TimelineTable: NSViewRepresentable {
 
     /// The header or the composer changed height: rows scroll under the new one, the reader's place kept.
     private func inset(_ new: EdgeInsets) {
-        guard new.top != insets.top || new.bottom != insets.bottom else { return }
-        let kept = opened ? position() : nil
-        insets = NSEdgeInsets(top: new.top, left: 0, bottom: new.bottom, right: 0)
-        // Before the scroll view tiles for them, so that tile finds the viewport already this size.
-        if width > 0 { viewportHeight = visible.height }
-        applying = true
-        scrollView.contentInsets = insets
-        scrollView.scrollerInsets = insets
-        applying = false
-        guard width > 0 else { return }
-        preservingPosition(keeping: kept) {}
+        let changed = new.top != insets.top || new.bottom != insets.bottom
+        if changed {
+            let kept = opened ? position() : nil
+            insets = NSEdgeInsets(top: new.top, left: 0, bottom: new.bottom, right: 0)
+            // Before the scroll view tiles for them, so that tile finds the viewport already this size.
+            if width > 0 { viewportHeight = visible.height }
+            applying = true
+            scrollView.contentInsets = insets
+            scrollView.scrollerInsets = insets
+            applying = false
+            guard width > 0 else { return }
+            if opened {
+                preservingPosition(keeping: kept) {}
+            } else if let configuration {
+                apply(configuration.entries)
+            }
+        } else if !opened, width > 0, let configuration {
+            apply(configuration.entries)
+        }
     }
 
     private func viewportResized() {
@@ -926,8 +965,18 @@ struct TimelineTable: NSViewRepresentable {
     private func checkHistory() {
         guard let configuration else { return }
         let viewport = viewport
-        // A thread's root and line sit over its loading row; only the replies under it count toward the distance.
-        let above = index["older"].map { table.rect(ofRow: $0).minY - table.rect(ofRow: 1).minY } ?? 0
+        // A thread's root and line sit over its older replies; only the replies under them count toward the distance.
+        let above: CGFloat =
+            if let older = index["older"] {
+                table.rect(ofRow: older).minY - table.rect(ofRow: 1).minY
+            } else if configuration.context.isThread,
+                let boundary = index["replies"]
+                    ?? configuration.context.threadRootID.flatMap({ rootID in
+                        rows.firstIndex { $0.messageEventID == rootID }
+                    })
+            {
+                table.rect(ofRow: boundary).maxY - table.rect(ofRow: 1).minY
+            } else { 0 }
         if configuration.canLoadOlder && Policy.needsOlder(viewport, above: above) {
             DispatchQueue.main.async { configuration.onLoadOlder() }
         } else if configuration.canLoadNewer && Policy.needsNewer(viewport) {
@@ -955,9 +1004,11 @@ struct TimelineTable: NSViewRepresentable {
     /// The pane is moving on to another timeline, or has, so this table has nothing left to scroll to.
     private var leaving: Bool {
         guard let configuration else { return true }
-        return scrollView.window == nil
-            || configuration.timelineID != nil
-                && configuration.timelineID != configuration.context.matrix?.shownTimelineID
+        let current =
+            configuration.context.isThread
+            ? configuration.context.matrix?.threadSelection
+            : configuration.context.matrix?.shownTimelineID
+        return scrollView.window == nil || configuration.timelineID != nil && configuration.timelineID != current
     }
 
     /// Keeps what this table measured for the next table on the same timeline.
@@ -983,11 +1034,11 @@ struct TimelineTable: NSViewRepresentable {
         }
     }
 
-    /// What a row's height depends on: the row, and the table's width, settings and pane.
+    /// What a row's height depends on: the row, and the row column width, settings and pane.
     private func fingerprint(_ row: TimelineEntry) -> Int {
         var hasher = Hasher()
         hasher.combine(row)
-        hasher.combine(width)
+        hasher.combine(rowWidth)
         hasher.combine(settings)
         hasher.combine(configuration?.context.isThread)
         return hasher.finalize()
@@ -1190,6 +1241,12 @@ final class TimelineCell: NSView {
         self.commands = commands
     }
 
+    /// Drops the hosted row so idle spare and recycled cells neither retain old contexts nor stay subscribed.
+    func clear() {
+        host.rootView = nil
+        commands = nil
+    }
+
     /// The row's height at `width`, from the same views it is drawn with.
     func height(width: CGFloat) -> CGFloat { host.sizeThatFits(in: CGSize(width: width, height: 0)).height }
 
@@ -1262,8 +1319,9 @@ struct TimelineRow: View, Equatable {
     @ViewBuilder private var content: some View {
         switch entry.kind {
         case .spacer, .end: Color.clear
-        case .loading(let loading):
-            TimelineLoadingRow(loading: loading, offline: context.matrix?.connectionState == .offline)
+        case .loading(let loading, let immediate):
+            TimelineLoadingRow(
+                loading: loading, offline: context.matrix?.connectionState == .offline, immediate: immediate)
         case .welcome(let welcome):
             TimelineWelcomeRow(welcome: welcome).conversationRow(metrics, isThread: context.isThread)
         case .day(let label):
@@ -1274,7 +1332,6 @@ struct TimelineRow: View, Equatable {
         case .message(let row):
             if let matrix = context.matrix {
                 let message = row.message
-                let target = context.actionTarget(for: message)
                 MessageRow(
                     message: message, grouped: row.grouped, isThread: context.isThread,
                     own: message.senderID == matrix.user?.id, highlighted: row.highlighted, isSaved: row.saved,
@@ -1294,17 +1351,19 @@ struct TimelineRow: View, Equatable {
                         AvatarView(
                             name: $0.senderName, size: metrics.avatarSmall, matrix: matrix, source: $0.avatarURL)
                     },
-                    replyPreview: message.replyPreview.map {
-                        ReplyPreviewView(
-                            matrix: matrix, message: message, preview: $0, origin: target, onOpen: context.onShowReply,
-                            onOpenThread: context.onThread)
+                    replyPreview: message.replyPreview.map { preview in
+                        let needsOrigin = preview.state == .unavailable || preview.state == .failed
+                        return ReplyPreviewView(
+                            matrix: matrix, message: message, preview: preview,
+                            origin: needsOrigin ? context.actionTarget(for: message) : nil,
+                            onOpen: context.onShowReply, onOpenThread: context.onThread)
                     },
                     attachment: message.attachment.map {
                         AttachmentView(
                             matrix: matrix, message: message, attachment: $0, collapsed: row.mediaCollapsed,
-                            actions: context.attachmentActions(for: message, target: target))
+                            actions: context.rowAttachmentActions(for: message))
                     },
-                    actions: context.actions(for: row, target: target),
+                    actions: context.rowActions(for: row),
                     reactionFrame: { context.onReactionFrame(entry.id, $0, $1) })
             }
         }
@@ -1327,9 +1386,10 @@ private struct TimelineLoadingRow: View {
     @Environment(\.metrics) private var m
     let loading: Bool
     let offline: Bool
+    var immediate = false
     var body: some View {
-        DelayedProgress(active: loading, offline: offline, interval: .historyLoading).frame(maxWidth: .infinity).frame(
-            height: m.sp40)
+        DelayedProgress(active: loading, offline: offline, interval: .historyLoading, immediate: immediate)
+            .frame(maxWidth: .infinity).frame(height: m.sp40)
     }
 }
 

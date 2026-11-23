@@ -31,6 +31,18 @@ struct ThreadRootResolverTests {
         #expect(resolved == root && !fetched)
     }
 
+    @Test("A valid cached root resolves synchronously without opening a pending wait")
+    func cachedRootResolvesSynchronously() {
+        #expect(ThreadRootResolver.cached(roomID: room, rootID: root.id, candidates: [root]) == root)
+        #expect(ThreadRootResolver.cached(roomID: room, rootID: root.id, candidates: []) == nil)
+        var unconfirmed = root
+        unconfirmed.sendState = "sending"
+        #expect(ThreadRootResolver.cached(roomID: room, rootID: root.id, candidates: [unconfirmed]) == nil)
+        var reply = root
+        reply.threadRootID = "$other"
+        #expect(ThreadRootResolver.cached(roomID: room, rootID: root.id, candidates: [reply]) == nil)
+    }
+
     @Test("A missing root is fetched by its exact room and event ID")
     func fetchesMissingRoot() async throws {
         var request: [String] = []
