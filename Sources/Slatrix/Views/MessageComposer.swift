@@ -36,6 +36,14 @@ struct MessageComposer: View {
     var isPrimary = false
     /// In a thread's pane, whose messages' text starts nearer their avatars; the placeholder starts where it does.
     var isThread = false
+    /// Disables the composer input and buttons while keeping floating accessories (reply Retry/Cancel, draft status)
+    /// interactive.
+    var inputDisabled = false
+    /// Floats at the very top of the composer's overlay stack (e.g. toasts), never overlapping suggestions or banners.
+    var topOverlay: AnyView? = nil
+    /// Floats directly above the composer frame (e.g. reply banner, attachment draft status), coordinated with mentions
+    /// and errors in one vertical stack so overlays never collide.
+    var accessories: AnyView? = nil
 
     @StateObject private var editor = ComposerEditorState()
     @State private var localAttachments: [URL] = []
@@ -48,6 +56,10 @@ struct MessageComposer: View {
     @State private var isActive = true
     /// Text is selected in the editor, which brings up the formatting bar over it.
     @State private var hasSelection = false
+    /// Persistent Slack-style inline formatting bar toggled via the Aa button.
+    @State private var showFormattingBar = false
+    /// Measured height of the floating stack above the composer so the timeline's "Jump to recent" pill lifts clear.
+    @State private var floatingHeight: CGFloat = 0
     @State private var mention: MentionSearch.Suggestions?
     @State private var mentionIndex = 0
     @State private var typingTask: Task<Void, Never>?
@@ -73,7 +85,7 @@ struct MessageComposer: View {
     }
 
     private var canSend: Bool {
-        allowsSend && !sending && !preparingAttachments
+        allowsSend && !inputDisabled && !sending && !preparingAttachments
             && (!text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || (!requiresTextForSend && !isEditing && !attachments.isEmpty))
     }
@@ -82,25 +94,32 @@ struct MessageComposer: View {
     private var mentionMatches: [MentionSearch.Candidate] { mention?.candidates ?? [] }
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: m.radiusLarge)
         VStack(alignment: .leading, spacing: 0) {
             if isEditing {
                 HStack(spacing: m.sp8) {
                     RoundedRectangle(cornerRadius: m.sp2).fill(colors.accent).frame(width: m(3), height: m.sp16)
-                    Text("Editing message").font(m.font(.subheadline, .medium))
+                    Text("Editing message").font(m.font(.caption, .medium))
                     Spacer()
-                    Button {
-                        onCancelEdit?()
-                    } label: {
-                        Image(systemName: "xmark").font(m.font(.subheadline, .semibold))
+                    CloseButton(label: "Cancel editing") { onCancelEdit?() }.help("Cancel editing (Escape)")
+                }.padding(.horizontal, m.sp12).padding(.top, m.sp8).padding(.bottom, m.sp4)
+            }
+            if showFormattingBar {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 0) {
+                        formattingButtons
                     }
-                    .buttonStyle(.row).help("Cancel editing (Escape)").accessibilityLabel("Cancel editing")
-                }.padding(.horizontal, m.sp12).padding(.top, m.sp12).padding(.bottom, m.sp4)
+                    .padding(.horizontal, m.sp8).padding(.vertical, m.sp4)
+                }
+                .scrollIndicators(.hidden)
+                .disabled(sending)
+                .accessibilityElement(children: .contain).accessibilityLabel("Message formatting")
+                Divider().overlay(colors.border)
             }
             if !attachments.isEmpty && !isEditing { attachmentStrip.padding(.top, m.sp8) }
             // One line at rest, 40 pt, growing upward; the buttons keep to its bottom edge, so Send never moves. The
             // composer keeps to the messages' column, so "+" sits under their avatars and the text starts where theirs
-            // does, past the editor's own inset. Compact messages have no avatars, so "+" joins the buttons at the end
-            // and the composer reaches past the column for its text to start where theirs does.
+            // does, past the editor's own inset. Compact messages have no avatars, so "+" joins the buttons at the end.
             HStack(alignment: .bottom, spacing: 0) {
                 if !compact {
                     attachButton.padding(.bottom, m(6))
@@ -116,8 +135,10 @@ struct MessageComposer: View {
                     ComposerNativeEditor(
                         text: $text, state: editor, members: members, mentionText: NSColor(colors.mentionText),
                         mentionFill: NSColor(colors.mentionFill), textColor: NSColor(colors.textBody),
-                        linkColor: NSColor(colors.accent), enabled: !sending, reachable: isEnabled,
-                        acceptsAttachments: !sending && !isEditing && !preparingAttachments, onTextChange: changed,
+                        linkColor: NSColor(colors.accent), enabled: !sending && !inputDisabled,
+                        reachable: isEnabled && !inputDisabled,
+                        acceptsAttachments: !sending && !inputDisabled && !isEditing && !preparingAttachments,
+                        onTextChange: changed,
                         onSelectionChange: { text, range in
                             if hasSelection != (range.length > 0) { hasSelection = range.length > 0 }
                             updateMention(text, range)
@@ -129,6 +150,18 @@ struct MessageComposer: View {
                 }
                 HStack(spacing: 0) {
                     if compact { attachButton }
+                    Button {
+                        withAnimation(Motion.overlay) { showFormattingBar.toggle() }
+                    } label: {
+                        Text("Aa").font(m.font(.body, .semibold))
+                            .frame(width: m.iconButton, height: m.iconButton)
+                            .background(showFormattingBar ? colors.selection : .clear, in: Circle())
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.icon)
+                    .foregroundStyle(showFormattingBar ? colors.textPrimary : muted)
+                    .help("Formatting").accessibilityLabel("Formatting")
+                    .accessibilityAddTraits(showFormattingBar ? .isSelected : [])
                     iconButton("at", label: "Mention someone") {
                         editor.insert("@")
                         editor.focus()
@@ -142,33 +175,38 @@ struct MessageComposer: View {
                     } else {
                         Button(action: send) {
                             Image(systemName: isEditing ? "checkmark" : "arrow.up").font(m.font(.body, .bold))
-                                .foregroundStyle(canSend ? colors.onAccent : colors.textTertiary)
                                 .frame(width: m.iconButton, height: m.iconButton)
-                                .background(canSend ? colors.accentFill : colors.sunken, in: Circle())
-                                .contentShape(Circle())
-                        }.buttonStyle(.row).disabled(!canSend).padding(.leading, m.sp4)
-                            .help(isEditing ? "Save changes (Return)" : "Send message (Return)")
-                            .accessibilityLabel(isEditing ? "Save changes" : "Send message")
+                        }
+                        .buttonStyle(ComposerSendButtonStyle(active: canSend)).disabled(!canSend)
+                        .padding(.leading, m.sp4)
+                        .help(isEditing ? "Save changes (Return)" : "Send message (Return)")
+                        .accessibilityLabel(isEditing ? "Save changes" : "Send message")
                     }
                 }.padding(.bottom, m(6)).padding(.leading, m.sp4).disabled(sending)
             }.padding(.leading, compact ? m.sp8 : m(6)).padding(.trailing, m(6))
         }
-        .glass(
-            colors.control, in: RoundedRectangle(cornerRadius: m.controlLarge / 2), cornerRadius: m.controlLarge / 2,
-            elevated: false
-        )
-        // The resting edge is the glass's, or the elevation's hairline before macOS 26; focus adds the accent.
+        .background(colors.control, in: shape)
         .overlay(
-            RoundedRectangle(cornerRadius: m.controlLarge / 2).strokeBorder(
-                editor.isFocused ? colors.accentLine : .clear, lineWidth: 1)
+            shape.strokeBorder(
+                editor.isFocused ? colors.accentFill : colors.borderStrong, lineWidth: editor.isFocused ? 1 : 0.5)
         )
-        .elevation(.e1, cornerRadius: m.controlLarge / 2)
-        // Compact, the text sits 12 in from the rounded edge: 8 here and the editor's own 4.
-        .padding(.leading, compact ? -m.sp12 : 0)
-        // Suggestions, errors and hints float above the composer instead of growing it.
-        .overlay(alignment: .topLeading) {
-            floating.alignmentGuide(.top) { $0[.bottom] + m.sp8 }
+        .overlay {
+            if editor.isFocused {
+                RoundedRectangle(cornerRadius: m.radiusLarge + m(3))
+                    .strokeBorder(colors.accentFill.opacity(0.3), lineWidth: m(3)).padding(-m(3))
+                    .allowsHitTesting(false)
+            }
         }
+        // Only the composer box itself disables on `inputDisabled`; floating accessories (reply Retry/Cancel, draft
+        // status, toasts) stay live above it.
+        .disabled(inputDisabled)
+        // Suggestions, errors, toasts and reply/attachment cards float in one stack above the composer.
+        .overlay(alignment: .topLeading) {
+            floating
+                .onGeometryChange(for: CGFloat.self, of: \.size.height) { floatingHeight = $0 }
+                .alignmentGuide(.top) { $0[.bottom] + m.sp8 }
+        }
+        .preference(key: ComposerAccessoryHeightKey.self, value: floatingHeight > 0 ? floatingHeight + m.sp8 : 0)
         .onAppear { isActive = true }
         // Once as an edit opens; opened under a cover, the editor takes the keyboard as it would after any cover.
         .task(id: isEditing || requiresTextForSend) {
@@ -194,7 +232,9 @@ struct MessageComposer: View {
             onTyping(false)
         }
         .onReceive(NotificationCenter.default.publisher(for: .menuAction)) { notification in
-            guard notification.userInfo?["action"] as? String == "attach", !isEditing, isEnabled else { return }
+            guard notification.userInfo?["action"] as? String == "attach", !isEditing, isEnabled, !inputDisabled else {
+                return
+            }
             let focused = NSApp.keyWindow?.firstResponder
             if focused === editor.textView || (isPrimary && !(focused is ComposerTextView)) { chooseFiles() }
         }
@@ -205,14 +245,22 @@ struct MessageComposer: View {
                 onCancelEdit?()
             }
         }
-        .uploadIntake(isEnabled && !sending && !isEditing && !preparingAttachments ? queueInput as UploadIntake : nil)
+        .uploadIntake(
+            isEnabled && !inputDisabled && !sending && !isEditing && !preparingAttachments
+                ? queueInput as UploadIntake : nil)
     }
 
     private var floating: some View {
-        VStack(alignment: .leading, spacing: m.sp8) {
-            if hasSelection && editor.isFocused && linkDraft == nil { formattingToolbar }
-            if let draft = Binding($linkDraft) { linkCard(draft) }
-            if !mentionMatches.isEmpty { mentionSuggestions }
+        let showsSelectionBar =
+            hasSelection && editor.isFocused && !inputDisabled && linkDraft == nil && !showFormattingBar
+        let showsReplyHint = requiresTextForSend && !attachments.isEmpty
+        return VStack(alignment: .leading, spacing: m.sp8) {
+            if let topOverlay {
+                topOverlay.frame(maxWidth: .infinity)
+            }
+            if showsSelectionBar { formattingToolbar.transition(.opacity) }
+            if let draft = Binding($linkDraft) { linkCard(draft).disabled(inputDisabled).transition(.opacity) }
+            if !mentionMatches.isEmpty && !inputDisabled { mentionSuggestions.transition(.opacity) }
             Group {
                 if let errorMessage {
                     HStack(alignment: .firstTextBaseline) {
@@ -220,7 +268,7 @@ struct MessageComposer: View {
                         Text(errorMessage).textSelection(.enabled)
                         Spacer(minLength: m.sp4)
                         Button("Try again", action: send).buttonStyle(.textLink).disabled(!canSend)
-                    }.font(m.font(.subheadline)).foregroundStyle(colors.destructive)
+                    }.font(m.font(.caption)).foregroundStyle(colors.destructive)
                         .accessibilityElement(children: .combine)
                 }
                 if let attachmentError {
@@ -228,59 +276,66 @@ struct MessageComposer: View {
                         Image(systemName: "exclamationmark.circle").accessibilityHidden(true)
                         Text(attachmentError)
                         Spacer(minLength: m.sp4)
-                        Button {
-                            self.attachmentError = nil
-                        } label: {
-                            Image(systemName: "xmark")
-                        }.buttonStyle(.row).help("Dismiss").accessibilityLabel("Dismiss attachment error")
-                    }.font(m.font(.subheadline)).foregroundStyle(colors.destructive).accessibilityElement(
+                        CloseButton(label: "Dismiss attachment error") { self.attachmentError = nil }
+                    }.font(m.font(.caption)).foregroundStyle(colors.destructive).accessibilityElement(
                         children: .combine)
                 }
-                if requiresTextForSend && !attachments.isEmpty {
-                    Text("Add a message to reply").font(m.font(.subheadline)).foregroundStyle(muted)
+                if showsReplyHint {
+                    Text("Add a message to reply").font(m.font(.caption)).foregroundStyle(muted)
                 }
             }
             .padding(.horizontal, m.sp12).padding(.vertical, m.sp8)
             .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+            .elevation(.e2, cornerRadius: m.radiusLarge)
+            if let accessories { accessories }
         }
+        .animation(
+            Motion.overlay,
+            value: [
+                showsSelectionBar, linkDraft != nil, !mentionMatches.isEmpty, errorMessage != nil,
+                attachmentError != nil, showsReplyHint, accessories != nil,
+            ])
     }
 
     /// The formatting bar over a selection; each button shows whether its format is on there.
     private var formattingToolbar: some View {
-        let formats = editor.formats
-        return HStack(spacing: 0) {
-            formatButton("bold", label: "Bold", keys: "⌘B", on: formats.style.contains(.bold)) {
-                editor.toggle(.bold)
-            }
-            formatButton("italic", label: "Italic", keys: "⌘I", on: formats.style.contains(.italic)) {
-                editor.toggle(.italic)
-            }
-            formatButton("strikethrough", label: "Strikethrough", keys: "⇧⌘X", on: formats.style.contains(.strike)) {
-                editor.toggle(.strike)
-            }
-            toolbarDivider
-            formatButton("link", label: "Link", keys: "⇧⌘U", on: false, action: editLink)
-            toolbarDivider
-            formatButton("list.number", label: "Numbered list", keys: "⇧⌘7", on: formats.block == .ordered) {
-                editor.toggle(block: .ordered)
-            }
-            formatButton("list.bullet", label: "Bulleted list", keys: "⇧⌘8", on: formats.block == .bullet) {
-                editor.toggle(block: .bullet)
-            }
-            toolbarDivider
-            formatButton("text.quote", label: "Quote", keys: "⇧⌘9", on: formats.block == .quote) {
-                editor.toggle(block: .quote)
-            }
-            formatButton(
-                "chevron.left.forwardslash.chevron.right", label: "Code", keys: "⇧⌘C",
-                on: formats.style.contains(.code)
-            ) { editor.toggle(.code) }
-            formatButton("curlybraces.square", label: "Code block", keys: "⌥⇧⌘C", on: formats.block == .code) {
-                editor.toggle(block: .code)
-            }
-        }.padding(m.sp2).disabled(sending)
+        HStack(spacing: 0) { formattingButtons }
+            .padding(m.sp2).disabled(sending)
             .background(colors.overlay, in: Capsule()).elevation(.e2, cornerRadius: m.control / 2)
             .accessibilityElement(children: .contain).accessibilityLabel("Message formatting")
+    }
+
+    @ViewBuilder private var formattingButtons: some View {
+        let formats = editor.formats
+        formatButton("bold", label: "Bold", keys: "⌘B", on: formats.style.contains(.bold)) {
+            editor.toggle(.bold)
+        }
+        formatButton("italic", label: "Italic", keys: "⌘I", on: formats.style.contains(.italic)) {
+            editor.toggle(.italic)
+        }
+        formatButton("strikethrough", label: "Strikethrough", keys: "⇧⌘X", on: formats.style.contains(.strike)) {
+            editor.toggle(.strike)
+        }
+        toolbarDivider
+        formatButton("link", label: "Link", keys: "⇧⌘U", on: false, action: editLink)
+        toolbarDivider
+        formatButton("list.number", label: "Numbered list", keys: "⇧⌘7", on: formats.block == .ordered) {
+            editor.toggle(block: .ordered)
+        }
+        formatButton("list.bullet", label: "Bulleted list", keys: "⇧⌘8", on: formats.block == .bullet) {
+            editor.toggle(block: .bullet)
+        }
+        toolbarDivider
+        formatButton("text.quote", label: "Quote", keys: "⇧⌘9", on: formats.block == .quote) {
+            editor.toggle(block: .quote)
+        }
+        formatButton(
+            "chevron.left.forwardslash.chevron.right", label: "Code", keys: "⇧⌘C",
+            on: formats.style.contains(.code)
+        ) { editor.toggle(.code) }
+        formatButton("curlybraces.square", label: "Code block", keys: "⌥⇧⌘C", on: formats.block == .code) {
+            editor.toggle(block: .code)
+        }
     }
 
     private var toolbarDivider: some View {
@@ -677,6 +732,38 @@ private struct ComposerLinkDraft: Equatable {
     }
 }
 
+/// The composer's round Send / Save button, with hover, press and focus feedback matching primary controls.
+private struct ComposerSendButtonStyle: ButtonStyle {
+    let active: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        StyledSend(active: active, configuration: configuration)
+    }
+
+    private struct StyledSend: View {
+        let active: Bool
+        let configuration: Configuration
+        @Environment(\.isFocused) private var focusedWithin
+        @Environment(\.metrics) private var m
+        @EnvironmentObject private var appearance: AppearanceStore
+        @State private var hovering = false
+
+        var body: some View {
+            let colors = appearance.colors
+            configuration.label
+                .foregroundStyle(active ? colors.onAccent : colors.textTertiary)
+                .background(active ? colors.accentFill : colors.sunken, in: Circle())
+                .overlay {
+                    if active && (hovering || configuration.isPressed) {
+                        Circle().fill(colors.scrim.opacity(configuration.isPressed ? 0.5 : 0.25))
+                    }
+                }
+                .contentShape(Circle())
+                .focusRing(keyboardFocused(focusedWithin), cornerRadius: m.iconButton / 2)
+                .onHover { hovering = $0 }
+        }
+    }
+}
+
 /// Slack's line in place of the composer where you may not post, at the composer's resting height so nothing moves.
 struct ComposerNotice: View {
     var text: String
@@ -902,7 +989,7 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
     private var mentionText = NSColor.linkColor
     private var mentionFill = NSColor.clear
     private var linkColor = NSColor.linkColor
-    private var themeText = NSColor.textColor
+    fileprivate var themeText = NSColor.textColor
 
     // MARK: How text looks, from what it is
 
@@ -916,6 +1003,7 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
         self.mentionFill = mentionFill
         linkColor = link
         themeText = text
+        insertionPointColor = text
         storage.beginEditing()
         restyle(NSRange(location: 0, length: storage.length))
         storage.endEditing()
@@ -934,10 +1022,10 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
         if style.contains(.italic) && !code { traits.insert(.italic) }
         font = NSFont(descriptor: font.fontDescriptor.withSymbolicTraits(traits), size: size) ?? font
         var attributes: [NSAttributedString.Key: Any] = [
-            .font: font, .foregroundColor: NSColor.labelColor,
+            .font: font, .foregroundColor: themeText,
             .paragraphStyle: MessageBlocks.paragraph(
                 quote: block == .quote, list: block == .bullet || block == .ordered ? 1 : 0, code: code,
-                fontSize: fontSize, lineSpacing: 0),
+                fontSize: fontSize, lineSpacing: fontSize / 5),
         ]
         if !style.isEmpty { attributes[.composerStyle] = Int(style.rawValue) }
         if let block { attributes[.composerBlock] = block.rawValue }
@@ -1446,7 +1534,7 @@ private final class ComposerLayoutManager: PillLayoutManager {
         let font = view.typingAttributes[.font] as? NSFont ?? .systemFont(ofSize: NSFont.systemFontSize)
         let marker = MessageBlocks.marker(
             block == .bullet ? "• " : "\(number). ",
-            attributes: [.font: NSFont.systemFont(ofSize: font.pointSize), .foregroundColor: NSColor.labelColor])
+            attributes: [.font: NSFont.systemFont(ofSize: font.pointSize), .foregroundColor: view.themeText])
         // Where a message's marker text sits, so a list looks the same before and after sending.
         marker.draw(
             at: NSPoint(
@@ -1498,7 +1586,7 @@ private struct StagedAttachmentTile: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, m.sp12).frame(width: m(Self.fileWidth), height: m(Self.side))
-                .background(colors.canvas, in: shape)
+                .background(colors.raised, in: shape)
             }
         }
         .overlay(shape.strokeBorder(colors.border))

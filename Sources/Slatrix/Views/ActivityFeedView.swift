@@ -44,7 +44,7 @@ struct ActivityFeedView: View {
                 TabBar(tabs: ActivityFilter.allCases.map { .init(value: $0, title: $0.rawValue) }, selection: $filter)
                 Spacer()
                 FeedWorkspacePicker(matrix: matrix, workspaceID: $workspaceID)
-            }.padding(.horizontal, m.sp24).frame(height: m.tabBar)
+            }.padding(.horizontal, m.sp20).frame(height: m.tabBar)
             Divider().overlay(colors.border)
             if items.isEmpty && summaryRooms.isEmpty {
                 EmptyStateView(
@@ -59,9 +59,9 @@ struct ActivityFeedView: View {
                                 Button {
                                     onOpenRoom(room.id)
                                 } label: {
-                                    summaryRow(room)
+                                    summaryRow(room).modifier(FeedRowHover())
                                 }.buttonStyle(.row)
-                                Divider().overlay(colors.border).padding(.leading, m.sp24 + m.avatar + m.sp12)
+                                Divider().overlay(colors.border).padding(.leading, m.sp20 + m.avatar + m.sp12)
                             }
                         }
                         if !items.isEmpty {
@@ -70,12 +70,14 @@ struct ActivityFeedView: View {
                                 Button {
                                     onOpenMessage(item)
                                 } label: {
-                                    activityRow(item)
+                                    activityRow(item).modifier(FeedRowHover())
                                 }.buttonStyle(.row)
-                                Divider().overlay(colors.border).padding(.leading, m.sp24 + m.avatar + m.sp12)
+                                Divider().overlay(colors.border).padding(.leading, m.sp20 + m.avatar + m.sp12)
                             }
                         }
                     }.padding(.bottom, m.sp16)
+                        .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
+                        .frame(maxWidth: .infinity)
                 }
             }
         }.background(colors.canvas)
@@ -83,7 +85,7 @@ struct ActivityFeedView: View {
 
     private func sectionLabel(_ label: String) -> some View {
         Text(label).font(m.font(.body, .semibold)).foregroundStyle(colors.textSecondary).padding(
-            .horizontal, m.sp24
+            .horizontal, m.sp20
         ).padding(.top, m.sp20).padding(.bottom, m.sp12)
     }
 
@@ -118,7 +120,7 @@ struct ActivityFeedView: View {
                 Circle().fill(colors.accent).frame(width: m.sp8, height: m.sp8).accessibilityLabel(
                     "Unread conversation")
             }
-        }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16).contentShape(Rectangle())
+        }.padding(.horizontal, m.sp20).padding(.vertical, m.sp16).contentShape(Rectangle())
     }
 
     private func activityRow(_ item: ActivityItem) -> some View {
@@ -161,9 +163,19 @@ struct ActivityFeedView: View {
                 Image(systemName: "at").font(m.font(.body, .semibold)).foregroundStyle(colors.accent)
                     .padding(.top, m.sp2)
             }
-        }.padding(.horizontal, m.sp24).padding(.vertical, m.sp16).frame(maxWidth: .infinity, alignment: .leading)
+        }.padding(.horizontal, m.sp20).padding(.vertical, m.sp16).frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(
                 Rectangle()
             ).accessibilityValue(unread ? "Unread" : "")
+    }
+}
+
+/// Hover background for full-bleed collection feed rows (Activity, Drafts).
+struct FeedRowHover: ViewModifier {
+    @State private var hovering = false
+    @ThemeColors private var colors
+
+    func body(content: Content) -> some View {
+        content.background(hovering ? colors.hover : .clear).onHover { hovering = $0 }
     }
 }

@@ -204,7 +204,7 @@ struct Modal<Content: View>: View {
             }
         }
         .frame(maxWidth: width, maxHeight: height.map(m.callAsFunction))
-        .background(colors.canvas).foregroundStyle(colors.textBody)
+        .background(colors.overlay).foregroundStyle(colors.textBody)
         .modalSurface()
         // Keeps the modal off the window's edges at any zoom.
         .padding(m.sp40)

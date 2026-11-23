@@ -26,7 +26,7 @@ struct AvatarView: View {
         let image: CGImage
     }
     private var radius: CGFloat { cornerRadius ?? size / 2 }
-    private var dot: CGFloat { size * 0.28 }
+    private var dot: CGFloat { max(9, size * 0.28) }
     private var shift: CGFloat { size * 0.06 }
     private var large: Bool { size > Self.largeSide }
     private var requestID: RequestID { RequestID(userID: matrix?.user?.id, source: source, large: large) }
@@ -66,7 +66,7 @@ struct AvatarView: View {
                     if presence == .active {
                         Circle().fill(colors.presenceActive)
                     } else {
-                        Circle().strokeBorder(colors.presenceAway, lineWidth: max(1.5, size * 0.05) - 1)
+                        Circle().strokeBorder(colors.presenceAway, lineWidth: max(1.5, size * 0.05))
                     }
                 }
                 .frame(width: dot - 2, height: dot - 2).offset(x: shift - 1, y: shift - 1).accessibilityHidden(true)

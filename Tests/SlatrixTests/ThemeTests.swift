@@ -23,6 +23,19 @@ struct ThemeTests {
             #expect(contrast(colors.textPrimary, surface) >= 4.5)
             #expect(contrast(colors.textSecondary, surface) >= 4.5)
         }
+        for surface in [colors.canvas, colors.raised, colors.overlay, colors.control] {
+            #expect(contrast(colors.textTertiary, surface) >= 4.5, "\(theme) dark=\(dark) textTertiary")
+        }
+        #expect(contrast(colors.onAccent, colors.accentFill) >= 4.5, "\(theme) dark=\(dark) onAccent/accentFill")
+        #expect(
+            contrast(colors.onAccent, colors.destructiveFill) >= 4.5, "\(theme) dark=\(dark) onAccent/destructiveFill")
+        for surface in [colors.canvas, colors.raised, colors.overlay] {
+            #expect(contrast(colors.destructive, surface) >= 4.5, "\(theme) dark=\(dark) destructive text")
+        }
+        for surface in [colors.canvas, colors.raised] {
+            #expect(contrast(colors.warning, surface) >= 4.5, "\(theme) dark=\(dark) warning")
+            #expect(contrast(colors.success, surface) >= 4.5, "\(theme) dark=\(dark) success")
+        }
         #expect(contrast(colors.accent, colors.canvas) >= 4.5)
         #expect(contrast(colors.mentionText, over(colors.mentionFill, colors.canvas)) >= 4.5)
         // A mention of you, also on the message jumped to and under the pointer.
@@ -49,7 +62,17 @@ struct ThemeTests {
                 #expect(contrast(sidebar.textPrimary, surface) >= 4.5)
                 #expect(contrast(sidebar.textSecondary, surface) >= 4.5)
             }
+            #expect(contrast(sidebar.textTertiary, frame) >= 4.5, "\(theme) dark=\(dark) onFrameTertiary")
         }
+    }
+
+    // capability: app.appearance
+    @Test("Appearance defaults to following the system color scheme")
+    func defaultsToSystem() {
+        let saved = UserDefaults.standard.object(forKey: "appearance.mode")
+        defer { UserDefaults.standard.set(saved, forKey: "appearance.mode") }
+        UserDefaults.standard.removeObject(forKey: "appearance.mode")
+        #expect(AppearanceStore().mode == .system)
     }
 
     // capability: app.themes

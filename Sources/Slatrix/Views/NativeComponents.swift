@@ -5,12 +5,13 @@ import SwiftUI
 struct EmptyStateView<Action: View>: View {
     private static var textWidth: CGFloat { 360 }
     @Environment(\.metrics) private var m
+    @ThemeColors private var colors
     let symbol: String
     let title: String
     @ViewBuilder var action: () -> Action
     var body: some View {
         VStack(spacing: m.sp12) {
-            Image(systemName: symbol).font(m.font(.title1)).foregroundStyle(.secondary)
+            Image(systemName: symbol).font(m.font(.title1)).foregroundStyle(colors.textSecondary)
             Text(title).font(m.font(.body, .semibold)).multilineTextAlignment(.center).frame(
                 maxWidth: m(Self.textWidth))
             action().buttonStyle(.textLink).font(m.font(.body))
@@ -31,7 +32,7 @@ struct InlineErrorView: View {
     var body: some View {
         HStack(spacing: m.sp8) {
             Image(systemName: "exclamationmark.circle").foregroundStyle(colors.warning)
-            Text(message).font(m.font(.subheadline)).textSelection(.enabled).frame(
+            Text(message).font(m.font(.caption)).textSelection(.enabled).frame(
                 maxWidth: .infinity, alignment: .leading)
             if let dismiss { CloseButton(label: "Dismiss error", action: dismiss) }
         }.padding(.horizontal, m.sp12).padding(.vertical, m.sp8).background(colors.warning.opacity(0.08))

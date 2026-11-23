@@ -316,9 +316,7 @@ struct EncryptionRecoveryView: View {
                 VStack(alignment: .leading, spacing: m.sp8) {
                     Text("Recovery key").font(m.font(.body, .semibold))
                     SecureField("", text: $recoveryKey)
-                        .textFieldStyle(.plain).font(m.font(.reading, design: .monospaced)).padding(m.sp12)
-                        .background(colors.raised, in: RoundedRectangle(cornerRadius: m.radius))
-                        .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.textSecondary.opacity(0.5)))
+                        .textFieldStyle(.field)
                         .disabled(busy).accessibilityLabel("Recovery key")
                 }
             }

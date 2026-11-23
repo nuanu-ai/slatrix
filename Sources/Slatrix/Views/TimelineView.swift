@@ -5,6 +5,7 @@ struct TimelineView: View {
     @Environment(\.metrics) private var m
     @Environment(\.openURL) private var openURL
     @Environment(\.timelineBarInsets) private var barInsets
+    @Environment(\.composerAccessoryHeight) private var accessoryHeight
     let matrix: MatrixService
     @EnvironmentObject var appearance: AppearanceStore
     @Environment(Popovers.self) private var popovers: Popovers?
@@ -182,24 +183,31 @@ struct TimelineView: View {
         .overlay(alignment: .top) {
             if let scrollEdge { ScrollEdgeHairline(state: scrollEdge, top: insets.top) }
         }
-        .overlay(alignment: .bottomTrailing) {
+        .overlay(alignment: .bottom) {
             if jumpVisible && !messages.isEmpty {
-                Button {
-                    if matrix.focusedEventID != nil {
-                        if let onJumpToLatest {
-                            onJumpToLatest()
+                HStack {
+                    Spacer(minLength: 0)
+                    Button {
+                        if matrix.focusedEventID != nil {
+                            if let onJumpToLatest {
+                                onJumpToLatest()
+                            } else {
+                                Task { await matrix.selectRoom(room.id) }
+                            }
                         } else {
-                            Task { await matrix.selectRoom(room.id) }
+                            scroller.scrollToBottom()
                         }
-                    } else {
-                        scroller.scrollToBottom()
-                    }
-                } label: {
-                    Label("Jump to recent", systemImage: "arrow.down").font(m.font(.subheadline, .semibold))
-                        .padding(.horizontal, m.sp16).padding(.vertical, m.sp8)
-                        .background(colors.raised, in: Capsule()).overlay(Capsule().stroke(colors.border))
-                        .elevation(.e2, cornerRadius: m.sp20)
-                }.buttonStyle(.row).padding(m.sp20).padding(.bottom, insets.bottom).transition(.opacity)
+                    } label: {
+                        Label("Jump to recent", systemImage: "arrow.down").font(m.font(.subheadline, .semibold))
+                            .padding(.horizontal, m.sp16).padding(.vertical, m.sp8)
+                            .background(colors.raised, in: Capsule())
+                            .elevation(.e2, cornerRadius: m.sp20)
+                    }.buttonStyle(.row)
+                }
+                .padding(.horizontal, m.conversationInset(thread: thread))
+                .padding(.bottom, m.sp16 + insets.bottom + accessoryHeight)
+                .animation(Motion.overlay, value: accessoryHeight)
+                .conversationRow(m, isThread: thread).transition(.opacity)
             }
         }
         .animation(Motion.overlay, value: jumpVisible)
@@ -707,15 +715,47 @@ struct MessageRow: View {
             // that leading of its own, so it comes on top of them. Two grouped rows share both their 2s, so a sender's
             // first gap is the tightest.
             .padding(.top, Self.topInset(m, grouped: grouped, compact: compact))
-            .padding(.bottom, compact ? m.sp4 : grouped ? m.sp4 : m.sp2)
+            .padding(.bottom, compact ? m.sp2 : grouped ? m.sp4 : m.sp2)
     }
     /// The space above a row's first line, which the hover toolbar may hang into.
     static func topInset(_ m: Metrics, grouped: Bool, compact: Bool) -> CGFloat {
         compact ? (grouped ? 0 : m.sp2) : grouped ? m(3) : m.sp12
     }
-    private func content(gutter: CGFloat) -> some View {
-        HStack(alignment: .top, spacing: gutter) {
-            if !compact {
+    @ViewBuilder private func content(gutter: CGFloat) -> some View {
+        if compact {
+            VStack(alignment: .leading, spacing: m.sp2) {
+                if !message.isRedacted, let replyPreview { replyPreview.id(message.id) }
+                HStack(alignment: .top, spacing: m(6)) {
+                    HStack(alignment: .firstTextBaseline, spacing: m(6)) {
+                        Text(time).font(m.font(.subheadline)).monospacedDigit()
+                            .foregroundStyle(colors.textSecondary).fixedSize()
+                        Button {
+                            actions.openProfile?()
+                        } label: {
+                            Text(message.senderName).font(m.font(.reading, .semibold))
+                                .foregroundStyle(colors.textPrimary).lineLimit(1).truncationMode(.tail)
+                        }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help("View profile")
+                        if let status = effectiveWaitStatus {
+                            SendingClock(since: message.timestamp, status: status)
+                        }
+                        if let seen, !pendingSend {
+                            ReadTicks(read: seen.read).help(seen.tooltip ?? "")
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: m.sp2) {
+                        messageText
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .overlay(alignment: .topLeading) {
+                    if isSaved {
+                        Image(systemName: "bookmark.fill").font(m.font(.subheadline)).foregroundStyle(colors.accent)
+                            .offset(x: -m(14), y: m.sp2)
+                    }
+                }
+                if !message.isRedacted { messageExtras }
+            }
+        } else {
+            HStack(alignment: .top, spacing: gutter) {
                 if grouped || !appearance.showAvatars {
                     // One line: a wrap would grow the row on hover.
                     Text(hovered ? gutterTime : "").font(m.font(.subheadline)).monospacedDigit().lineLimit(1)
@@ -736,87 +776,86 @@ struct MessageRow: View {
                         "View \(message.senderName)’s profile"
                     ).padding(.top, m.sp2)
                 }
+                VStack(alignment: .leading, spacing: m.sp2) {
+                    if !grouped {
+                        HStack(alignment: .firstTextBaseline, spacing: m(6)) {
+                            Button {
+                                actions.openProfile?()
+                            } label: {
+                                Text(message.senderName).font(m.font(.reading, .semibold))
+                                    .foregroundStyle(colors.textPrimary)
+                            }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help("View profile")
+                            Text(time).font(m.font(.subheadline)).monospacedDigit()
+                                .foregroundStyle(colors.textSecondary)
+                            if let seen, !pendingSend {
+                                ReadTicks(read: seen.read).help(seen.tooltip ?? "")
+                            }
+                            if isSaved {
+                                Image(systemName: "bookmark.fill").font(m.font(.subheadline))
+                                    .foregroundStyle(colors.accent)
+                            }
+                            if let status = effectiveWaitStatus {
+                                SendingClock(since: message.timestamp, status: status, showsBlockedLabel: true)
+                            }
+                        }
+                    }
+                    if !message.isRedacted, let replyPreview { replyPreview.id(message.id) }
+                    messageText
+                    if !message.isRedacted { messageExtras }
+                }.frame(maxWidth: .infinity, alignment: .leading)
             }
-            VStack(alignment: .leading, spacing: m.sp2) {
-                if !grouped || compact {
-                    HStack(alignment: .firstTextBaseline, spacing: m(6)) {
-                        if compact {
-                            Text(time).font(m.font(.subheadline)).monospacedDigit()
-                                .foregroundStyle(colors.textSecondary)
-                        }
-                        Button {
-                            actions.openProfile?()
-                        } label: {
-                            Text(message.senderName).font(m.font(.body, .semibold))
-                                .foregroundStyle(colors.textPrimary)
-                        }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help("View profile")
-                        if !compact {
-                            Text(time).font(m.font(.subheadline)).monospacedDigit()
-                                .foregroundStyle(colors.textSecondary)
-                        }
-                        if let seen, !pendingSend {
-                            ReadTicks(read: seen.read).help(seen.tooltip ?? "")
-                        }
-                        if isSaved {
-                            Image(systemName: "bookmark.fill").font(m.font(.subheadline)).foregroundStyle(colors.accent)
-                        }
-                        if let status = effectiveWaitStatus {
-                            SendingClock(since: message.timestamp, status: status, showsBlockedLabel: true)
-                        }
+        }
+    }
+    @ViewBuilder private var messageText: some View {
+        if message.isRedacted {
+            Text(ChatMessage.deletedBody).italic().font(m.font(.reading)).foregroundStyle(colors.textSecondary)
+                .opacity(pendingMutation ? 0.5 : 1)
+        } else {
+            if message.kind == "m.room.encrypted" {
+                // One quiet line per message; the header offers the recovery key once for all of them.
+                Label(message.body, systemImage: "lock").font(m.font(.body)).italic()
+                    .foregroundStyle(colors.textSecondary)
+            } else if message.showsMessageBody {
+                // Slack draws a message that hasn't reached the server lighter, and nothing else.
+                NativeMessageBody(
+                    body: message.body, formattedBody: message.formattedBody, edited: message.isEdited,
+                    menuCommands: actions.menu
+                ).opacity(pendingSend || pendingMutation ? 0.5 : 1)
+            }
+            if message.isEdited && (!message.showsMessageBody || message.kind == "m.room.encrypted") {
+                Text("(edited)").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+            }
+        }
+    }
+    @ViewBuilder private var messageExtras: some View {
+        // A reused cell shows another message: a download or preview in flight must not carry over.
+        if let attachment { attachment.padding(.top, m(6)).id(message.id) }
+        if !message.reactions.isEmpty { reactions.padding(.top, m(3)) }
+        if !isThread, let count = message.replyCount, count > 0 {
+            ThreadRepliesBar(
+                count: count, lastReply: message.lastReply, avatar: replierAvatar,
+                prepare: actions.prepareThread, action: actions.openReplies
+            ).padding(.top, m.sp4)
+        }
+        if pendingSend, let failure = sendFailure {
+            VStack(alignment: .leading, spacing: m.sp4) {
+                HStack(alignment: .firstTextBaseline, spacing: m.sp12) {
+                    Label("Not delivered", systemImage: "exclamationmark.circle.fill")
+                        .foregroundStyle(colors.destructive)
+                    if failure.canRetry {
+                        Button("Retry", action: actions.retrySend).buttonStyle(.textLink)
+                    }
+                    Button("Delete", role: .destructive, action: actions.cancelSend).buttonStyle(.textLink)
+                }.disabled(sendBusy).overlay(alignment: .trailing) {
+                    if sendBusy {
+                        DelayedProgress().padding(.leading, m.sp8).frame(width: 0, alignment: .leading)
                     }
                 }
-                if message.isRedacted {
-                    Text(ChatMessage.deletedBody).italic().font(m.font(.reading)).foregroundStyle(
-                        colors.textSecondary
-                    ).opacity(pendingMutation ? 0.5 : 1)
-                } else {
-                    // State of its own per message, so a reused cell never names another copy's thread.
-                    if let replyPreview { replyPreview.id(message.id) }
-                    if message.kind == "m.room.encrypted" {
-                        // One quiet line per message; the header offers the recovery key once for all of them.
-                        Label(message.body, systemImage: "lock").font(m.font(.body)).italic()
-                            .foregroundStyle(colors.textSecondary)
-                    } else if message.showsMessageBody {
-                        // Slack draws a message that hasn't reached the server lighter, and nothing else.
-                        NativeMessageBody(
-                            body: message.body, formattedBody: message.formattedBody, edited: message.isEdited,
-                            menuCommands: actions.menu
-                        ).opacity(pendingSend || pendingMutation ? 0.5 : 1)
-                    }
-                    if message.isEdited && (!message.showsMessageBody || message.kind == "m.room.encrypted") {
-                        Text("(edited)").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-                    }
-                    // A reused cell shows another message: a download or preview in flight must not carry over.
-                    if let attachment { attachment.padding(.top, m(6)).id(message.id) }
-                    if !message.reactions.isEmpty { reactions.padding(.top, m(3)) }
-                    if !isThread, let count = message.replyCount, count > 0 {
-                        ThreadRepliesBar(
-                            count: count, lastReply: message.lastReply, avatar: replierAvatar,
-                            prepare: actions.prepareThread, action: actions.openReplies
-                        ).padding(.top, m.sp4)
-                    }
-                    if pendingSend, let failure = sendFailure {
-                        VStack(alignment: .leading, spacing: m.sp4) {
-                            HStack(alignment: .firstTextBaseline, spacing: m.sp12) {
-                                Label("Not delivered", systemImage: "exclamationmark.circle.fill")
-                                    .foregroundStyle(colors.destructive)
-                                if failure.canRetry {
-                                    Button("Retry", action: actions.retrySend).buttonStyle(.textLink)
-                                }
-                                Button("Delete", role: .destructive, action: actions.cancelSend).buttonStyle(.textLink)
-                            }.disabled(sendBusy).overlay(alignment: .trailing) {
-                                if sendBusy {
-                                    DelayedProgress().padding(.leading, m.sp8).frame(width: 0, alignment: .leading)
-                                }
-                            }
-                            // A network failure needs only Retry; the others say what to do first.
-                            if failure.kind != .recoverable {
-                                Text(failure.message).foregroundStyle(colors.textSecondary)
-                            }
-                        }.font(m.font(.subheadline)).padding(.top, m.sp2)
-                    }
+                // A network failure needs only Retry; the others say what to do first.
+                if failure.kind != .recoverable {
+                    Text(failure.message).foregroundStyle(colors.textSecondary)
                 }
-            }.frame(maxWidth: .infinity, alignment: .leading)
+            }.font(m.font(.subheadline)).padding(.top, m.sp2)
         }
     }
 
@@ -827,7 +866,7 @@ struct MessageRow: View {
                     actions.react?(reaction.key)
                 } label: {
                     ReactionChip(mine: reaction.mine) {
-                        Text(EmojiCatalog.presented(reaction.key)).font(m.font(.subheadline)).lineLimit(1)
+                        Text(EmojiCatalog.presented(reaction.key)).font(m.font(.body)).lineLimit(1)
                         Text("\(reaction.count)").font(m.font(.subheadline, .semibold)).fixedSize()
                             .foregroundStyle(reaction.mine ? colors.accent : colors.textSecondary)
                     }
@@ -903,10 +942,11 @@ private struct SendingClock: View {
     }
 }
 
-/// A reaction's pill: 24 pt, gray at rest; yours are tinted.
+/// A reaction's pill: 24 pt, gray at rest; yours are tinted with an accent edge.
 private struct ReactionChip<Content: View>: View {
     let mine: Bool
     @ViewBuilder let content: Content
+    @State private var hovering = false
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
     var body: some View {
@@ -915,6 +955,9 @@ private struct ReactionChip<Content: View>: View {
         HStack(alignment: .firstTextBaseline, spacing: m.sp4) { content }.padding(.horizontal, m.sp8)
             .frame(height: m.sp24)
             .background(mine ? colors.accentTint : colors.sunken, in: Capsule())
+            .overlay { if hovering { Capsule().fill(colors.hover) } }
+            .overlay { if mine { Capsule().strokeBorder(colors.accentLine, lineWidth: 1) } }
+            .onHover { hovering = $0 }
     }
 }
 
@@ -1296,9 +1339,11 @@ private struct ScrollEdgeHairline: View {
     let top: CGFloat
     @ThemeColors private var colors
     var body: some View {
-        if state.contentAbove {
-            Divider().overlay(colors.border).padding(.top, top)
-        }
+        Divider().overlay(colors.border)
+            .opacity(state.contentAbove ? 1 : 0)
+            .animation(Motion.overlay, value: state.contentAbove)
+            .padding(.top, top)
+            .allowsHitTesting(false)
     }
 }
 
@@ -1325,6 +1370,22 @@ extension EnvironmentValues {
     var timelineBarInsets: TimelineBarInsets? {
         get { self[TimelineBarInsetsKey.self] }
         set { self[TimelineBarInsetsKey.self] = newValue }
+    }
+}
+
+/// Height of floating cards above the composer (reply banner, attachment draft status, mention menu) so `Jump to recent`
+/// stays clear of them without resizing the timeline's bottom inset.
+struct ComposerAccessoryHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat { 0 }
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+private struct ComposerAccessoryHeightEnvironmentKey: EnvironmentKey { static let defaultValue: CGFloat = 0 }
+
+extension EnvironmentValues {
+    var composerAccessoryHeight: CGFloat {
+        get { self[ComposerAccessoryHeightEnvironmentKey.self] }
+        set { self[ComposerAccessoryHeightEnvironmentKey.self] = newValue }
     }
 }
 
@@ -1365,15 +1426,19 @@ private struct TimelineBarsLayout: Layout {
 struct TimelineUnderBars<Timeline: View, Header: View, Footer: View>: View {
     @State private var insets = EdgeInsets()
     @State private var barInsets = TimelineBarInsets()
+    @State private var accessoryHeight: CGFloat = 0
     let timeline: (EdgeInsets) -> Timeline
     @ViewBuilder let header: Header
     @ViewBuilder let footer: Footer
 
     var body: some View {
         TimelineBarsLayout(onMeasure: measured) {
-            timeline(insets).environment(\.timelineBarInsets, barInsets)
+            timeline(insets)
+                .environment(\.timelineBarInsets, barInsets)
+                .environment(\.composerAccessoryHeight, accessoryHeight)
             ZStack(alignment: .top) { header }
             ZStack(alignment: .bottom) { footer }
+                .onPreferenceChange(ComposerAccessoryHeightKey.self) { accessoryHeight = $0 }
         }
     }
 

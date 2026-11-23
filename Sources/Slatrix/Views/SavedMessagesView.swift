@@ -26,7 +26,7 @@ struct SavedMessagesView: View {
                     let count = $0 == .inProgress ? list.tab(.inProgress).count : 0
                     return .init(value: $0, title: $0.title, count: count > 0 ? count : nil)
                 }, selection: $tab
-            ).padding(.horizontal, m.sp24).frame(maxWidth: .infinity, alignment: .leading)
+            ).padding(.horizontal, m.sp20).frame(maxWidth: .infinity, alignment: .leading)
             Divider().overlay(appearance.colors.border)
             if shown.isEmpty {
                 EmptyStateView(symbol: tab.symbol, title: tab.empty).frame(maxHeight: .infinity)
@@ -38,7 +38,9 @@ struct SavedMessagesView: View {
                                 matrix: matrix, reference: reference, actions: actions,
                                 onCustomReminder: { custom = reference })
                         }
-                    }.padding(.horizontal, m.sp12).padding(.vertical, m.sp4)
+                    }.padding(.horizontal, m.sp8).padding(.vertical, m.sp4)
+                        .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
+                        .frame(maxWidth: .infinity)
                 }
             }
         }

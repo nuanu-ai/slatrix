@@ -341,7 +341,6 @@ private struct MediaActionsToolbar: View {
             }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: m(side)).help("More actions")
         }.padding(.horizontal, m.sp2).frame(height: m(side))
             .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radius))
-            .overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.border))
             .elevation(.e1, cornerRadius: m.radius)
     }
 }
@@ -388,7 +387,7 @@ private struct FileCard: View {
             }
             .padding(m.sp12).frame(maxWidth: m(Self.maxWidth), alignment: .leading)
             .opacity(pendingSend ? 0.5 : 1)
-            .background(colors.canvas, in: shape)
+            .background(colors.raised, in: shape)
             .overlay(alignment: .bottom) {
                 if pendingSend {
                     PendingUploadProgressOverlay(

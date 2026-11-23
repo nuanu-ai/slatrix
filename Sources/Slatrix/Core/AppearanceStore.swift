@@ -26,7 +26,8 @@ enum MessageDensity: String, CaseIterable, Identifiable {
 }
 
 @MainActor final class AppearanceStore: ObservableObject {
-    @Published var mode = AppTheme(rawValue: UserDefaults.standard.string(forKey: "appearance.mode") ?? "dark") ?? .dark
+    @Published var mode =
+        AppTheme(rawValue: UserDefaults.standard.string(forKey: "appearance.mode") ?? "system") ?? .system
     { didSet { save(mode.rawValue, "mode") } }
     @Published var theme =
         ColorTheme(rawValue: UserDefaults.standard.string(forKey: "appearance.theme") ?? "") ?? .standard
@@ -58,7 +59,14 @@ enum MessageDensity: String, CaseIterable, Identifiable {
     @Published var notificationPreview = UserDefaults.standard.bool(forKey: "notifications.preview") {
         didSet { UserDefaults.standard.set(notificationPreview, forKey: "notifications.preview") }
     }
-    @Published var systemIsDark = true
+    @Published var systemIsDark = AppearanceStore.currentSystemIsDark()
+
+    private static func currentSystemIsDark() -> Bool {
+        if let appearance = NSApp?.effectiveAppearance {
+            return appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        }
+        return UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+    }
     var preferredColorScheme: ColorScheme? { mode == .system ? nil : mode == .dark ? .dark : .light }
     var isDark: Bool { mode == .dark || (mode == .system && systemIsDark) }
     /// The system accent in each theme, resolved once; picking another in System Settings redraws the window.

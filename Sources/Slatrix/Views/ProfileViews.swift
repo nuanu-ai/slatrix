@@ -21,6 +21,7 @@ struct ProfilePane: View {
         let colors = appearance.colors
         VStack(spacing: 0) {
             PaneHeader(title: "Profile", closeLabel: "Close profile", onClose: onClose)
+            Divider().overlay(colors.border)
             ScrollView {
                 // A contact card, as Contacts lays one out: the photo, name and status centered over the actions,
                 // then the details in a grouped box.

@@ -331,6 +331,7 @@ struct RootView: View {
 
     var body: some View {
         ModalHost(
+            top: m.paneHeader + (colors.theme.framed ? m.sidebarInset : 0),
             onCovered: { shown in
                 modalShown = shown
                 // A notification that arrived while a modal was open opens once it closes.
@@ -587,7 +588,7 @@ struct RootView: View {
     // A single long modifier chain exceeds the type checker's time limit in some Swift releases.
     private var observedContent: some View {
         navigationObservedContent
-            .onChange(of: systemScheme) { _, scheme in appearance.systemIsDark = scheme == .dark }
+            .onChange(of: systemScheme, initial: true) { _, scheme in appearance.systemIsDark = scheme == .dark }
             .onReceive(NotificationCenter.default.publisher(for: .menuAction)) { notification in
                 handleMenu(notification.userInfo?["action"] as? String ?? "")
             }
@@ -831,8 +832,10 @@ struct RootView: View {
                                 if paneCovers {
                                     inspector(room).overlay(alignment: .top) { Divider().overlay(colors.border) }
                                         .padding(.top, m.paneHeader)
+                                        .transition(.opacity)
                                 }
                             }
+                            .animation(Motion.pane, value: paneCovers)
                             // Banners float over the conversation instead of pushing it down, under whichever header is
                             // on top: a pane in the conversation's place brings its own, with its close button. A thread
                             // there floats its own notice in the same column, first, so neither lies over the other.
@@ -859,7 +862,8 @@ struct RootView: View {
                                     inspector(room).layoutIsolated()
                                 }
                             }
-                        }.frameCard(colors.theme.framed, leading: sidebarCollapsed)
+                        }
+                        .frameCard(colors.theme.framed, leading: sidebarCollapsed)
                     }
                     .covered(coverage.drawer)
                     .overlay(alignment: .leading) { drawer }
@@ -948,6 +952,12 @@ struct RootView: View {
                 }
             }
         }
+        .animation(
+            Motion.overlay,
+            value: [
+                pendingMatrixLink != nil, pendingThreadOpen != nil, threadOpenError != nil, navigationNotice != nil,
+                platform.pendingNotification != nil, localError != nil, attachmentDrafts.errorMessage != nil,
+            ])
     }
 
     @ViewBuilder private func inspector(_ room: ChatRoom?) -> some View {
@@ -1212,12 +1222,32 @@ struct RootView: View {
                 } footer: {
                     VStack(spacing: 0) {
                         if room.canPostMessages == false {
+                            let reply = replyTarget.flatMap {
+                                $0.message.roomID == room.id
+                                    && ($0.threadID == nil || $0.threadID != threadRoot?.eventID) ? $0 : nil
+                            }
+                            let draftAddress = editTarget == nil ? AttachmentDraftAddress(roomID: room.id) : nil
                             ComposerNotice(text: Self.cannotPost).padding(.top, m.sp4).padding(.bottom, m.sp12)
+                                .overlay(alignment: .top) {
+                                    VStack(alignment: .leading, spacing: m.sp8) {
+                                        ToastHost(toasts: toasts).frame(maxWidth: .infinity)
+                                        if hasComposerAccessories(reply: reply, drafts: draftAddress) {
+                                            composerAccessories(reply: reply, drafts: draftAddress)
+                                        }
+                                    }
+                                    .alignmentGuide(.top) { $0[.bottom] + m.sp8 }
+                                }
                         } else if let target = editTarget, target.surface == .conversation,
                             target.message.roomID == room.id
                         {
-                            editComposer(target, room: room).padding(.top, m.sp4).padding(.bottom, m.sp12)
+                            editComposer(target, room: room, topOverlay: AnyView(ToastHost(toasts: toasts)))
+                                .padding(.top, m.sp4).padding(.bottom, m.sp12)
                         } else {
+                            let reply = replyTarget.flatMap {
+                                $0.message.roomID == room.id
+                                    && ($0.threadID == nil || $0.threadID != threadRoot?.eventID) ? $0 : nil
+                            }
+                            let draftAddress = editTarget == nil ? AttachmentDraftAddress(roomID: room.id) : nil
                             BindingScope({ draftBinding(room.id) }) { text in
                                 MessageComposer(
                                     text: text,
@@ -1256,27 +1286,16 @@ struct RootView: View {
                                     onDiscardAttachments: attachmentDrafts.discard,
                                     requiresTextForSend: scopedReply(roomID: room.id) != nil,
                                     onConversationKey: { conversationKey($0, room: room, threadRootID: nil) },
-                                    isPrimary: true
+                                    isPrimary: true,
+                                    inputDisabled: !localReady || !attachmentDrafts.ready,
+                                    topOverlay: AnyView(ToastHost(toasts: toasts)),
+                                    accessories: hasComposerAccessories(reply: reply, drafts: draftAddress)
+                                        ? AnyView(composerAccessories(reply: reply, drafts: draftAddress)) : nil
                                 )
                             }
-                            .disabled(!localReady || !attachmentDrafts.ready).id(
-                                "composer-\(composerGeneration)-\(room.id)"
-                            )
+                            .id("composer-\(composerGeneration)-\(room.id)")
                             .padding(.top, m.sp4).padding(.bottom, m.sp12)
                         }
-                    }
-                    // Floats above the composer, so a toast, reply or attachment notice never resizes it or moves the
-                    // timeline.
-                    .overlay(alignment: .top) {
-                        VStack(spacing: m.sp8) {
-                            ToastHost(toasts: toasts)
-                            composerAccessories(
-                                reply: replyTarget.flatMap {
-                                    $0.message.roomID == room.id
-                                        && ($0.threadID == nil || $0.threadID != threadRoot?.eventID) ? $0 : nil
-                                },
-                                drafts: editTarget == nil ? AttachmentDraftAddress(roomID: room.id) : nil)
-                        }.alignmentGuide(.top) { $0[.bottom] }
                     }
                     .conversationColumn(m, isThread: false).scrollEdge(.bottom, colors.canvas)
                     .covered(coverage.pane)
@@ -1294,7 +1313,7 @@ struct RootView: View {
         channelPanel = panel
     }
     private func channelHeader(_ room: ChatRoom) -> some View {
-        toolbar(grid: true) {
+        toolbar(grid: false) {
             ChannelHeader.Title(matrix: matrix, room: room) { headerAction($0, room: room) }
         } trailing: {
             // In the toolbar, so it never covers or moves a message.
@@ -1378,12 +1397,24 @@ struct RootView: View {
         } footer: {
             VStack(spacing: 0) {
                 if room.canPostMessages == false {
-                    ComposerNotice(text: Self.cannotPost).padding(.top, m.sp4).padding(.bottom, m.sp16)
+                    let reply = replyTarget.flatMap { $0.belongsTo(roomID: room.id, threadID: root.eventID) ? $0 : nil }
+                    let draftAddress =
+                        editTarget == nil ? AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID) : nil
+                    ComposerNotice(text: Self.cannotPost).padding(.top, m.sp4).padding(.bottom, m.sp12)
+                        .overlay(alignment: .top) {
+                            if hasComposerAccessories(reply: reply, drafts: draftAddress) {
+                                composerAccessories(reply: reply, drafts: draftAddress)
+                                    .alignmentGuide(.top) { $0[.bottom] + m.sp8 }
+                            }
+                        }
                 } else if let target = editTarget, target.surface == .thread(rootID: root.eventID),
                     target.message.roomID == room.id
                 {
-                    editComposer(target, room: room, isThread: true).padding(.top, m.sp4).padding(.bottom, m.sp16)
+                    editComposer(target, room: room, isThread: true).padding(.top, m.sp4).padding(.bottom, m.sp12)
                 } else {
+                    let reply = replyTarget.flatMap { $0.belongsTo(roomID: room.id, threadID: root.eventID) ? $0 : nil }
+                    let draftAddress =
+                        editTarget == nil ? AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID) : nil
                     BindingScope({ threadDraftBinding(root.eventID, roomID: room.id) }) { text in
                         MessageComposer(
                             text: text, placeholder: "Reply…",
@@ -1429,13 +1460,14 @@ struct RootView: View {
                             onDiscardAttachments: attachmentDrafts.discard,
                             requiresTextForSend: scopedReply(roomID: room.id, threadID: root.eventID) != nil,
                             onConversationKey: { conversationKey($0, room: room, threadRootID: root.eventID) },
-                            isThread: true
+                            isThread: true,
+                            inputDisabled: !localReady || !attachmentDrafts.ready || threadReadyID != root.eventID
+                                || matrix.selectedRoomID != root.roomID,
+                            accessories: hasComposerAccessories(reply: reply, drafts: draftAddress)
+                                ? AnyView(composerAccessories(reply: reply, drafts: draftAddress)) : nil
                         )
                     }
                     .id("thread-composer-\(composerGeneration)-\(root.eventID)").padding(.top, m.sp4)
-                    .disabled(
-                        !localReady || !attachmentDrafts.ready || threadReadyID != root.eventID
-                            || matrix.selectedRoomID != root.roomID)
                     let withFiles = hasQueuedFiles(roomID: room.id, threadID: root.eventID)
                     Toggle(
                         isOn: Binding(
@@ -1453,16 +1485,9 @@ struct RootView: View {
                             Text("Also send to \(Text(room.writtenName).fontWeight(.semibold))")
                         }
                     }.toggleStyle(.checkbox).font(m.font(.body)).foregroundStyle(colors.textSecondary)
-                        .frame(maxWidth: .infinity, alignment: .leading).padding(.top, m.sp8).padding(.bottom, m.sp16)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.top, m.sp8).padding(.bottom, m.sp12)
                         .disabled(threadReadyID != root.eventID || withFiles)
                 }
-            }
-            .overlay(alignment: .top) {
-                composerAccessories(
-                    reply: replyTarget.flatMap { $0.belongsTo(roomID: room.id, threadID: root.eventID) ? $0 : nil },
-                    drafts: editTarget == nil
-                        ? AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID) : nil
-                ).alignmentGuide(.top) { $0[.bottom] }
             }
             .conversationColumn(m, isThread: true).scrollEdge(.bottom, colors.canvas)
         }
@@ -1571,9 +1596,11 @@ struct RootView: View {
                                     roomID: address.roomID, body: draftSummary(address),
                                     thread: address.threadRootID != nil)
                             }.buttonStyle(.row)
-                            Divider().overlay(colors.border).padding(.leading, m.sp24)
+                            Divider().overlay(colors.border).padding(.leading, m.sp20)
                         }
                     }
+                    .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
+                    .frame(maxWidth: .infinity)
                 }
             }
         }
@@ -1640,7 +1667,9 @@ struct RootView: View {
                 Image(systemName: "chevron.right").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
             }
             Text(body).font(m.font(.body)).foregroundStyle(colors.textSecondary).lineLimit(3)
-        }.padding(m.sp24).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+        }.padding(.horizontal, m.sp20).padding(.vertical, m.sp16).frame(maxWidth: .infinity, alignment: .leading)
+            .modifier(FeedRowHover())
+            .contentShape(Rectangle())
     }
     private func openThreadDraft(_ address: ThreadDraftAddress) {
         let identity = composerIdentity
@@ -1788,11 +1817,18 @@ struct RootView: View {
         }.padding(.horizontal, m.sp16).padding(.vertical, m.sp8).frame(maxWidth: .infinity, alignment: .leading)
             .modifier(ComposerCard(colors: colors))
     }
+    private func hasComposerAccessories(reply: MessageReplyTarget?, drafts: AttachmentDraftAddress?) -> Bool {
+        if reply != nil { return true }
+        guard let drafts else { return false }
+        if !attachmentDrafts.ready { return true }
+        if localReady && attachmentDrafts.needsReview(drafts) { return true }
+        return localReady && attachmentDrafts.files[drafts, default: []].contains { $0.url == nil }
+    }
     private func composerAccessories(reply: MessageReplyTarget?, drafts: AttachmentDraftAddress?) -> some View {
-        VStack(alignment: .leading, spacing: m.sp4) {
+        VStack(alignment: .leading, spacing: m.sp8) {
             if let reply { replyBanner(reply) }
             if let drafts { attachmentDraftStatus(drafts) }
-        }.padding(.bottom, m.sp4)
+        }
     }
     private func startReply(_ message: ChatMessage, surface: MessageReplyTarget.Surface, session: UUID, timeline: UUID)
     {
@@ -2382,7 +2418,9 @@ struct RootView: View {
                 target.write(value, current: editTarget, context: editContext, text: &editText)
             })
     }
-    private func editComposer(_ target: MessageEditTarget, room: ChatRoom, isThread: Bool = false) -> some View {
+    private func editComposer(
+        _ target: MessageEditTarget, room: ChatRoom, isThread: Bool = false, topOverlay: AnyView? = nil
+    ) -> some View {
         let context = composerContext
         return BindingScope({ editBinding(target, context: context) }) { text in
             MessageComposer(
@@ -2403,7 +2441,8 @@ struct RootView: View {
                 onError: { error in
                     guard isCurrentEdit(target, context: context) else { return }
                     matrix.errorMessage = error
-                }, allowsSend: !matrix.sessionExpired && isCurrentEdit(target, context: context), isThread: isThread
+                }, allowsSend: !matrix.sessionExpired && isCurrentEdit(target, context: context), isThread: isThread,
+                topOverlay: topOverlay
             )
         }
         .id("edit-\(composerGeneration)-\(target.id)").disabled(!isCurrentEdit(target, context: context))
@@ -3222,7 +3261,9 @@ private struct TitleSearch<Field: View>: View {
                 // Opened from the button, ⌘G or ⌘F: the field was not there to take the cursor, so it takes it now.
                 field().onAppear { if open { bar.focus() } }
             } else {
-                IconButton(symbol: "magnifyingglass", label: "Search", role: .body) { open = true }
+                ToolbarCapsule {
+                    IconButton(symbol: "magnifyingglass", label: "Search", role: .body) { open = true }
+                }
             }
         }
         .onChange(of: bar.focusRequests) { _, _ in if !fits { open = true } }
@@ -3303,10 +3344,14 @@ private struct ConnectionBanner: View {
 private struct ErrorBanner: View {
     let matrix: MatrixService
     var body: some View {
-        if let error = matrix.errorMessage {
-            Banner(
-                text: error, symbol: "exclamationmark.triangle.fill", onDismiss: { matrix.errorMessage = nil })
+        ZStack {
+            if let error = matrix.errorMessage {
+                Banner(
+                    text: error, symbol: "exclamationmark.triangle.fill", onDismiss: { matrix.errorMessage = nil }
+                ).transition(.opacity)
+            }
         }
+        .animation(Motion.overlay, value: matrix.errorMessage != nil)
     }
 }
 
@@ -3358,23 +3403,12 @@ private struct MessageActionInvalidation: View {
     }
 }
 
-/// What lies outside a rounded rectangle within its square bounds: its four corners.
-private struct OutsideCorners: Shape {
-    let radius: CGFloat
-    func path(in rect: CGRect) -> Path {
-        var path = Path(rect)
-        path.addPath(RoundedRectangle(cornerRadius: radius).path(in: rect))
-        return path
-    }
-}
-
 /// A card floating above the composer: it never moves what is under it.
 private struct ComposerCard: ViewModifier {
     @Environment(\.metrics) private var m
     let colors: AppColors
     func body(content: Content) -> some View {
         content.background(colors.raised).clipShape(RoundedRectangle(cornerRadius: m.radiusLarge))
-            .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).stroke(colors.border))
             .elevation(.e2, cornerRadius: m.radiusLarge)
     }
 }

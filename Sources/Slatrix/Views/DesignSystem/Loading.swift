@@ -91,7 +91,8 @@ struct AfterLoadingDelay<Content: View>: View {
     }
 
     var body: some View {
-        ZStack { if shown { content } }
+        ZStack { if shown { content.transition(.opacity) } }
+            .animation(Motion.overlay, value: shown)
             .loadingInterval(interval, while: active && !hasContent)
             .task(id: [active && !hasContent, offline, immediate]) {
                 guard active, !hasContent else {

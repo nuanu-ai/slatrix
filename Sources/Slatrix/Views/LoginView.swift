@@ -3,7 +3,6 @@ import SwiftUI
 struct LoginView: View {
     private static let heroTile: CGFloat = 88
     private static let formWidth: CGFloat = 360
-    private static let fieldHeight: CGFloat = 40
     @Environment(\.metrics) private var m
     let matrix: MatrixService
     @EnvironmentObject var appearance: AppearanceStore
@@ -63,9 +62,9 @@ struct LoginView: View {
                 Button("Try it without signing in") {
                     guard matrix.canChangeAuthentication else { return }
                     onPreview()
-                }.disabled(busy || clearingSavedSession || !matrix.canChangeAuthentication).buttonStyle(.row).font(
+                }.disabled(busy || clearingSavedSession || !matrix.canChangeAuthentication).buttonStyle(.textLink).font(
                     m.font(.body)
-                ).foregroundStyle(colors.accent)
+                )
             }
             Spacer()
         }.frame(maxWidth: .infinity, maxHeight: .infinity).background(colors.canvas).onAppear { focused = .username }
@@ -73,9 +72,7 @@ struct LoginView: View {
     private func field<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: m.sp8) {
             Text(label).font(m.font(.body, .semibold))
-            content().textFieldStyle(.plain).padding(.horizontal, m.sp12).frame(height: m(Self.fieldHeight)).background(
-                colors.canvas, in: RoundedRectangle(cornerRadius: m.radius)
-            ).overlay(RoundedRectangle(cornerRadius: m.radius).stroke(colors.border)).font(m.font(.reading))
+            content().textFieldStyle(.field)
         }
     }
     private func clearSavedSession() {
