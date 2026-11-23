@@ -101,6 +101,7 @@ final class ConnectionRecovery {
     private var wakeObserver: NSObjectProtocol?
     private var sleeping = false
     private var sleepStopTask: (id: UUID, task: Task<Void, Never>)?
+    private var activeStopTask: (id: UUID, task: Task<Void, Never>)?
     private var sendQueueHandle: TaskHandle?
     private var sendQueueResumes: [String: Task<Void, Never>] = [:]
     private var sendQueueFailures: [String: Int] = [:]
@@ -445,6 +446,7 @@ final class ConnectionRecovery {
     }
 
     private func stopCurrent() async {
+        let previousStop = activeStopTask?.task
         let previous = service
         let pending = attempt?.task
         let pendingSleepStop = sleepStopTask?.task
@@ -486,11 +488,21 @@ final class ConnectionRecovery {
         onUpdate = nil
         onSendingResumed = nil
         onSendQueueUpdate = nil
-        // Cancelling a Swift Task cannot stop its UniFFI future. Stopping only
-        // after start returns prevents an old start from resurrecting sync.
-        if let pending { _ = await pending.result }
-        await pendingSleepStop?.value
-        await previous?.stop()
+        // Cancelling a Swift Task cannot stop its UniFFI future, and concurrent stops (e.g. auth error + logout)
+        // must serialize behind any in-flight SDK stop so callers never delete stores while sync is still tearing down.
+        guard previousStop != nil || pending != nil || pendingSleepStop != nil || previous != nil else { return }
+        let stopID = UUID()
+        let stopTask = Task { @MainActor [weak self] in
+            defer {
+                if let self, self.activeStopTask?.id == stopID { self.activeStopTask = nil }
+            }
+            await previousStop?.value
+            if let pending { _ = await pending.result }
+            await pendingSleepStop?.value
+            await previous?.stop()
+        }
+        activeStopTask = (stopID, stopTask)
+        await stopTask.value
     }
 
     private func publish() {

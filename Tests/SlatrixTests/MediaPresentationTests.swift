@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import MatrixRustSDK
 import Testing
 
 @testable import Slatrix
@@ -130,5 +131,56 @@ struct MediaPresentationTests {
         sendingImage.sendState = "sending"
         #expect(MediaViewerState.pendingNotice(for: sendingImage, hasCachedStill: true) == nil)
         #expect(MediaViewerState.pendingNotice(for: sendingImage, hasCachedStill: false) == "Still sending…")
+    }
+
+    @Test("Viewer reload key changes when remote media arrives for an already-sent local echo event ID")
+    @MainActor func mediaViewerLoadKeyChangesWhenRemoteMediaRevisionLands() throws {
+        let service = MatrixService.scratch()
+        let roomID = "!media:example.org"
+        service.selectedRoomID = roomID
+        let source = try MediaSource.fromUrl(url: "mxc://example.org/photo")
+        func imageItem(isRemote: Bool) -> EventTimelineItem {
+            EventTimelineItem(
+                isRemote: isRemote, eventOrTransactionId: .eventId(eventId: "$sent-1"),
+                sender: "@me:example.org", senderProfile: .unavailable, forwarder: nil, forwarderProfile: nil,
+                isOwn: true, isEditable: false,
+                content: .msgLike(
+                    content: MsgLikeContent(
+                        kind: .message(
+                            content: MessageContent(
+                                msgType: .image(
+                                    content: ImageMessageContent(
+                                        filename: "photo.png", caption: nil, formattedCaption: nil, source: source,
+                                        info: ImageInfo(
+                                            height: 100, width: 100, mimetype: "image/png", size: 42,
+                                            thumbnailInfo: nil, thumbnailSource: nil, blurhash: nil, isAnimated: false))
+                                ),
+                                body: "photo.png", isEdited: false, mentions: nil)),
+                        inReplyTo: nil, threadRoot: nil, threadSummary: nil)),
+                reactions: [], eventTypeRaw: "m.room.message", timestamp: 1_000,
+                localSendState: isRemote ? nil : .sent(eventId: "$sent-1"),
+                editSendState: nil, redactionSendState: nil, localCreatedAt: nil, readReceipts: [:], origin: nil,
+                canBeRepliedTo: true, lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
+        }
+
+        // Local echo has the server event ID and sendState == "sent", before remote media populates mainMedia.
+        service.projectMediaCaptionForChecks(
+            [FakeTimelineItem(imageItem(isRemote: false))], roomID: roomID, inThread: false)
+        let localSent = try #require(service.messages.first)
+        #expect(localSent.eventID == "$sent-1" && localSent.sendState == "sent")
+        let beforeRevision = service.attachmentSourceRevision(localSent)
+        #expect(beforeRevision == nil)
+        let beforeKey = MediaViewerLoadKey(message: localSent, sourceRevision: beforeRevision)
+
+        // Remote echo lands with the same event ID and sendState == "sent", populating mainMedia.
+        service.projectMediaCaptionForChecks(
+            [FakeTimelineItem(imageItem(isRemote: true))], roomID: roomID, inThread: false)
+        let remoteSent = try #require(service.messages.first)
+        #expect(remoteSent.eventID == "$sent-1" && remoteSent.sendState == "sent")
+        let afterRevision = service.attachmentSourceRevision(remoteSent)
+        #expect(afterRevision != nil)
+        let afterKey = MediaViewerLoadKey(message: remoteSent, sourceRevision: afterRevision)
+
+        #expect(beforeKey != afterKey)
     }
 }

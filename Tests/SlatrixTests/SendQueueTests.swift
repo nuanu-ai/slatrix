@@ -452,4 +452,76 @@ struct SendQueueStaleMessageTests {
         #expect(try await service.cancelMessage(failedMessage))
         #expect(f.room.isSendQueueEnabled())
     }
+
+    @Test("Projecting a live timeline reconciles stale ghost send-queue entries while preserving live echoes")
+    func liveTimelineReconciliationClearsStaleGhostSendQueueEntries() throws {
+        let folder = try TemporaryDirectory()
+        let roots = [folder.path("support"), folder.path("caches")]
+        let creds = SecureSessionStore(file: folder.path("credentials.json"))
+        let service = MatrixService(credentials: creds, storeRoots: roots)
+        let roomID = "!reconcile:example.org"
+        service.user = ChatUser(id: "@me:example.org", name: "Me")
+        service.selectedRoomID = roomID
+        service.applyConnection(
+            MatrixConnectionFeedback(state: .running, isRetrying: false, canRetry: false, errorMessage: nil))
+
+        // Seed a stale ghost failure (e.g. completed during startup snapshot race), one real live local echo,
+        // and one failed local echo inside a thread (hidden from main live timeline).
+        service.handleSendQueueUpdate(
+            roomID: roomID,
+            update: .sendError(transactionId: "tx-ghost", error: .genericApiError(msg: "502"), isRecoverable: true))
+        service.handleSendQueueUpdate(roomID: roomID, update: .newLocalEvent(transactionId: "tx-live"))
+        service.handleSendQueueUpdate(
+            roomID: roomID,
+            update: .sendError(transactionId: "tx-thread", error: .genericApiError(msg: "502"), isRecoverable: true))
+        #expect(service.failedSendRoomIDs == [roomID] && service.queuedSendCount == 3)
+
+        func localEvent(_ tx: String, state: EventSendState) -> EventTimelineItem {
+            EventTimelineItem(
+                isRemote: false, eventOrTransactionId: .transactionId(transactionId: tx),
+                sender: "@me:example.org", senderProfile: .unavailable, forwarder: nil, forwarderProfile: nil,
+                isOwn: true, isEditable: true,
+                content: .msgLike(
+                    content: MsgLikeContent(
+                        kind: .message(
+                            content: MessageContent(
+                                msgType: .text(content: TextMessageContent(body: tx, formatted: nil)), body: tx,
+                                isEdited: false, mentions: nil)),
+                        inReplyTo: nil, threadRoot: nil, threadSummary: nil)),
+                reactions: [], eventTypeRaw: "m.room.message", timestamp: 1_000,
+                localSendState: state, editSendState: nil, redactionSendState: nil, localCreatedAt: nil,
+                readReceipts: [:], origin: nil, canBeRepliedTo: true,
+                lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
+        }
+
+        // Observe tx-thread in a thread timeline so main-timeline reconciliation preserves it even after the thread closes.
+        service.projectMediaCaptionForChecks(
+            [
+                FakeTimelineItem(
+                    localEvent(
+                        "tx-thread",
+                        state: .sendingFailed(error: .genericApiError(msg: "502"), isRecoverable: true)))
+            ],
+            roomID: roomID, inThread: true)
+
+        // Main live timeline contains only tx-live: tx-ghost must be pruned, while tx-live and tx-thread stay.
+        service.projectMediaCaptionForChecks(
+            [FakeTimelineItem(localEvent("tx-live", state: .notSentYet(progress: nil)))],
+            roomID: roomID, inThread: false)
+        #expect(service.failedSendRoomIDs == [roomID] && service.queuedSendCount == 2)
+
+        // Once tx-thread sends and no local echoes remain in the live timeline, both warning and queued count clear.
+        service.handleSendQueueUpdate(
+            roomID: roomID, update: .sentEvent(transactionId: "tx-thread", eventId: "$thread-sent"))
+        service.projectMediaCaptionForChecks(
+            [FakeTimelineItem(textEvent("$sent", body: "Done", sender: "@me:example.org"))],
+            roomID: roomID, inThread: false)
+        #expect(service.failedSendRoomIDs.isEmpty && service.queuedSendCount == 0)
+
+        // Persisted failure store on disk must also have pruned tx-ghost.
+        let reloaded = MatrixService(credentials: creds, storeRoots: roots)
+        reloaded.user = ChatUser(id: "@me:example.org", name: "Me")
+        reloaded.loadPersistedSendFailures(accountID: "@me:example.org")
+        #expect(reloaded.failedSendRoomIDs.isEmpty && reloaded.queuedSendCount == 0)
+    }
 }

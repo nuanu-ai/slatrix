@@ -685,4 +685,28 @@ struct ConnectionRecoveryOwnershipTests {
         #expect(old.startCount == 0 && current.startCount == 1 && recovery.feedback.state == .running)
         await recovery.stop()
     }
+
+    @Test("Concurrent stop waits for an in-flight SDK stop to finish before returning")
+    func concurrentStopWaitsForInFlightSDKStop() async throws {
+        let recovery = onlineRecovery()
+        let service = FakeSyncService(state: .running)
+        try await recovery.attach(service) { _ in }
+        service.stopGate.arm()
+
+        let first = Task { await recovery.stop() }
+        #expect(await eventually { service.stopGate.isWaiting })
+
+        var secondDone = false
+        let second = Task {
+            await recovery.stop()
+            secondDone = true
+        }
+        await drainMainActor()
+        #expect(!secondDone && service.stopCount == 0)
+
+        service.stopGate.release()
+        await first.value
+        await second.value
+        #expect(secondDone && service.stopCount == 1)
+    }
 }

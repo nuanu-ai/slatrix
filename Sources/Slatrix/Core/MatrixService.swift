@@ -53,6 +53,8 @@ private struct SendQueueTracker {
     private var pending: [String: Set<String>] = [:]
     /// Failed transactions by room, storing whether the failure is recoverable.
     private(set) var failures: [String: [String: Bool]] = [:]
+    /// Local transactions observed in a room's thread timeline so main-timeline reconciliation keeps them.
+    private var threadTransactions: [String: Set<String>] = [:]
     private var replayingInitial = false
     private var initialReplaySeen: [String: Set<String>] = [:]
 
@@ -115,19 +117,55 @@ private struct SendQueueTracker {
         case .sentEvent(let id, _), .cancelledLocalEvent(let id):
             removePending(roomID: roomID, transactionID: id)
             removeFailure(roomID: roomID, transactionID: id)
+            removeThreadTransaction(roomID: roomID, transactionID: id)
         case .mediaUpload:
             break
         }
     }
 
+    mutating func markThreadTransaction(roomID: String, transactionID: String) {
+        threadTransactions[roomID, default: []].insert(transactionID)
+    }
+
+    func hasEntries(in roomID: String) -> Bool {
+        !(pending[roomID]?.isEmpty ?? true) || !(failures[roomID]?.isEmpty ?? true)
+    }
+
+    /// Prunes entries for `roomID` whose transaction IDs are no longer active local echoes in its live timeline.
+    mutating func reconcile(roomID: String, activeLocalTransactionIDs: Set<String>) -> (
+        changed: Bool, failuresChanged: Bool
+    ) {
+        let kept = activeLocalTransactionIDs.union(threadTransactions[roomID] ?? [])
+        var changed = false
+        var failuresChanged = false
+        if let existingPending = pending[roomID] {
+            let filtered = existingPending.intersection(kept)
+            if filtered != existingPending {
+                pending[roomID] = filtered.isEmpty ? nil : filtered
+                changed = true
+            }
+        }
+        if let existingFailures = failures[roomID] {
+            let filtered = existingFailures.filter { kept.contains($0.key) }
+            if filtered != existingFailures {
+                failures[roomID] = filtered.isEmpty ? nil : filtered
+                changed = true
+                failuresChanged = true
+            }
+        }
+        return (changed, failuresChanged)
+    }
+
     mutating func remove(roomID: String, transactionID: String) {
         removePending(roomID: roomID, transactionID: transactionID)
         removeFailure(roomID: roomID, transactionID: transactionID)
+        removeThreadTransaction(roomID: roomID, transactionID: transactionID)
     }
 
     mutating func reset() {
         pending = [:]
         failures = [:]
+        threadTransactions = [:]
         replayingInitial = false
         initialReplaySeen = [:]
     }
@@ -175,6 +213,12 @@ private struct SendQueueTracker {
         guard var map = failures[roomID] else { return }
         map.removeValue(forKey: transactionID)
         failures[roomID] = map.isEmpty ? nil : map
+    }
+
+    private mutating func removeThreadTransaction(roomID: String, transactionID: String) {
+        guard var ids = threadTransactions[roomID] else { return }
+        ids.remove(transactionID)
+        threadTransactions[roomID] = ids.isEmpty ? nil : ids
     }
 }
 
@@ -1822,6 +1866,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         liveTimeline = nil
         mainProjections = [:]
         threadProjections = [:]
+        projectedLiveRoomID = nil
         timelineHandle = nil
         typingHandle = nil
         threadHandle = nil
@@ -2117,8 +2162,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         sendFailures = kept.sendFailures
         mainProjections = kept.projections
         timelineRevision = kept.revision
+        projectedLiveRoomID = id
         // What arrived while the reader was away.
         showTimeline(kept.observer.snapshot, roomID: id)
+        if connectionState == .running { reconcileLiveTimelineSendQueue(roomID: id) }
         if !messages.isEmpty { Performance.finish(.roomTimeline, ["messages": messages.count]) }
         updateSubscriptions(id)
         if let room = try? client?.getRoom(roomId: id) { watchTyping(room, token: kept.token) }
@@ -2443,6 +2490,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         liveTimeline = nil
         mainProjections = [:]
         threadProjections = [:]
+        projectedLiveRoomID = nil
         mediaFiles.removeAll()
         mainMedia = [:]
         threadMedia = [:]
@@ -2500,6 +2548,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         var id: String?
         var eventOrTransactionId: EventOrTransactionId?
         var isRemote = false
+        var hasPendingDependentChange = false
         var failure: MessageSendFailure?
         var uploadProgress: Double?
         var forwardMedia: ForwardMediaRevision?
@@ -2511,6 +2560,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private typealias Projections = [ObjectIdentifier: ItemProjection]
     private var mainProjections: Projections = [:]
     private var threadProjections: Projections = [:]
+    @ObservationIgnored private var projectedLiveRoomID: String?
+    @ObservationIgnored var prepareVideo: @Sendable (URL, String, UInt64) async -> (VideoInfo, URL?) = {
+        await VideoUpload.prepare($0, mimetype: $1, size: $2)
+    }
 
     private func projection(of item: TimelineItem, roomID: String) -> ItemProjection {
         var result = ItemProjection(item: item)
@@ -2523,6 +2576,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         result.id = id
         result.eventOrTransactionId = event.eventOrTransactionId
         result.isRemote = event.isRemote
+        result.hasPendingDependentChange = event.editSendState != nil || event.redactionSendState != nil
         result.failure = MessageSendFailure.failure(event.localSendState)
         result.uploadProgress = MatrixMapping.uploadProgress(from: event.localSendState)
         if case .msgLike(let content) = event.content, case .message(let message) = content.kind {
@@ -2596,12 +2650,23 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             threadMedia = shownMedia
             threadForwardMedia = forwardMedia
             threadSendFailures = failures
+            for projection in projections.values {
+                if !projection.isRemote, case .transactionId(let txID) = projection.eventOrTransactionId,
+                    projection.message?.sendState != "sent"
+                {
+                    globalSendQueue.markThreadTransaction(roomID: roomID, transactionID: txID)
+                }
+            }
         } else {
             mainProjections = projections
             mainMedia = shownMedia
             mainForwardMedia = forwardMedia
             mainSendFailures = failures
             firstUnreadEventID = UnreadMapping.firstUnreadEventID(in: marks)
+            if focusedEventID == nil {
+                projectedLiveRoomID = roomID
+                if connectionState == .running { reconcileLiveTimelineSendQueue(roomID: roomID) }
+            }
         }
         sendFailures = mainSendFailures.merging(threadSendFailures) { _, latest in latest }
         if !retryingSendKeys.isEmpty {
@@ -2612,6 +2677,32 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             }
         }
         return projected
+    }
+
+    private func reconcileLiveTimelineSendQueue(roomID: String) {
+        guard globalSendQueue.hasEntries(in: roomID) else { return }
+        var activeLocalTxIDs = Set<String>()
+        for projection in mainProjections.values {
+            // Dependent edits/redactions travel through the send queue without exposing their transaction IDs here.
+            if projection.hasPendingDependentChange { return }
+            if !projection.isRemote, case .transactionId(let txID) = projection.eventOrTransactionId,
+                projection.message?.sendState != "sent"
+            {
+                activeLocalTxIDs.insert(txID)
+            }
+        }
+        if loadedThreadRootID != nil {
+            for projection in threadProjections.values {
+                if !projection.isRemote, case .transactionId(let txID) = projection.eventOrTransactionId,
+                    projection.message?.sendState != "sent"
+                {
+                    activeLocalTxIDs.insert(txID)
+                }
+            }
+        }
+        let outcome = globalSendQueue.reconcile(roomID: roomID, activeLocalTransactionIDs: activeLocalTxIDs)
+        if outcome.failuresChanged { persistSendQueueFailures() }
+        if outcome.changed { publishGlobalSendQueue() }
     }
 
     /// As Slack keeps a message it couldn't delete or edit: it goes back to how the server has it, and you hear why
@@ -2666,6 +2757,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         // Thread timelines infer their own relation. Extra JSON cannot override
         // that fallback relation, so an explicit quote must use sendReply.
         do {
+            try assertActiveSession()
             let handle =
                 if let reply = replyToID {
                     try await target.sendReply(msg: content, eventId: reply)
@@ -3303,8 +3395,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         var posterFile: URL?
         defer { if let posterFile { try? FileManager.default.removeItem(at: posterFile) } }
         if mime.hasPrefix("video/") {
-            let (info, poster) = await VideoUpload.prepare(url, mimetype: mime, size: UInt64(values.fileSize ?? 0))
+            let (info, poster) = await prepareVideo(url, mime, UInt64(values.fileSize ?? 0))
             posterFile = poster
+            try assertActiveSession()
             try assertDestination(roomID)
             kind = .video(videoInfo: info, thumbnailSource: poster.map { .file(filename: $0.path) })
         } else if mime.hasPrefix("image/") {
@@ -3329,14 +3422,41 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         } else {
             target = try requireTimeline()
         }
+        try FileHandle(forReadingFrom: url).close()
         let handle = try target.sendAttachment(params: parameters, attachment: kind)
         do {
             try await handle.join()
         } catch {
+            if Self.isPreEnqueueAttachmentError(error) { throw error }
             throw AttachmentDeliveryError(underlying: error, message: Self.safeError(error))
         }
         if let destination { sends[Conversation(roomID: destination, threadRootID: threadRootID), default: 0] += 1 }
         await returnToLive(after: token, threadRootID: threadRootID)
+    }
+
+    /// Distinguishes unambiguous local validation or file-read errors that failed before queueing from uncertain
+    /// delivery/queue failures that might already have reached the server.
+    private static func isPreEnqueueAttachmentError(_ error: Error) -> Bool {
+        if let roomError = error as? RoomError {
+            switch roomError {
+            case .InvalidAttachmentData, .InvalidAttachmentMimeType, .InvalidMediaInfo, .TimelineUnavailable,
+                .InvalidThumbnailData, .InvalidRepliedToEventId:
+                return true
+            case .FailedSendingAttachment:
+                return false
+            }
+        }
+        if let cocoa = error as? CocoaError {
+            return cocoa.code == .fileNoSuchFile || cocoa.code == .fileReadNoSuchFile
+                || cocoa.code == .fileReadNoPermission || cocoa.code == .fileReadUnknown
+        }
+        let nsError = error as NSError
+        if nsError.domain == NSPOSIXErrorDomain,
+            nsError.code == Int(ENOENT) || nsError.code == Int(EACCES) || nsError.code == Int(EPERM)
+        {
+            return true
+        }
+        return false
     }
 
     /// An image's size upright, from its header alone: EXIF orientations 5 to 8 turn it a quarter, swapping the sides.
@@ -3982,8 +4102,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let previousFailures = globalSendQueue.failures
         globalSendQueue.apply(roomID: roomID, update: update)
         switch update {
-        case .sendError(let id, _, _), .sentEvent(let id, _), .cancelledLocalEvent(let id):
+        case .sendError(let id, _, _):
             retryingSendKeys.remove(SendQueueMessageKey(roomID: roomID, messageID: id))
+            uploadProgress.clear(roomID: roomID, messageID: id)
+        case .sentEvent(let id, _), .cancelledLocalEvent(let id):
+            let key = SendQueueMessageKey(roomID: roomID, messageID: id)
+            retryingSendKeys.remove(key)
+            mainSendFailures.removeValue(forKey: key)
+            threadSendFailures.removeValue(forKey: key)
+            sendFailures.removeValue(forKey: key)
             uploadProgress.clear(roomID: roomID, messageID: id)
         case .mediaUpload(let relatedTo, _, _, let progress):
             if progress.total > 0 {
@@ -4053,6 +4180,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 if openState == .failed { Task { [weak self] in await self?.retryOpenRoom() } }
                 if let id = failedSubscriptionRoomID, id == selectedRoomID { updateSubscriptions(id) }
                 if needsInitialProfileLoad { loadInitialProfile() }
+                if let liveRoom = projectedLiveRoomID, liveRoom == selectedRoomID, focusedEventID == nil {
+                    reconcileLiveTimelineSendQueue(roomID: liveRoom)
+                }
             }
         case .failed: status = .error
         case .idle, .connecting, .offline, .stopped: status = .syncing

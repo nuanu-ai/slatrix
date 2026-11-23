@@ -483,6 +483,8 @@ struct RootView: View {
                         openThread(root, room: root.roomID, openedWith: matrix.threadOpening?.openedWith)
                     } else if threadOpenError != nil, let request = pendingThreadOpen, isCurrentThreadOpen(request) {
                         openThread(request.message, openedWith: request.openedWith)
+                    } else if replyError != nil, !replyOpening, let target = replyTarget {
+                        prepareReply(target)
                     }
                 }
             }

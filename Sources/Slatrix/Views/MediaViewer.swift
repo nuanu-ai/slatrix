@@ -62,7 +62,9 @@ private struct MediaViewerPage: View {
         }
         .background(colors.mediaBackdrop)
         .accessibilityAddTraits(.isModal)
-        .task(id: "\(message.eventID)|\(message.sendState)") { await load() }
+        .task(id: MediaViewerLoadKey(message: message, sourceRevision: matrix.attachmentSourceRevision(message))) {
+            await load()
+        }
     }
 
     private func content(_ loaded: Loaded?) -> MediaStageView.Content {

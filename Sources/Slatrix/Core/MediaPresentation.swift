@@ -129,6 +129,21 @@ enum MediaViewerNavigation {
     }
 }
 
+/// Reload key for an open media viewer page: changes when the server event or its remote media source lands.
+struct MediaViewerLoadKey: Hashable {
+    let eventID: String
+    let sendState: String
+    let attachmentURL: String?
+    let sourceRevision: Data?
+
+    init(message: ChatMessage, sourceRevision: Data?) {
+        eventID = message.eventID
+        sendState = message.sendState
+        attachmentURL = message.attachment?.url
+        self.sourceRevision = sourceRevision
+    }
+}
+
 /// The message the media viewer shows, if it is open.
 @Observable @MainActor final class MediaViewerState {
     private(set) var message: ChatMessage?
