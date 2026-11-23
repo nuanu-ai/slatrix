@@ -187,7 +187,7 @@ fun SlatrixTheme(
             surfaceTint = colors.accent,
             inverseSurface = colors.tooltip,
             inverseOnSurface = colors.onTooltip,
-            error = colors.destructiveFill,
+            error = colors.destructive,
             onError = colors.onAccent,
             errorContainer = colors.mentionYouFill,
             onErrorContainer = colors.textPrimary,

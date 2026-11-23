@@ -58,8 +58,8 @@ struct MessageComposer: View {
     @State private var hasSelection = false
     /// Persistent Slack-style inline formatting bar toggled via the Aa button.
     @State private var showFormattingBar = false
-    /// Measured height of floating accessories so the timeline's "Jump to recent" pill lifts clear of them.
-    @State private var accessoryHeight: CGFloat = 0
+    /// Measured height of the floating stack above the composer so the timeline's "Jump to recent" pill lifts clear.
+    @State private var floatingHeight: CGFloat = 0
     @State private var mention: MentionSearch.Suggestions?
     @State private var mentionIndex = 0
     @State private var typingTask: Task<Void, Never>?
@@ -202,12 +202,11 @@ struct MessageComposer: View {
         .disabled(inputDisabled)
         // Suggestions, errors, toasts and reply/attachment cards float in one stack above the composer.
         .overlay(alignment: .topLeading) {
-            floating.alignmentGuide(.top) { $0[.bottom] + m.sp8 }
+            floating
+                .onGeometryChange(for: CGFloat.self, of: \.size.height) { floatingHeight = $0 }
+                .alignmentGuide(.top) { $0[.bottom] + m.sp8 }
         }
-        .preference(
-            key: ComposerAccessoryHeightKey.self,
-            value: accessories != nil && accessoryHeight > 0 ? accessoryHeight + m.sp8 : 0
-        )
+        .preference(key: ComposerAccessoryHeightKey.self, value: floatingHeight > 0 ? floatingHeight + m.sp8 : 0)
         .onAppear { isActive = true }
         // Once as an edit opens; opened under a cover, the editor takes the keyboard as it would after any cover.
         .task(id: isEditing || requiresTextForSend) {
@@ -288,10 +287,7 @@ struct MessageComposer: View {
             .padding(.horizontal, m.sp12).padding(.vertical, m.sp8)
             .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
             .elevation(.e2, cornerRadius: m.radiusLarge)
-            if let accessories {
-                accessories
-                    .onGeometryChange(for: CGFloat.self, of: \.size.height) { accessoryHeight = $0 }
-            }
+            if let accessories { accessories }
         }
         .animation(
             Motion.overlay,

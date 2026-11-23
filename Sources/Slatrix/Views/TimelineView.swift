@@ -600,13 +600,16 @@ struct MessageRow: View {
                         if let seen, !pendingSend {
                             ReadTicks(read: seen.read).help(seen.tooltip ?? "")
                         }
-                        if isSaved {
-                            Image(systemName: "bookmark.fill").font(m.font(.subheadline)).foregroundStyle(colors.accent)
-                        }
                     }
                     VStack(alignment: .leading, spacing: m.sp2) {
                         messageText
                     }.frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .overlay(alignment: .topLeading) {
+                    if isSaved {
+                        Image(systemName: "bookmark.fill").font(m.font(.subheadline)).foregroundStyle(colors.accent)
+                            .offset(x: -m(14), y: m.sp2)
+                    }
                 }
                 if !message.isRedacted { messageExtras }
             }

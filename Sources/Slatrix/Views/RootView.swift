@@ -575,7 +575,7 @@ struct RootView: View {
     // A single long modifier chain exceeds the type checker's time limit in some Swift releases.
     private var observedContent: some View {
         navigationObservedContent
-            .onChange(of: systemScheme) { _, scheme in appearance.systemIsDark = scheme == .dark }
+            .onChange(of: systemScheme, initial: true) { _, scheme in appearance.systemIsDark = scheme == .dark }
             .onReceive(NotificationCenter.default.publisher(for: .menuAction)) { notification in
                 handleMenu(notification.userInfo?["action"] as? String ?? "")
             }
@@ -1187,9 +1187,20 @@ struct RootView: View {
                 } footer: {
                     VStack(spacing: 0) {
                         if room.canPostMessages == false {
+                            let reply = replyTarget.flatMap {
+                                $0.message.roomID == room.id
+                                    && ($0.threadID == nil || $0.threadID != threadRoot?.eventID) ? $0 : nil
+                            }
+                            let draftAddress = editTarget == nil ? AttachmentDraftAddress(roomID: room.id) : nil
                             ComposerNotice(text: Self.cannotPost).padding(.top, m.sp4).padding(.bottom, m.sp12)
                                 .overlay(alignment: .top) {
-                                    ToastHost(toasts: toasts).alignmentGuide(.top) { $0[.bottom] + m.sp8 }
+                                    VStack(alignment: .leading, spacing: m.sp8) {
+                                        ToastHost(toasts: toasts).frame(maxWidth: .infinity)
+                                        if hasComposerAccessories(reply: reply, drafts: draftAddress) {
+                                            composerAccessories(reply: reply, drafts: draftAddress)
+                                        }
+                                    }
+                                    .alignmentGuide(.top) { $0[.bottom] + m.sp8 }
                                 }
                         } else if let target = editTarget, target.surface == .conversation,
                             target.message.roomID == room.id
@@ -1341,7 +1352,16 @@ struct RootView: View {
         } footer: {
             VStack(spacing: 0) {
                 if room.canPostMessages == false {
+                    let reply = replyTarget.flatMap { $0.belongsTo(roomID: room.id, threadID: root.eventID) ? $0 : nil }
+                    let draftAddress =
+                        editTarget == nil ? AttachmentDraftAddress(roomID: room.id, threadRootID: root.eventID) : nil
                     ComposerNotice(text: Self.cannotPost).padding(.top, m.sp4).padding(.bottom, m.sp12)
+                        .overlay(alignment: .top) {
+                            if hasComposerAccessories(reply: reply, drafts: draftAddress) {
+                                composerAccessories(reply: reply, drafts: draftAddress)
+                                    .alignmentGuide(.top) { $0[.bottom] + m.sp8 }
+                            }
+                        }
                 } else if let target = editTarget, target.surface == .thread(rootID: root.eventID),
                     target.message.roomID == room.id
                 {

@@ -178,8 +178,11 @@ struct WindowButtonsCenteringTests {
                     && !accessible("Clear search", in: hosting).isEmpty
             })
         let textField = try #require(allViews(hosting).compactMap { $0 as? NSTextField }.first)
-        window.makeFirstResponder(textField)
-        #expect(await eventually { bar.menuOpen })
+        #expect(
+            await eventually {
+                window.makeFirstResponder(textField)
+                return bar.menuOpen
+            })
         let clear = try #require(accessible("Clear search", in: hosting).first)
         clear.setAccessibilityFocused?(true)
         await drainMainActor()

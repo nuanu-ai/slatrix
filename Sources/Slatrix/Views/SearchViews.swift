@@ -59,14 +59,19 @@ struct SearchBarField: View {
                     let items = items
                     if items.indices.contains(bar.selection) { onPick(items[bar.selection]) }
                 }
-                .onExitCommand {
-                    if bar.text.isEmpty { bar.close() } else { bar.text = "" }
-                }
             if !bar.text.isEmpty {
                 IconButton(symbol: "xmark.circle.fill", label: "Clear search", role: .body, side: 20) {
                     focused = .field
                     bar.text = ""
                 }.focused($focused, equals: .clear).foregroundStyle(colors.textTertiary)
+            }
+        }
+        .onExitCommand {
+            if bar.text.isEmpty {
+                bar.close()
+            } else {
+                focused = .field
+                bar.text = ""
             }
         }
         .padding(.horizontal, m.sp12).frame(height: m.control)

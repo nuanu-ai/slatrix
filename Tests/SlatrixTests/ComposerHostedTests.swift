@@ -497,12 +497,13 @@ struct ComposerHostedTests {
         appearance.mode = .light
         appearance.theme = .sand
         let draft = Draft("First line<br>Second line")
+        let m = Metrics(zoom: 1)
         let hosting = NSHostingView(
             rootView: AnyView(
                 MessageComposer(
                     text: Binding(get: { draft.text }, set: { draft.text = $0 }), placeholder: "Message #team",
                     members: [], onSend: { _, _ in }, onTyping: { _ in }
-                ).frame(width: 360).environmentObject(appearance)))
+                ).frame(width: 360).environmentObject(appearance).environment(\.metrics, m)))
         let window = offscreenWindow(NSSize(width: 400, height: 400))
         defer {
             window.contentView = nil
@@ -514,8 +515,10 @@ struct ComposerHostedTests {
         let attrs = try #require(view.textStorage?.attributes(at: 0, effectiveRange: nil))
         let paragraph = try #require(attrs[.paragraphStyle] as? NSParagraphStyle)
         let font = try #require(attrs[.font] as? NSFont)
+        #expect(
+            abs(font.pointSize - m.size(.reading)) < 0.1, "composer=\(font.pointSize) vs reading=\(m.size(.reading))")
         let timeline = NativeSelectableMessageText.attributed(
-            [MessageBodyRun(text: "First line\nSecond line")], fontSize: Double(font.pointSize),
+            [MessageBodyRun(text: "First line\nSecond line")], fontSize: Double(m.size(.reading)),
             textColor: NSColor(appearance.colors.textBody), linkColor: NSColor(appearance.colors.accent))
         let timelineParagraph = try #require(
             timeline.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
@@ -562,6 +565,16 @@ struct ComposerHostedTests {
         _ = toggle.accessibilityPerformPress?()
         #expect(await eventually { !accessible("Bold", in: hosting).isEmpty })
         hosting.layoutSubtreeIfNeeded()
+        func allViews(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(allViews) }
+        let editorScroll = try editor(in: hosting).enclosingScrollView
+        let barScroll = try #require(
+            allViews(hosting).compactMap { $0 as? NSScrollView }.first { $0 !== editorScroll })
+        let barFrame = barScroll.convert(barScroll.bounds, to: hosting)
+        let composerLeft = (hosting.bounds.width - 248) / 2
+        let composerRight = composerLeft + 248
+        #expect(
+            barFrame.width <= 248.5 && barFrame.minX >= composerLeft - 0.5 && barFrame.maxX <= composerRight + 0.5,
+            "Formatting bar ScrollView overflowed 248 pt composer: \(barFrame) vs [\(composerLeft), \(composerRight)]")
         #expect(
             hosting.fittingSize.width <= 248.5,
             "Inline formatting bar overflowed 248 pt thread width: \(hosting.fittingSize.width)")
@@ -618,6 +631,10 @@ struct ComposerHostedTests {
         matrix.messages = messages
         matrix.focusedEventID = messages.first?.id
         let draft = Draft()
+        let members = [
+            ChatUser(id: "@alice:example.org", name: "Alice"),
+            ChatUser(id: "@alex:example.org", name: "Alex"),
+        ]
         let (hosting, window) = host(
             TimelineUnderBars { insets in
                 TimelineView(
@@ -628,7 +645,7 @@ struct ComposerHostedTests {
             } footer: {
                 MessageComposer(
                     text: Binding(get: { draft.text }, set: { draft.text = $0 }), placeholder: "Message #general",
-                    members: [], onSend: { _, _ in }, onTyping: { _ in },
+                    members: members, onSend: { _, _ in }, onTyping: { _ in },
                     accessories: AnyView(
                         HStack {
                             Text("Replying to Alice")
@@ -652,6 +669,19 @@ struct ComposerHostedTests {
                 return !jumpFrame.isEmpty && !bannerFrame.isEmpty && !jumpFrame.intersects(bannerFrame)
                     && jumpFrame.minY >= bannerFrame.maxY - 1
             })
+        // Opening mention suggestions above the banner lifts Jump to recent above the whole floating stack too.
+        let view = try editor(in: hosting)
+        window.makeFirstResponder(view)
+        type(view, "@Al")
+        #expect(await eventually(timeout: .seconds(5)) { !accessible("Alice", in: hosting).isEmpty })
+        let suggestion = try #require(accessible("Alice", in: hosting).first)
+        #expect(
+            await eventually(timeout: .seconds(5)) {
+                let jumpFrame = jump.accessibilityFrame?() ?? .zero
+                let suggestionFrame = suggestion.accessibilityFrame?() ?? .zero
+                return !jumpFrame.isEmpty && !suggestionFrame.isEmpty && !jumpFrame.intersects(suggestionFrame)
+                    && jumpFrame.minY >= suggestionFrame.maxY - 1
+            })
     }
 
     @Test("Mention suggestions stack cleanly above RootView composer banners without overlapping")
@@ -667,6 +697,10 @@ struct ComposerHostedTests {
         let files = AttachmentDraftStore(
             directory: AttachmentDraftStore.directory(in: local.url), keyProvider: vaultKey)
         let room = FakeOpenRoom("!overlay:example.org", cached: [])
+        room.memberList = [
+            roomMember("@alice:example.org", name: "Alice"),
+            roomMember("@alex:example.org", name: "Alex"),
+        ]
         let address = AttachmentDraftAddress(roomID: room.id())
         let access = try await files.open(accountID: "@me:example.org")
         _ = try await files.save(urls: [sample], address: address, access: access, revision: 1)
@@ -692,14 +726,11 @@ struct ComposerHostedTests {
         defer { close(window) }
 
         await matrix.selectRoom(room.id())
-        matrix.members = [
-            ChatUser(id: "@alice:example.org", name: "Alice"),
-            ChatUser(id: "@alex:example.org", name: "Alex"),
-        ]
         #expect(
             await eventually(timeout: .seconds(10)) {
                 hosting.layoutSubtreeIfNeeded()
-                return !accessible("Send anyway", in: hosting).isEmpty && (try? editor(in: hosting).isEditable) == true
+                return matrix.members.count == 2 && !accessible("Send anyway", in: hosting).isEmpty
+                    && (try? editor(in: hosting).isEditable) == true
             })
         let view = try editor(in: hosting)
         window.makeFirstResponder(view)
@@ -713,5 +744,9 @@ struct ComposerHostedTests {
         #expect(
             !bannerFrame.intersects(suggestionFrame), "banner=\(bannerFrame) overlaps suggestion=\(suggestionFrame)")
         #expect(suggestionFrame.minY >= bannerFrame.maxY - 1, "suggestion=\(suggestionFrame) banner=\(bannerFrame)")
+
+        // Losing posting permission replaces the composer with ComposerNotice while keeping draft recovery reachable.
+        matrix.rooms[0].canPostMessages = false
+        #expect(await eventually(timeout: .seconds(5)) { !accessible("Send anyway", in: hosting).isEmpty })
     }
 }

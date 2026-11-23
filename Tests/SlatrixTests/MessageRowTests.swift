@@ -208,4 +208,25 @@ struct MessageRowTests {
             abs(shortName - longName) < 1,
             "Long sender name squeezed compact attachment: short=\(shortName) long=\(longName)")
     }
+
+    @Test("Bookmarking a compact message does not narrow or rewrap its body text")
+    func compactBookmarkDoesNotRewrap() {
+        let saved = UserDefaults.standard.object(forKey: "appearance.density")
+        defer { UserDefaults.standard.set(saved, forKey: "appearance.density") }
+        let appearance = AppearanceStore()
+        appearance.density = .compact
+        let message = ChatMessage(
+            id: "$bm", roomID: "!room:example.org", senderID: "@a:example.org", senderName: "Anna",
+            body: "Checking whether saving this compact message ever narrows its body enough to push a word down",
+            timestamp: Date(timeIntervalSince1970: 1_800_000_000))
+        func height(saved: Bool) -> CGFloat {
+            NSHostingView(
+                rootView: MessageRow(message: message, grouped: false, isSaved: saved, timeLabel: "10:00")
+                    .frame(width: 340).environmentObject(appearance).environment(\.metrics, m)
+            ).fittingSize.height
+        }
+        let unsaved = height(saved: false)
+        let bookmarked = height(saved: true)
+        #expect(abs(unsaved - bookmarked) < 0.5, "Compact bookmark changed row height: \(unsaved) vs \(bookmarked)")
+    }
 }

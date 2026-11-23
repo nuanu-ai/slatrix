@@ -59,7 +59,14 @@ enum MessageDensity: String, CaseIterable, Identifiable {
     @Published var notificationPreview = UserDefaults.standard.bool(forKey: "notifications.preview") {
         didSet { UserDefaults.standard.set(notificationPreview, forKey: "notifications.preview") }
     }
-    @Published var systemIsDark = true
+    @Published var systemIsDark = AppearanceStore.currentSystemIsDark()
+
+    private static func currentSystemIsDark() -> Bool {
+        if let appearance = NSApp?.effectiveAppearance {
+            return appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        }
+        return UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+    }
     var preferredColorScheme: ColorScheme? { mode == .system ? nil : mode == .dark ? .dark : .light }
     var isDark: Bool { mode == .dark || (mode == .system && systemIsDark) }
     /// The system accent in each theme, resolved once; picking another in System Settings redraws the window.

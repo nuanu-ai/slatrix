@@ -45,7 +45,7 @@ class DesignTokensTest {
             }
             assertTrue("dark=$dark onAccent/accentFill", contrast(colors.getValue("onAccent"), colors.getValue("accentFill")) >= 4.5f)
             assertTrue("dark=$dark onAccent/destructiveFill", contrast(colors.getValue("onAccent"), colors.getValue("destructiveFill")) >= 4.5f)
-            for (surface in listOf("canvas", "raised", "overlay")) {
+            for (surface in listOf("canvas", "raised", "overlay", "wallpaper")) {
                 assertTrue("dark=$dark destructive/$surface", contrast(colors.getValue("destructive"), colors.getValue(surface)) >= 4.5f)
             }
             assertTrue("dark=$dark warning/canvas", contrast(colors.getValue("warning"), colors.getValue("canvas")) >= 4.5f)
