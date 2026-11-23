@@ -4,6 +4,7 @@ import SwiftUI
 struct TimelineView: View {
     @Environment(\.metrics) private var m
     @Environment(\.openURL) private var openURL
+    @Environment(\.timelineBarInsets) private var barInsets
     let matrix: MatrixService
     @EnvironmentObject var appearance: AppearanceStore
     @Environment(Popovers.self) private var popovers: Popovers?
@@ -101,7 +102,7 @@ struct TimelineView: View {
                 jumpVisible = showsJump
                 if let scrolled, scrolled != contentAbove.wrappedValue { contentAbove.wrappedValue = scrolled }
                 onReport?(report)
-            }, readKey: readKey, insets: insets
+            }, readKey: readKey, insets: insets, barInsets: barInsets
         )
         .overlay(alignment: .bottom) {
             // A conversation still reading its first rows, after the loading delay, holds their place on the composer.
@@ -1063,21 +1064,83 @@ extension TimelineRowContext {
     }
 }
 
+/// Measured heights of the floating header and composer bars over a timeline, pushed synchronously to the table in
+/// `TimelineUnderBars`'s layout pass before the table places or opens.
+@MainActor final class TimelineBarInsets {
+    private(set) var current = EdgeInsets()
+    private(set) var measured = false
+    var onChange: ((EdgeInsets) -> Void)?
+
+    func update(_ new: EdgeInsets) {
+        let changed = !measured || new.top != current.top || new.bottom != current.bottom
+        current = new
+        measured = true
+        if changed { onChange?(new) }
+    }
+}
+
+private struct TimelineBarInsetsKey: EnvironmentKey {
+    static let defaultValue: TimelineBarInsets? = nil
+}
+
+extension EnvironmentValues {
+    var timelineBarInsets: TimelineBarInsets? {
+        get { self[TimelineBarInsetsKey.self] }
+        set { self[TimelineBarInsetsKey.self] = newValue }
+    }
+}
+
+/// Measures the floating header and composer bars before placing the timeline under them, so the table receives its
+/// real insets synchronously before its first `open()`.
+private struct TimelineBarsLayout: Layout {
+    let onMeasure: @MainActor (EdgeInsets) -> Void
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let first = subviews.first else { return proposal.replacingUnspecifiedDimensions() }
+        return first.sizeThatFits(proposal)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count >= 3 else {
+            for subview in subviews { subview.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size)) }
+            return
+        }
+        let barProposal = ProposedViewSize(width: bounds.width, height: bounds.height)
+        let headerSize = subviews[1].sizeThatFits(barProposal)
+        let footerSize = subviews[2].sizeThatFits(barProposal)
+        if bounds.width > 0 && bounds.height > 0 {
+            let measured = EdgeInsets(top: headerSize.height, leading: 0, bottom: footerSize.height, trailing: 0)
+            MainActor.assumeIsolated { onMeasure(measured) }
+        }
+        subviews[0].place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+        subviews[1].place(
+            at: CGPoint(x: bounds.midX, y: bounds.minY), anchor: .top,
+            proposal: ProposedViewSize(width: bounds.width, height: headerSize.height))
+        subviews[2].place(
+            at: CGPoint(x: bounds.midX, y: bounds.maxY), anchor: .bottom,
+            proposal: ProposedViewSize(width: bounds.width, height: footerSize.height))
+    }
+}
+
 /// A timeline with its header over its top and its composer over its bottom, floating so rows scroll under both. Their
 /// heights, tracked here as the composer grows, keep the timeline's own view of the screen between them.
 struct TimelineUnderBars<Timeline: View, Header: View, Footer: View>: View {
     @State private var insets = EdgeInsets()
+    @State private var barInsets = TimelineBarInsets()
     let timeline: (EdgeInsets) -> Timeline
     @ViewBuilder let header: Header
     @ViewBuilder let footer: Footer
 
     var body: some View {
-        timeline(insets)
-            .overlay(alignment: .top) {
-                header.onGeometryChange(for: CGFloat.self, of: \.size.height) { insets.top = $0 }
-            }
-            .overlay(alignment: .bottom) {
-                footer.onGeometryChange(for: CGFloat.self, of: \.size.height) { insets.bottom = $0 }
-            }
+        TimelineBarsLayout(onMeasure: measured) {
+            timeline(insets).environment(\.timelineBarInsets, barInsets)
+            ZStack(alignment: .top) { header }
+            ZStack(alignment: .bottom) { footer }
+        }
+    }
+
+    private func measured(_ new: EdgeInsets) {
+        barInsets.update(new)
+        if insets != new { DispatchQueue.main.async { insets = new } }
     }
 }

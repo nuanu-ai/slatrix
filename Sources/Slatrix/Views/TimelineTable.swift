@@ -125,6 +125,8 @@ struct TimelineTable: NSViewRepresentable {
     var readKey: AnyHashable? = nil
     /// The header's and the composer's heights: rows scroll under both, and the reader sees only what is between.
     var insets = EdgeInsets()
+    /// Synchronous bar-height channel from `TimelineUnderBars`, measured before the table places or opens.
+    var barInsets: TimelineBarInsets? = nil
 
     func makeCoordinator() -> TimelineTableCoordinator { TimelineTableCoordinator() }
 
@@ -264,7 +266,12 @@ struct TimelineTable: NSViewRepresentable {
         {
             pendingFocus = configuration.focusedEventID
         }
-        inset(configuration.insets)
+        if let barInsets = configuration.barInsets {
+            barInsets.onChange = { [weak self] new in self?.inset(new) }
+            if barInsets.measured { inset(barInsets.current) }
+        } else {
+            inset(configuration.insets)
+        }
         // As in Slack, what you send brings a live conversation to it, however soon the server confirms it.
         if opened, configuration.live, let previous, previous.sends != configuration.sends {
             preservingPosition(keeping: .bottom) {}
@@ -279,7 +286,7 @@ struct TimelineTable: NSViewRepresentable {
     // MARK: Rows
 
     private func apply(_ entries: [TimelineEntry]) {
-        guard width > 0, let configuration else { return }
+        guard width > 0, let configuration, configuration.barInsets?.measured != false else { return }
         let settings = Settings(
             zoom: configuration.context.metrics.zoom,
             density: configuration.context.appearance?.density ?? .comfortable,
@@ -829,17 +836,25 @@ struct TimelineTable: NSViewRepresentable {
 
     /// The header or the composer changed height: rows scroll under the new one, the reader's place kept.
     private func inset(_ new: EdgeInsets) {
-        guard new.top != insets.top || new.bottom != insets.bottom else { return }
-        let kept = opened ? position() : nil
-        insets = NSEdgeInsets(top: new.top, left: 0, bottom: new.bottom, right: 0)
-        // Before the scroll view tiles for them, so that tile finds the viewport already this size.
-        if width > 0 { viewportHeight = visible.height }
-        applying = true
-        scrollView.contentInsets = insets
-        scrollView.scrollerInsets = insets
-        applying = false
-        guard width > 0 else { return }
-        preservingPosition(keeping: kept) {}
+        let changed = new.top != insets.top || new.bottom != insets.bottom
+        if changed {
+            let kept = opened ? position() : nil
+            insets = NSEdgeInsets(top: new.top, left: 0, bottom: new.bottom, right: 0)
+            // Before the scroll view tiles for them, so that tile finds the viewport already this size.
+            if width > 0 { viewportHeight = visible.height }
+            applying = true
+            scrollView.contentInsets = insets
+            scrollView.scrollerInsets = insets
+            applying = false
+            guard width > 0 else { return }
+            if opened {
+                preservingPosition(keeping: kept) {}
+            } else if let configuration {
+                apply(configuration.entries)
+            }
+        } else if !opened, width > 0, let configuration {
+            apply(configuration.entries)
+        }
     }
 
     private func viewportResized() {

@@ -349,6 +349,190 @@ struct TimelineHostedTests {
         #expect(table.rect(ofRow: table.numberOfRows - 1).maxY == between)
     }
 
+    private struct UnderBarsFixture: View {
+        let service: MatrixService
+        let room: ChatRoom
+        let appearance: AppearanceStore
+        let popovers: Popovers
+        var headerHeight: CGFloat = 52
+        var footerHeight: CGFloat = 84
+        var timeline = 0
+        var body: some View {
+            TimelineUnderBars { insets in
+                TimelineView(
+                    matrix: service, room: room, savedIDs: [], onThread: { _ in }, onReply: { _ in },
+                    onEdit: { _ in }, onSave: { _ in }, insets: insets
+                ).id("\(room.id):\(timeline):\(service.shownTimelineID)")
+            } header: {
+                Color.clear.frame(maxWidth: .infinity).frame(height: headerHeight)
+            } footer: {
+                Color.clear.frame(maxWidth: .infinity).frame(height: footerHeight)
+            }
+            .environmentObject(appearance).environment(\.metrics, Metrics(zoom: 1)).environment(popovers)
+        }
+    }
+
+    @Test(
+        "Under real header and composer bars, the first layout already clears both bars and never jumps on the next",
+        arguments: [40, 3])
+    func underBarsFirstLayoutClearsBars(count: Int) async throws {
+        let service = MatrixService.scratch()
+        let timeline = HistoryTimeline(noHandle: .init())
+        let client = FakeClient(rooms: [FakeRoom(roomInfo(id: Self.room.id))])
+        service.user = ChatUser(id: Self.user, name: "Reader")
+        service.rooms = [Self.room]
+        service.selectedRoomID = Self.room.id
+        service.configureMessageActionsForChecks(
+            client: client, main: timeline, thread: nil, rootID: nil, sessionID: UUID(), selectionID: UUID(),
+            threadID: UUID())
+        service.messages = Self.messages(0..<count)
+        let window = offscreenWindow(NSSize(width: 620, height: 600))
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        let hosting = NSHostingView(
+            rootView: UnderBarsFixture(
+                service: service, room: Self.room, appearance: AppearanceStore(), popovers: Popovers()))
+        window.contentView = hosting
+        var recordedInsets: [NSEdgeInsets] = []
+        var recordedTops: [CGFloat] = []
+        let observer = CFRunLoopObserverCreateWithHandler(
+            nil, CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.max
+        ) { _, _ in
+            MainActor.assumeIsolated {
+                if let sv = Harness.views(in: hosting).compactMap({ $0 as? TimelineScrollView }).first {
+                    recordedInsets.append(sv.contentInsets)
+                    if let cell = Harness.views(in: hosting).compactMap({ $0 as? TimelineCell }).first(where: { cell in
+                        guard cell.window != nil, case .message(let entry) = cell.entry?.kind else { return false }
+                        return entry.message.eventID == "Message-\(count - 1)"
+                    }) {
+                        recordedTops.append(cell.convert(cell.bounds, to: nil).minY)
+                    }
+                }
+            }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        defer { CFRunLoopObserverInvalidate(observer) }
+        window.orderFrontRegardless()
+        _ = await eventually { recordedInsets.count >= 4 }
+
+        let scrollView = try #require(
+            Harness.views(in: hosting).compactMap { $0 as? TimelineScrollView }.first)
+        #expect(recordedInsets.first?.top == 52, "insets per frame: \(recordedInsets), tops: \(recordedTops)")
+        #expect(recordedInsets.first?.bottom == 84, "insets per frame: \(recordedInsets), tops: \(recordedTops)")
+        #expect(scrollView.contentInsets.top == 52)
+        #expect(scrollView.contentInsets.bottom == 84)
+        let newestID = "Message-\(count - 1)"
+        let newest = try #require(
+            Harness.views(in: hosting).compactMap { $0 as? TimelineCell }.first { cell in
+                guard cell.window != nil, case .message(let entry) = cell.entry?.kind else { return false }
+                return entry.message.eventID == newestID
+            })
+        let frame1 = newest.convert(newest.bounds, to: nil)
+        let footerTop = scrollView.convert(scrollView.bounds, to: nil).minY + 84
+        #expect(frame1.minY >= footerTop - 0.5)
+        if let firstTop = recordedTops.first, let lastTop = recordedTops.last {
+            #expect(abs(lastTop - firstTop) < 0.5, "tops across frames: \(recordedTops), insets: \(recordedInsets)")
+        }
+    }
+
+    @Test("Under real bars, a focused message opens dead-center between header and composer on its first layout")
+    func underBarsFirstLayoutCentersFocus() async throws {
+        let service = MatrixService.scratch()
+        let timeline = HistoryTimeline(noHandle: .init())
+        let client = FakeClient(rooms: [FakeRoom(roomInfo(id: Self.room.id))])
+        service.user = ChatUser(id: Self.user, name: "Reader")
+        service.rooms = [Self.room]
+        service.selectedRoomID = Self.room.id
+        service.configureMessageActionsForChecks(
+            client: client, main: timeline, thread: nil, rootID: nil, sessionID: UUID(), selectionID: UUID(),
+            threadID: UUID())
+        service.messages = Self.messages(0..<80)
+        service.focusedEventID = "Message-25"
+        let window = offscreenWindow(NSSize(width: 620, height: 600))
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        let hosting = NSHostingView(
+            rootView: UnderBarsFixture(
+                service: service, room: Self.room, appearance: AppearanceStore(), popovers: Popovers()))
+        window.contentView = hosting
+        hosting.layoutSubtreeIfNeeded()
+
+        let scrollView = try #require(
+            Harness.views(in: hosting).compactMap { $0 as? TimelineScrollView }.first)
+        let bounds = scrollView.convert(scrollView.bounds, to: nil)
+        let center = (bounds.minY + 84 + bounds.maxY - 52) / 2
+        let focused = try #require(
+            Harness.views(in: hosting).compactMap { $0 as? TimelineCell }.first { cell in
+                guard cell.window != nil, case .message(let entry) = cell.entry?.kind else { return false }
+                return entry.message.eventID == "Message-25"
+            })
+        let mid1 = focused.convert(focused.bounds, to: nil).midY
+        #expect(abs(mid1 - center) <= 2)
+
+        await drainMainActor()
+        hosting.layoutSubtreeIfNeeded()
+        let mid2 = focused.convert(focused.bounds, to: nil).midY
+        #expect(abs(mid2 - center) <= 2)
+    }
+
+    @Test(
+        "Switching rooms inside TimelineUnderBars with a different composer height opens at the new height with no jump"
+    )
+    func underBarsWarmSwitchDifferentFooterHeight() async throws {
+        let roomA = ChatRoom(id: "!a:example.org", name: "Room A")
+        let roomB = ChatRoom(id: "!b:example.org", name: "Room B")
+        let service = MatrixService.scratch()
+        let timeline = HistoryTimeline(noHandle: .init())
+        let client = FakeClient(rooms: [FakeRoom(roomInfo(id: roomA.id)), FakeRoom(roomInfo(id: roomB.id))])
+        service.user = ChatUser(id: Self.user, name: "Reader")
+        service.rooms = [roomA, roomB]
+        service.selectedRoomID = roomA.id
+        service.configureMessageActionsForChecks(
+            client: client, main: timeline, thread: nil, rootID: nil, sessionID: UUID(), selectionID: UUID(),
+            threadID: UUID())
+        service.messages = Self.messages(0..<40, prefix: "A")
+        let appearance = AppearanceStore()
+        let popovers = Popovers()
+        let window = offscreenWindow(NSSize(width: 620, height: 600))
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        let hosting = NSHostingView(
+            rootView: UnderBarsFixture(
+                service: service, room: roomA, appearance: appearance, popovers: popovers, footerHeight: 120,
+                timeline: 0))
+        window.contentView = hosting
+        hosting.layoutSubtreeIfNeeded()
+        await drainMainActor()
+        hosting.layoutSubtreeIfNeeded()
+
+        // Switch to Room B whose composer is much shorter, keeping TimelineUnderBars mounted.
+        service.selectedRoomID = roomB.id
+        service.messages = Self.messages(0..<40, prefix: "B")
+        hosting.rootView = UnderBarsFixture(
+            service: service, room: roomB, appearance: appearance, popovers: popovers, footerHeight: 56, timeline: 1)
+        hosting.layoutSubtreeIfNeeded()
+
+        let scrollView = try #require(
+            Harness.views(in: hosting).compactMap { $0 as? TimelineScrollView }.first)
+        #expect(scrollView.contentInsets.bottom == 56)
+        let newest = try #require(
+            Harness.views(in: hosting).compactMap { $0 as? TimelineCell }.first { cell in
+                guard cell.window != nil, case .message(let entry) = cell.entry?.kind else { return false }
+                return entry.message.eventID == "B-39"
+            })
+        let frame1 = newest.convert(newest.bounds, to: nil)
+        await drainMainActor()
+        hosting.layoutSubtreeIfNeeded()
+        let frame2 = newest.convert(newest.bounds, to: nil)
+        #expect(abs(frame2.minY - frame1.minY) < 0.5)
+    }
+
     @Test("The row kept still through a resize is the first below the header, not one passing under it")
     func anchorBelowHeader() async throws {
         let harness = Harness(

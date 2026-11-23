@@ -467,4 +467,42 @@ struct ConversationSwitchHostedTests {
         #expect(await eventually(timeout: .seconds(20)) { harness.sample().rows["$reply"] != nil })
         #expect(harness.matrix.selectedRoomID == harness.rooms[1].id())
     }
+
+    @Test("Cold launch of the first conversation already has header and composer insets on its first frame with rows")
+    func coldLaunchZeroInsetJump() async throws {
+        let harness = try Harness()
+        defer { harness.close() }
+        var firstInsets: NSEdgeInsets?
+        var firstRows: [String: CGFloat]?
+        var moved: [String] = []
+        let observer = CFRunLoopObserverCreateWithHandler(
+            nil, CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.max
+        ) { _, _ in
+            MainActor.assumeIsolated {
+                let sample = harness.sample()
+                guard !sample.rows.isEmpty else { return }
+                if firstInsets == nil,
+                    let sv = Harness.views(in: harness.hosting).compactMap({ $0 as? TimelineScrollView }).first
+                {
+                    firstInsets = sv.contentInsets
+                }
+                if let baseline = firstRows {
+                    for (id, top) in sample.rows {
+                        if let before = baseline[id], abs(before - top) > 0.5 {
+                            moved.append("\(id): \(before) -> \(top)")
+                        }
+                    }
+                } else {
+                    firstRows = sample.rows
+                }
+            }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        defer { CFRunLoopObserverInvalidate(observer) }
+        try #require(await harness.settled(on: 0))
+        await harness.idle()
+        let insets = try #require(firstInsets)
+        #expect(insets.top > 0 && insets.bottom > 0, "firstInsets=\(insets), moved=\(moved)")
+        #expect(moved.isEmpty, "moved=\(moved), firstInsets=\(insets)")
+    }
 }
