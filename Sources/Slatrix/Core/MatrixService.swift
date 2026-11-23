@@ -52,19 +52,60 @@ struct SendQueueMessageKey: Hashable {
 private struct SendQueueTracker {
     private var pending: [String: Set<String>] = [:]
     /// Failed transactions by room, storing whether the failure is recoverable.
-    private var failures: [String: [String: Bool]] = [:]
+    private(set) var failures: [String: [String: Bool]] = [:]
+    private var replayingInitial = false
+    private var initialReplaySeen: [String: Set<String>] = [:]
+
+    mutating func loadPersisted(_ saved: [String: [String: Bool]]) {
+        failures = saved
+        pending = [:]
+        for (roomID, roomFailures) in saved {
+            for (txID, isRecoverable) in roomFailures where isRecoverable {
+                pending[roomID, default: []].insert(txID)
+            }
+        }
+    }
+
+    mutating func beginInitialReplay() {
+        replayingInitial = true
+        initialReplaySeen = [:]
+    }
+
+    mutating func finishInitialReplay() {
+        guard replayingInitial else { return }
+        replayingInitial = false
+        let seen = initialReplaySeen
+        initialReplaySeen = [:]
+        for (roomID, roomFailures) in failures {
+            let surviving = seen[roomID] ?? []
+            let filtered = roomFailures.filter { surviving.contains($0.key) }
+            failures[roomID] = filtered.isEmpty ? nil : filtered
+        }
+        for (roomID, ids) in pending {
+            let surviving = seen[roomID] ?? []
+            let filtered = ids.intersection(surviving)
+            pending[roomID] = filtered.isEmpty ? nil : filtered
+        }
+    }
 
     mutating func apply(roomID: String, update: RoomSendQueueUpdate) {
         switch update {
         case .newLocalEvent(let id):
-            pending[roomID, default: []].insert(id)
-            removeFailure(roomID: roomID, transactionID: id)
+            if replayingInitial { initialReplaySeen[roomID, default: []].insert(id) }
+            // Never clear a known failure on .newLocalEvent (e.g., startup replay of persisted local echoes);
+            // permanently failed items stay out of `pending` so the offline banner won't promise auto-send.
+            if let isRecoverable = failures[roomID]?[id] {
+                if isRecoverable { pending[roomID, default: []].insert(id) }
+            } else {
+                pending[roomID, default: []].insert(id)
+            }
         case .replacedLocalEvent(let id):
             if failures[roomID]?[id] != false { pending[roomID, default: []].insert(id) }
         case .retryEvent(let id):
             pending[roomID, default: []].insert(id)
             removeFailure(roomID: roomID, transactionID: id)
         case .sendError(let id, _, let isRecoverable):
+            if replayingInitial { initialReplaySeen[roomID, default: []].insert(id) }
             failures[roomID, default: [:]][id] = isRecoverable
             if isRecoverable {
                 pending[roomID, default: []].insert(id)
@@ -87,6 +128,12 @@ private struct SendQueueTracker {
     mutating func reset() {
         pending = [:]
         failures = [:]
+        replayingInitial = false
+        initialReplaySeen = [:]
+    }
+
+    func isFailed(roomID: String, transactionID: String) -> Bool {
+        failures[roomID]?[transactionID] != nil
     }
 
     var queuedCount: Int { pending.values.reduce(0) { $0 + $1.count } }
@@ -1535,6 +1582,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
         guard !sessionExpired else { return }
         roomSubscriptions.attach(service.roomListService())
+        loadPersistedSendFailures(accountID: id)
+        beginInitialSendQueueReplay()
         try await connectionRecovery.attach(
             service, client: newClient, homeserverURL: homeserverURL,
             onSendingResumed: { [weak self] in self?.refusedChanges?.cancel() },
@@ -1546,6 +1595,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 guard let self, self.sessionGeneration == generation, self.connectionStopTask == nil else { return }
                 self.applyConnection(feedback)
             })
+        Task { @MainActor [weak self] in
+            guard let self, self.sessionGeneration == generation else { return }
+            self.finishInitialSendQueueReplay()
+        }
         guard sessionGeneration == generation, connectionStopTask == nil else { throw CancellationError() }
         if sessionExpired {
             await connectionRecovery.stop()
@@ -1811,6 +1864,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             }
             // While Keychain still holds the session it can restore into this store, so keep it.
             if deletionError == nil, let storeID { SessionStores.remove(storeID, roots: storeRoots) }
+            if deletionError == nil, let accountID = owner.userID { clearPersistedSendFailures(accountID: accountID) }
         }
         try validateLogout(stoppedOwner)
         sessionCleanupPending = deletionError != nil
@@ -2095,9 +2149,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     /// False, without showing the room, when its live timeline does not hold `anchor`.
     @discardableResult
-    private func setupRoom(_ id: String, focus: TimelineFocus, eventID: String?, containing anchor: String? = nil)
+    private func setupRoom(
+        _ id: String, focus: TimelineFocus, eventID: String?, containing anchor: String? = nil,
+        autoRetried: Bool = false
+    )
         async -> Bool
     {
+        let startedReconnect = reconnectCount
+        let startedOffline = connectionState != .running
         let ahead: (token: UUID, task: Task<PreparedRoom?, Never>)?
         if case .live = focus, eventID == nil, let prepared, prepared.roomID == id {
             ahead = (prepared.token, prepared.task)
@@ -2151,6 +2210,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 eventID: eventID, token: token)
         } catch {
             guard selection == token else { return true }
+            if !autoRetried, connectionState == .running, startedOffline || reconnectCount != startedReconnect {
+                return await setupRoom(id, focus: focus, eventID: eventID, containing: anchor, autoRetried: true)
+            }
             showConversation(id, eventID: eventID, token: token)
             openState = .failed
             failedOpen = (id, eventID)
@@ -3232,8 +3294,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         } else {
             target = try requireTimeline()
         }
+        let handle = try target.sendAttachment(params: parameters, attachment: kind)
         do {
-            let handle = try target.sendAttachment(params: parameters, attachment: kind)
             try await handle.join()
         } catch {
             throw AttachmentDeliveryError(underlying: error, message: Self.safeError(error))
@@ -3844,7 +3906,45 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         handleAuthError(isSoftLogout: isSoftLogout, generation: sessionGeneration)
     }
     #endif
+    private var persistedSendFailuresURL: URL? {
+        storeRoots.first?.appendingPathComponent("send-queue-failures.json")
+    }
+    func loadPersistedSendFailures(accountID: String) {
+        guard let url = persistedSendFailuresURL, let data = try? Data(contentsOf: url),
+            let all = try? JSONDecoder().decode([String: [String: [String: Bool]]].self, from: data),
+            let saved = all[accountID]
+        else { return }
+        globalSendQueue.loadPersisted(saved)
+        publishGlobalSendQueue()
+    }
+    func beginInitialSendQueueReplay() { globalSendQueue.beginInitialReplay() }
+    func finishInitialSendQueueReplay() {
+        globalSendQueue.finishInitialReplay()
+        persistSendQueueFailures()
+        publishGlobalSendQueue()
+    }
+    private func persistSendQueueFailures() {
+        guard !isPreview, let accountID = user?.id, let url = persistedSendFailuresURL else { return }
+        var all =
+            (try? Data(contentsOf: url)).flatMap {
+                try? JSONDecoder().decode([String: [String: [String: Bool]]].self, from: $0)
+            } ?? [:]
+        all[accountID] = globalSendQueue.failures.isEmpty ? nil : globalSendQueue.failures
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if let encoded = try? JSONEncoder().encode(all) {
+            try? encoded.write(to: url, options: .atomic)
+        }
+    }
+    private func clearPersistedSendFailures(accountID: String) {
+        guard let url = persistedSendFailuresURL, let data = try? Data(contentsOf: url),
+            var all = try? JSONDecoder().decode([String: [String: [String: Bool]]].self, from: data)
+        else { return }
+        all.removeValue(forKey: accountID)
+        if let encoded = try? JSONEncoder().encode(all) { try? encoded.write(to: url, options: .atomic) }
+    }
     func handleSendQueueUpdate(roomID: String, update: RoomSendQueueUpdate) {
+        let previousFailures = globalSendQueue.failures
         globalSendQueue.apply(roomID: roomID, update: update)
         switch update {
         case .sendError(let id, _, _), .sentEvent(let id, _), .cancelledLocalEvent(let id):
@@ -3852,6 +3952,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         case .newLocalEvent, .replacedLocalEvent, .retryEvent, .mediaUpload:
             break
         }
+        if globalSendQueue.failures != previousFailures { persistSendQueueFailures() }
         publishGlobalSendQueue()
     }
     func displayedSendFailure(for key: SendQueueMessageKey) -> MessageSendFailure? {
@@ -4218,17 +4319,29 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     // remove an in-flight message after delivery; it is not a remote delete API.
     func cancelMessage(_ message: ChatMessage) async throws -> Bool {
         guard let context = try pendingSendContext(message) else { return false }
+        let key = SendQueueMessageKey(roomID: message.roomID, messageID: message.eventID)
+        let transactionID: String? = if case .transactionId(let id) = context.itemID { id } else { nil }
+        let cancelledWasFailure =
+            sendFailures[key] != nil
+            || transactionID.map { globalSendQueue.isFailed(roomID: message.roomID, transactionID: $0) } == true
+        let excludedIDs = Set([message.eventID, transactionID].compactMap(\.self))
+        let otherFailureRemains =
+            globalSendQueue.hasFailure(
+                in: message.roomID, excluding: excludedIDs, suppressingRecoverable: false)
+            || sendFailures.keys.contains { $0.roomID == message.roomID && !excludedIDs.contains($0.messageID) }
+        let shouldUnblockQueue = cancelledWasFailure && !otherFailureRemains
         var cancelled = false
         try await performSendAction(context, message: message) {
             cancelled = try await SendQueueActions.cancel(
                 itemID: context.itemID, room: context.room, timeline: context.timeline,
-                resumeQueue: self.connectionState == .running)
+                resumeQueue: self.connectionState == .running && shouldUnblockQueue)
         }
         if cancelled {
-            connectionRecovery.cancelRoomResume(roomID: message.roomID)
-            retryingSendKeys.remove(SendQueueMessageKey(roomID: message.roomID, messageID: message.eventID))
-            if case .transactionId(let id) = context.itemID {
-                globalSendQueue.remove(roomID: message.roomID, transactionID: id)
+            if shouldUnblockQueue { connectionRecovery.cancelRoomResume(roomID: message.roomID) }
+            retryingSendKeys.remove(key)
+            if let transactionID {
+                globalSendQueue.remove(roomID: message.roomID, transactionID: transactionID)
+                persistSendQueueFailures()
             }
             publishGlobalSendQueue()
         }

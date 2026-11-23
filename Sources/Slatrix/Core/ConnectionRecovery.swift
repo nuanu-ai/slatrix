@@ -104,6 +104,8 @@ final class ConnectionRecovery {
     private var sendQueueHandle: TaskHandle?
     private var sendQueueResumes: [String: Task<Void, Never>] = [:]
     private var sendQueueFailures: [String: Int] = [:]
+    /// Recoverably failed transaction IDs per room so cancelling an unrelated follower leaves backoff intact.
+    private var failedTransactions: [String: Set<String>] = [:]
     private var healthCheckTask: Task<Void, Never>?
     private var lastHealthCheck: ContinuousClock.Instant?
     var isAttached: Bool { service != nil }
@@ -254,30 +256,48 @@ final class ConnectionRecovery {
     private func handleSendQueueUpdate(roomID: String, update: RoomSendQueueUpdate, account: UUID) {
         onSendQueueUpdate?(roomID, update)
         switch update {
-        case .sendError(_, _, let isRecoverable):
+        case .sendError(let transactionID, _, let isRecoverable):
             if isRecoverable {
+                failedTransactions[roomID, default: []].insert(transactionID)
                 resumeSending(roomID: roomID)
                 checkHealthAfterSendFailure(account: account)
             } else {
-                sendQueueResumes.removeValue(forKey: roomID)?.cancel()
+                removeFailedTransaction(roomID: roomID, transactionID: transactionID)
+                if failedTransactions[roomID] == nil {
+                    sendQueueResumes.removeValue(forKey: roomID)?.cancel()
+                }
             }
-        case .sentEvent:
-            cancelRoomResume(roomID: roomID)
-        case .cancelledLocalEvent:
-            cancelRoomResume(roomID: roomID)
-            if feedback.state == .running, let room = try? client?.getRoom(roomId: roomID),
-                !room.isSendQueueEnabled()
-            {
-                room.enableSendQueue(enable: true)
+        case .sentEvent(let transactionID, _):
+            removeFailedTransaction(roomID: roomID, transactionID: transactionID)
+            if failedTransactions[roomID] == nil {
+                cancelRoomResume(roomID: roomID)
+            }
+        case .cancelledLocalEvent(let transactionID):
+            let wasBlockingFailure = removeFailedTransaction(roomID: roomID, transactionID: transactionID)
+            if wasBlockingFailure, failedTransactions[roomID] == nil {
+                cancelRoomResume(roomID: roomID)
+                if feedback.state == .running, let room = try? client?.getRoom(roomId: roomID),
+                    !room.isSendQueueEnabled()
+                {
+                    room.enableSendQueue(enable: true)
+                }
             }
         default:
             break
         }
     }
 
+    @discardableResult
+    private func removeFailedTransaction(roomID: String, transactionID: String) -> Bool {
+        guard var set = failedTransactions[roomID], set.remove(transactionID) != nil else { return false }
+        failedTransactions[roomID] = set.isEmpty ? nil : set
+        return true
+    }
+
     func cancelRoomResume(roomID: String) {
         sendQueueResumes.removeValue(forKey: roomID)?.cancel()
         sendQueueFailures.removeValue(forKey: roomID)
+        failedTransactions.removeValue(forKey: roomID)
     }
 
     // A recoverable send error while sync still claims running can mean a blackholed socket. Probe quickly rather
@@ -305,6 +325,11 @@ final class ConnectionRecovery {
         }
     }
 
+    nonisolated static func isHealthyHTTPResponse(_ response: URLResponse) -> Bool {
+        guard let http = response as? HTTPURLResponse else { return false }
+        return (200..<300).contains(http.statusCode)
+    }
+
     private nonisolated static func probeServerHealth(homeserverURL: String?) async -> Bool {
         guard let homeserverURL, var url = URL(string: homeserverURL) else { return true }
         url.append(path: "_matrix/client/versions")
@@ -312,7 +337,7 @@ final class ConnectionRecovery {
         request.httpMethod = "GET"
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
-            return response is HTTPURLResponse
+            return isHealthyHTTPResponse(response)
         } catch {
             return false
         }
@@ -437,6 +462,7 @@ final class ConnectionRecovery {
         for resume in sendQueueResumes.values { resume.cancel() }
         sendQueueResumes = [:]
         sendQueueFailures = [:]
+        failedTransactions = [:]
         networkTask?.cancel()
         networkTask = nil
         networkRoute = nil
@@ -490,6 +516,7 @@ final class ConnectionRecovery {
         }
         if state == .running, feedback.state != .running, let client {
             sendQueueFailures = [:]
+            failedTransactions = [:]
             let account = generation
             Task { @MainActor [weak self] in
                 guard let self, self.generation == account, self.feedback.state == .running else { return }

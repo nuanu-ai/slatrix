@@ -62,6 +62,10 @@ final class ActionTimeline: Timeline, @unchecked Sendable {
     override func redactEvent(eventOrTransactionId: EventOrTransactionId, reason: String?) async throws {
         try await write("delete:\(MatrixMapping.identifier(eventOrTransactionId))")
     }
+    override func abortSend(itemId: EventOrTransactionId, target: SendTarget) async throws -> Bool {
+        try await write("abort:\(MatrixMapping.identifier(itemId))")
+        return true
+    }
     override func send(msg: RoomMessageEventContentWithoutRelation) async throws -> SendHandle {
         try await write("send")
         return SendHandle(noHandle: .init())

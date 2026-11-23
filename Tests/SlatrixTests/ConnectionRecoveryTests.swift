@@ -1,5 +1,7 @@
 import AppKit
+import Foundation
 import MatrixRustSDK
+import Network
 import Testing
 
 @testable import Slatrix
@@ -423,6 +425,82 @@ struct ConnectionRecoveryTests {
         client.emitQueue(roomID: "!room", update: .cancelledLocalEvent(transactionId: "t1"))
         #expect(await eventually { client.stopped.enabled.all == [true] })
         releaseTimer?.resume()
+        await recovery.stop()
+    }
+
+    @Test("Cancelling a follower message leaves an earlier failed message's backoff and paused queue intact")
+    func cancellingFollowerLeavesFailureBackoffIntact() async throws {
+        var timerCount = 0
+        var releaseTimer: CheckedContinuation<Void, Never>?
+        let recovery = ConnectionRecovery(
+            networkChanges: { AsyncStream { $0.yield(wifiRoute) } }, wakeNotifications: NotificationCenter(),
+            waitToResumeSending: { _ in
+                timerCount += 1
+                await withCheckedContinuation { releaseTimer = $0 }
+            })
+        let service = FakeSyncService(state: .running)
+        let client = SendQueueClient()
+        try await recovery.attach(service, client: client) { _ in }
+        try #require(await eventually { recovery.feedback.state == .running })
+
+        client.failSend(roomID: "!room", transactionID: "t1", recoverable: true)
+        try #require(await eventually { releaseTimer != nil })
+
+        // Follower t2 is cancelled while t1 is still failed: queue must stay paused and backoff intact.
+        client.emitQueue(roomID: "!room", update: .cancelledLocalEvent(transactionId: "t2"))
+        await drainMainActor()
+        #expect(client.stopped.enabled.all.isEmpty && timerCount == 1)
+
+        // Now cancelling the blocking failure t1 itself unblocks the room queue.
+        client.emitQueue(roomID: "!room", update: .cancelledLocalEvent(transactionId: "t1"))
+        #expect(await eventually { client.stopped.enabled.all == [true] })
+        releaseTimer?.resume()
+        await recovery.stop()
+    }
+
+    @Test("Health probe rejects reverse-proxy 502/503 responses and restarts sync")
+    func healthProbeRejectsHTTP502() async throws {
+        let url = URL(string: "http://127.0.0.1/versions")!
+        let ok = try #require(HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil))
+        let badGateway = try #require(HTTPURLResponse(url: url, statusCode: 502, httpVersion: nil, headerFields: nil))
+        let unavailable = try #require(HTTPURLResponse(url: url, statusCode: 503, httpVersion: nil, headerFields: nil))
+        #expect(ConnectionRecovery.isHealthyHTTPResponse(ok))
+        #expect(!ConnectionRecovery.isHealthyHTTPResponse(badGateway))
+        #expect(!ConnectionRecovery.isHealthyHTTPResponse(unavailable))
+
+        // Verify the real URLSession probe treats a loopback HTTP 502 server as unhealthy and restarts sync.
+        let listener = try NWListener(using: .tcp)
+        let queue = DispatchQueue(label: "HealthProbe502")
+        listener.newConnectionHandler = { connection in
+            connection.start(queue: queue)
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { _, _, _, _ in
+                let response = Data("HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
+                connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
+            }
+        }
+        let port: UInt16 = try await withCheckedThrowingContinuation { continuation in
+            listener.stateUpdateHandler = { [listener] state in
+                switch state {
+                case .ready: continuation.resume(returning: listener.port!.rawValue)
+                case .failed(let error): continuation.resume(throwing: error)
+                default: break
+                }
+            }
+            listener.start(queue: queue)
+        }
+        defer { listener.cancel() }
+
+        let recovery = ConnectionRecovery(
+            networkChanges: { AsyncStream { $0.yield(wifiRoute) } }, wakeNotifications: NotificationCenter(),
+            waitToResumeSending: { _ in try await Task.sleep(for: .seconds(60)) },
+            healthCheckInterval: .zero)
+        let service = FakeSyncService(state: .running)
+        let client = SendQueueClient()
+        try await recovery.attach(service, client: client, homeserverURL: "http://127.0.0.1:\(port)") { _ in }
+        try #require(await eventually { recovery.feedback.state == .running })
+
+        client.failSend(roomID: "!room", transactionID: "t1", recoverable: true)
+        #expect(await eventually(timeout: .seconds(5)) { service.stopCount == 1 && service.startCount == 1 })
         await recovery.stop()
     }
 

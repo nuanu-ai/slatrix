@@ -40,11 +40,13 @@ private final class SendTimeline: Timeline, @unchecked Sendable {
     let attachments = Recorder<AttachmentKind>()
     /// A video's poster as it is when it goes up; the upload removes it after.
     let posters = Recorder<Data>()
+    var failAttachmentEnqueue = false
     var failAttachmentJoin = false
     override func sendAttachment(params: UploadParameters, attachment: AttachmentKind) throws
         -> SendAttachmentJoinHandle
     {
         attachments.append(attachment)
+        if failAttachmentEnqueue { throw MatrixServiceError.request("Unreadable attachment") }
         if case .video(_, .file(let path)?) = attachment, let poster = FileManager.default.contents(atPath: path) {
             posters.append(poster)
         }
@@ -183,6 +185,21 @@ struct ComposerSendTests {
             try await service.uploadFile(file, roomID: roomID)
         }
         #expect(service.sends[Conversation(roomID: roomID, threadRootID: nil)] == nil)
+    }
+
+    @Test("A pre-enqueue sendAttachment failure is not wrapped in AttachmentDeliveryError")
+    func preEnqueueAttachmentFailureIsNotDeliveryError() async throws {
+        let scratch = try TemporaryDirectory()
+        let file = try scratch.file("notes.txt", Data("hello".utf8))
+        main.failAttachmentEnqueue = true
+        do {
+            try await service.uploadFile(file, roomID: roomID)
+            Issue.record("Expected pre-enqueue failure to throw")
+        } catch is AttachmentDeliveryError {
+            Issue.record("Pre-enqueue failure must not trigger AttachmentDeliveryError ('Send anyway')")
+        } catch let error as MatrixServiceError {
+            #expect(error.localizedDescription == "Unreadable attachment")
+        }
     }
 
     @Test("A send the SDK refuses to queue fails without being retried", arguments: [false, true])

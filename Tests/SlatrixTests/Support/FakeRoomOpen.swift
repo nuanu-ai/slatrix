@@ -176,6 +176,10 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     var focusedItems: [TimelineItem]?
     /// Why a timeline opened at an older message fails to load, as a lost connection would make it.
     var focusedError: Error?
+    /// Why building any timeline fails; when `buildFailuresRemaining` is set, only that many attempts fail.
+    var buildError: Error?
+    var buildFailuresRemaining: Int?
+    private let buildLock = NSLock()
     /// What a thread's timeline loads; the cache when nil.
     var threadItems: [TimelineItem]?
     /// The older pages of a thread's replies, newest page first.
@@ -201,6 +205,15 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     override func timelineWithConfiguration(configuration: TimelineConfiguration) async throws -> Timeline {
         focuses.append(configuration.focus)
         await buildGate.wait()
+        let nextBuildError: Error? = buildLock.withLock {
+            guard let buildError else { return nil }
+            if let remaining = buildFailuresRemaining {
+                guard remaining > 0 else { return nil }
+                buildFailuresRemaining = remaining - 1
+            }
+            return buildError
+        }
+        if let nextBuildError { throw nextBuildError }
         if case .event = configuration.focus {
             await eventGate.wait()
             if let focusedError { throw focusedError }

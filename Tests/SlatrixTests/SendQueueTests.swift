@@ -377,4 +377,78 @@ struct SendQueueStaleMessageTests {
             SignOutWarning.forExpiredSession(queuedCount: 1, hasFailedSends: true, isSoftLogout: true))
         #expect(both.message.contains("unsent") && both.message.contains("recovery key"))
     }
+
+    @Test("Persisted unrecoverable send failures survive relaunch replay and never promise auto-send offline")
+    func persistedSendFailureSurvivesRelaunch() throws {
+        let folder = try TemporaryDirectory()
+        let roots = [folder.path("support"), folder.path("caches")]
+        let creds = SecureSessionStore(file: folder.path("credentials.json"))
+
+        let first = MatrixService(credentials: creds, storeRoots: roots)
+        first.user = ChatUser(id: "@me:example.org", name: "Me")
+        first.applyConnection(
+            MatrixConnectionFeedback(state: .running, isRetrying: false, canRetry: false, errorMessage: nil))
+        first.handleSendQueueUpdate(
+            roomID: "!bg:example.org",
+            update: .sendError(transactionId: "t1", error: .invalidMimeType(mimeType: "x"), isRecoverable: false))
+        #expect(first.failedSendRoomIDs == ["!bg:example.org"] && first.queuedSendCount == 0)
+
+        // A .newLocalEvent replay for an already-known permanent failure must not clear the failure or mark pending.
+        first.handleSendQueueUpdate(roomID: "!bg:example.org", update: .newLocalEvent(transactionId: "t1"))
+        #expect(first.failedSendRoomIDs == ["!bg:example.org"] && first.queuedSendCount == 0)
+
+        // Relaunch with the same store root: SDK replays persisted local echoes as .newLocalEvent.
+        let relaunched = MatrixService(credentials: creds, storeRoots: roots)
+        relaunched.user = ChatUser(id: "@me:example.org", name: "Me")
+        relaunched.loadPersistedSendFailures(accountID: "@me:example.org")
+        relaunched.beginInitialSendQueueReplay()
+        relaunched.handleSendQueueUpdate(roomID: "!bg:example.org", update: .newLocalEvent(transactionId: "t1"))
+        relaunched.finishInitialSendQueueReplay()
+        #expect(relaunched.failedSendRoomIDs == ["!bg:example.org"] && relaunched.queuedSendCount == 0)
+
+        // If the persisted transaction is no longer present on a later launch, reconciliation prunes the stale record.
+        let cleaned = MatrixService(credentials: creds, storeRoots: roots)
+        cleaned.user = ChatUser(id: "@me:example.org", name: "Me")
+        cleaned.loadPersistedSendFailures(accountID: "@me:example.org")
+        cleaned.beginInitialSendQueueReplay()
+        cleaned.finishInitialSendQueueReplay()
+        #expect(cleaned.failedSendRoomIDs.isEmpty && cleaned.queuedSendCount == 0)
+    }
+
+    @Test("Cancelling a queued follower behind a failed message does not re-enable the paused room queue")
+    func cancellingFollowerDoesNotResumeRoomQueue() async throws {
+        let f = ActionFixture()
+        let service = f.service
+        f.room.enableSendQueue(enable: false)
+        service.applyConnection(
+            MatrixConnectionFeedback(state: .running, isRetrying: false, canRetry: false, errorMessage: nil))
+        func localEvent(_ tx: String, state: EventSendState) -> EventTimelineItem {
+            EventTimelineItem(
+                isRemote: false, eventOrTransactionId: .transactionId(transactionId: tx),
+                sender: f.userID, senderProfile: .unavailable, forwarder: nil, forwarderProfile: nil,
+                isOwn: true, isEditable: true,
+                content: .msgLike(
+                    content: MsgLikeContent(
+                        kind: .message(
+                            content: MessageContent(
+                                msgType: .text(content: TextMessageContent(body: tx, formatted: nil)), body: tx,
+                                isEdited: false, mentions: nil)),
+                        inReplyTo: nil, threadRoot: nil, threadSummary: nil)),
+                reactions: [], eventTypeRaw: "m.room.message", timestamp: 1_000,
+                localSendState: state, editSendState: nil, redactionSendState: nil, localCreatedAt: nil,
+                readReceipts: [:], origin: nil, canBeRepliedTo: true,
+                lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
+        }
+        let failed = localEvent("tx1", state: .sendingFailed(error: .genericApiError(msg: "502"), isRecoverable: true))
+        let follower = localEvent("tx2", state: .notSentYet(progress: nil))
+        service.projectMediaCaptionForChecks(
+            [FakeTimelineItem(failed), FakeTimelineItem(follower)], roomID: f.roomID, inThread: false)
+        let followerMessage = try #require(service.messages.first { $0.eventID == "tx2" })
+        #expect(try await service.cancelMessage(followerMessage))
+        #expect(!f.room.isSendQueueEnabled())
+
+        let failedMessage = try #require(service.messages.first { $0.eventID == "tx1" })
+        #expect(try await service.cancelMessage(failedMessage))
+        #expect(f.room.isSendQueueEnabled())
+    }
 }

@@ -478,10 +478,12 @@ struct RootView: View {
                 if let request = pendingMatrixLink, request.navigation != generation { cancelMatrixLink() }
             }
             .onChange(of: matrix.connectionState) { previous, current in
-                if previous != .running, current == .running, threadLoadError != nil, let root = threadRoot,
-                    openingThreadID == nil
-                {
-                    openThread(root, room: root.roomID, openedWith: matrix.threadOpening?.openedWith)
+                if previous != .running, current == .running {
+                    if threadLoadError != nil, let root = threadRoot, openingThreadID == nil {
+                        openThread(root, room: root.roomID, openedWith: matrix.threadOpening?.openedWith)
+                    } else if threadOpenError != nil, let request = pendingThreadOpen, isCurrentThreadOpen(request) {
+                        openThread(request.message, openedWith: request.openedWith)
+                    }
                 }
             }
     }
@@ -1996,9 +1998,11 @@ struct RootView: View {
     }
     private func loadThread(
         _ thread: ChatMessage, generation: UUID, identity: ComposerIdentity, restoringReply: MessageReplyTarget?,
-        openedWith: Int?
+        openedWith: Int?, autoRetried: Bool = false
     ) async {
         let id = thread.roomID
+        let startedReconnect = matrix.reconnectCount
+        let startedOffline = matrix.connectionState != .running
         threadRoot = thread
         openingThreadID = thread.eventID
         do {
@@ -2016,6 +2020,14 @@ struct RootView: View {
         } catch {
             guard navigationGeneration == generation, composerIdentity == identity, matrix.selectedRoomID == id
             else { return }
+            if !autoRetried, matrix.connectionState == .running,
+                startedOffline || matrix.reconnectCount != startedReconnect
+            {
+                await loadThread(
+                    thread, generation: generation, identity: identity, restoringReply: restoringReply,
+                    openedWith: openedWith, autoRetried: true)
+                return
+            }
             openingThreadID = nil
             if let restoringReply, restoringReply.isCurrent(replyTarget, owner: replyOwner) {
                 replyOpening = false
@@ -2049,10 +2061,12 @@ struct RootView: View {
             openThread(message, openedWith: openedWith(message))
         }
     }
-    private func openThread(_ message: ChatMessage, openedWith: Int? = nil) {
+    private func openThread(_ message: ChatMessage, openedWith: Int? = nil, autoRetried: Bool = false) {
         guard pendingRoomID == nil, localReady,
             matrix.rooms.contains(where: { $0.id == message.roomID && $0.membership == "join" })
         else { return }
+        let startedReconnect = matrix.reconnectCount
+        let startedOffline = matrix.connectionState != .running
         let rootID = message.threadRootID ?? message.eventID
         let candidates = [message] + matrix.messages + matrix.threadMessages + matrix.threadFeed.roots
         if matrix.isPreview {
@@ -2088,6 +2102,12 @@ struct RootView: View {
             } catch {
                 guard isCurrentThreadOpen(request) else {
                     if pendingThreadOpen?.id == request.id { cancelThreadOpen() }
+                    return
+                }
+                if !autoRetried, matrix.connectionState == .running,
+                    startedOffline || matrix.reconnectCount != startedReconnect
+                {
+                    openThread(message, openedWith: openedWith, autoRetried: true)
                     return
                 }
                 threadOpenTask = nil
