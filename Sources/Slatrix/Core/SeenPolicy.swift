@@ -15,21 +15,25 @@ enum SeenPolicy {
 }
 
 extension SeenPolicy {
-    /// What each group of your messages shows by its time, by the group's first row: the readers of its newest sent
-    /// message. Others' groups and groups still sending show nothing.
+    /// What each group of your messages shows by its time, by the group's first row: everyone who has read any sent
+    /// message in the group, so sending a follow-up never downgrades an earlier read receipt back to unread.
     static func headers(_ rows: [TimelineLayout.Row], me: String) -> [String: [String]] {
         let messages = rows.compactMap { row -> ChatMessage? in
             if case .message(let message, _, _) = row.kind { message } else { nil }
         }
-        let readers = readers(messages.map { ($0.id, $0.senderID, $0.readBy) }, me: me)
+        let byMessage = Self.readers(messages.map { ($0.id, $0.senderID, $0.readBy) }, me: me)
         var result: [String: [String]] = [:]
-        var newest: [String]?
+        var groupReaders: Set<String>?
         for row in rows.reversed() {
             guard case .message(let message, let grouped, _) = row.kind else { continue }
-            if newest == nil, message.senderID == me, message.sendState == "sent" { newest = readers[message.id] }
+            if message.senderID == me, message.sendState == "sent", let seen = byMessage[message.id] {
+                var combined = groupReaders ?? []
+                combined.formUnion(seen)
+                groupReaders = combined
+            }
             if !grouped {
-                if message.senderID == me, let newest { result[row.id] = newest }
-                newest = nil
+                if message.senderID == me, let groupReaders { result[row.id] = groupReaders.sorted() }
+                groupReaders = nil
             }
         }
         return result

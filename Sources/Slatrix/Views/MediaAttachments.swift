@@ -19,15 +19,19 @@ struct AttachmentView: View {
     let message: ChatMessage
     let attachment: MessageAttachment
     var collapsed = false
+    var pendingSend = false
     var actions = AttachmentActions()
 
     var body: some View {
         Group {
             if message.isViewerMedia {
                 InlineMedia(
-                    matrix: matrix, message: message, attachment: attachment, collapsed: collapsed, actions: actions)
+                    matrix: matrix, message: message, attachment: attachment, collapsed: collapsed,
+                    pendingSend: pendingSend, actions: actions)
             } else {
-                FileCard(matrix: matrix, message: message, attachment: attachment, actions: actions)
+                FileCard(
+                    matrix: matrix, message: message, attachment: attachment, pendingSend: pendingSend,
+                    actions: actions)
             }
         }
         // An edit that replaces the file starts over: nothing loaded for the old one carries across.
@@ -151,6 +155,7 @@ private struct InlineMedia: View {
     let message: ChatMessage
     let attachment: MessageAttachment
     let collapsed: Bool
+    let pendingSend: Bool
     let actions: AttachmentActions
     @State private var still: CGImage?
     @State private var animation: NSImage?
@@ -177,6 +182,7 @@ private struct InlineMedia: View {
                 }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
             }.buttonStyle(.row).help(collapsed ? "Show" : "Hide")
                 .accessibilityLabel("\(collapsed ? "Show" : "Hide") \(attachment.name)")
+                .opacity(pendingSend ? 0.5 : 1)
             if !collapsed { media }
         }
     }
@@ -198,6 +204,12 @@ private struct InlineMedia: View {
                 }
                 .overlay { if isVideo { videoOverlay } }
                 .overlay(alignment: .bottomLeading) { if !playsHere { badge.padding(m.sp8) } }
+                .opacity(pendingSend ? 0.5 : 1)
+                .overlay(alignment: .bottom) {
+                    if pendingSend, let progress = message.uploadProgress {
+                        UploadProgressBar(progress: progress)
+                    }
+                }
                 .clipShape(shape)
                 .overlay(shape.strokeBorder(colors.border))
                 .aspectRatio(box.width / box.height, contentMode: .fit)
@@ -356,6 +368,7 @@ private struct FileCard: View {
     let matrix: MatrixService
     let message: ChatMessage
     let attachment: MessageAttachment
+    let pendingSend: Bool
     let actions: AttachmentActions
     @State private var hovering = false
     @State private var downloading = false
@@ -373,7 +386,15 @@ private struct FileCard: View {
                 Spacer(minLength: m.sp8)
             }
             .padding(m.sp12).frame(maxWidth: m(Self.maxWidth), alignment: .leading)
-            .background(colors.canvas, in: shape).overlay(shape.strokeBorder(colors.border))
+            .opacity(pendingSend ? 0.5 : 1)
+            .background(colors.canvas, in: shape)
+            .overlay(alignment: .bottom) {
+                if pendingSend, let progress = message.uploadProgress {
+                    UploadProgressBar(progress: progress)
+                }
+            }
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(colors.border))
         }
         .buttonStyle(.row).help("Open \(attachment.name)")
         .overlay(alignment: .topTrailing) {
@@ -396,6 +417,26 @@ private struct FileCard: View {
             }
                 ?? []))
             .joined(separator: " · ")
+    }
+}
+
+/// A quiet hairline progress bar overlaid along the bottom edge of a sending attachment without shifting row height.
+private struct UploadProgressBar: View {
+    let progress: Double
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+
+    var body: some View {
+        let clamped = min(1, max(0, progress))
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                appearance.colors.sunken
+                appearance.colors.accentFill.frame(width: proxy.size.width * clamped)
+            }
+        }
+        .frame(height: m(3))
+        .accessibilityLabel("Uploading")
+        .accessibilityValue("\(Int((clamped * 100).rounded())) percent")
     }
 }
 

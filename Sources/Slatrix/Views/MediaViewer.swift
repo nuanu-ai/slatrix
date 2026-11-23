@@ -59,7 +59,7 @@ private struct MediaViewerPage: View {
         }
         .background(colors.mediaBackdrop)
         .accessibilityAddTraits(.isModal)
-        .task(id: message.eventID) { await load() }
+        .task(id: "\(message.eventID)|\(message.sendState)") { await load() }
     }
 
     private func content(_ loaded: Loaded?) -> MediaStageView.Content {
@@ -86,6 +86,16 @@ private struct MediaViewerPage: View {
             VStack(spacing: m.sp12) {
                 Text(error).font(m.font(.body)).foregroundStyle(colors.onMedia)
                 Button("Retry") { Task { await load() } }.buttonStyle(.secondary)
+            }
+        } else if message.sendState != "sent" {
+            if !message.isViewerMedia {
+                VStack(spacing: m.sp16) {
+                    FileTypeIcon(kind: attachment.fileKind, side: 96, glyph: .hero)
+                    Text(attachment.name).font(m.font(.title3, .semibold)).foregroundStyle(colors.onMedia)
+                    Text("Available once sent.").font(m.font(.body)).foregroundStyle(colors.onMedia).opacity(0.75)
+                }
+            } else if message.kind == "m.video" || matrix.cachedMediaImage(message) == nil {
+                Text("Still sending…").font(m.font(.body)).foregroundStyle(colors.onMedia).opacity(0.8)
             }
         } else if !message.isViewerMedia, loaded?.lease == nil {
             VStack(spacing: m.sp16) {
@@ -180,6 +190,7 @@ private struct MediaViewerPage: View {
     private func load() async {
         let eventID = message.eventID
         loaded = nil
+        guard message.sendState == "sent" else { return }
         do {
             if message.isViewerMedia && message.kind != "m.video" {
                 let image = try await matrix.loadFullImage(message)
@@ -190,7 +201,12 @@ private struct MediaViewerPage: View {
                 guard !Task.isCancelled, lease.isCurrent else { return }
                 loaded = Loaded(eventID: eventID, lease: lease)
             }
-        } catch is CancellationError {} catch {
+        } catch is CancellationError {
+            guard !Task.isCancelled else { return }
+            if !message.isViewerMedia || message.kind == "m.video" || matrix.cachedMediaImage(message) == nil {
+                loaded = Loaded(eventID: eventID, error: "This attachment isn’t available yet.")
+            }
+        } catch {
             guard !Task.isCancelled else { return }
             // An image keeps showing its thumbnail; the full picture is a nicety.
             if !message.isViewerMedia || message.kind == "m.video" || matrix.cachedMediaImage(message) == nil {

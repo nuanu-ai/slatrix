@@ -113,6 +113,16 @@ struct MediaCaptionTests {
         #expect(c.f.thread.reads.all.isEmpty && c.f.thread.writes.all.isEmpty)
     }
 
+    @Test("Queued caption edits never claim green 'Caption saved' before confirmation, especially offline")
+    func captionSaveNoticeIsTruthful() {
+        let offline = MediaCaptionSaveNotice.forConnection(.offline)
+        #expect(offline.symbol == "clock" && offline.text.contains("reconnect"))
+        let connecting = MediaCaptionSaveNotice.forConnection(.connecting)
+        #expect(connecting.symbol == "clock" && connecting.text.contains("reconnect"))
+        let online = MediaCaptionSaveNotice.forConnection(.running)
+        #expect(online.text != "Caption saved" && online.symbol == "clock")
+    }
+
     enum Change: String, CaseIterable, CustomTestStringConvertible {
         case caption, formatting, encryptedSource
         var testDescription: String { rawValue }

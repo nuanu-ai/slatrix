@@ -91,20 +91,30 @@ private struct SendQueueTracker {
 
     var queuedCount: Int { pending.values.reduce(0) { $0 + $1.count } }
 
-    func failedRoomIDs(suppressingRecoverable: Bool) -> Set<String> {
+    func failedRoomIDs(
+        suppressingRecoverable: Bool, excluding retryingKeys: Set<SendQueueMessageKey> = []
+    ) -> Set<String> {
         var rooms = Set<String>()
         for (roomID, roomFailures) in failures {
-            if roomFailures.values.contains(where: { !suppressingRecoverable || !$0 }) {
+            if roomFailures.contains(where: { id, isRecoverable in
+                !retryingKeys.contains(SendQueueMessageKey(roomID: roomID, messageID: id))
+                    && (!suppressingRecoverable || !isRecoverable)
+            }) {
                 rooms.insert(roomID)
             }
         }
         return rooms
     }
 
-    func hasFailure(in roomID: String, excluding excludedID: String? = nil, suppressingRecoverable: Bool) -> Bool {
+    func hasFailure(
+        in roomID: String, excluding excludedIDs: Set<String> = [],
+        retryingKeys: Set<SendQueueMessageKey> = [], suppressingRecoverable: Bool
+    ) -> Bool {
         guard let roomFailures = failures[roomID] else { return false }
         return roomFailures.contains { id, isRecoverable in
-            id != excludedID && (!suppressingRecoverable || !isRecoverable)
+            !excludedIDs.contains(id)
+                && !retryingKeys.contains(SendQueueMessageKey(roomID: roomID, messageID: id))
+                && (!suppressingRecoverable || !isRecoverable)
         }
     }
 
@@ -118,6 +128,69 @@ private struct SendQueueTracker {
         guard var map = failures[roomID] else { return }
         map.removeValue(forKey: transactionID)
         failures[roomID] = map.isEmpty ? nil : map
+    }
+}
+
+struct SendCancelPrompt: Equatable {
+    let title: String
+    let message: String
+    let action: String
+    let cancel: String
+
+    static func copy(failed: Bool, offline: Bool) -> Self {
+        if failed {
+            return Self(title: "Delete message?", message: "This can’t be undone.", action: "Delete", cancel: "Cancel")
+        }
+        if offline {
+            return Self(
+                title: "Cancel sending this message?",
+                message: "You’re offline, so this message hasn’t been sent yet.",
+                action: "Cancel sending", cancel: "Keep sending")
+        }
+        return Self(
+            title: "Cancel sending this message?",
+            message: "It may already have been delivered.",
+            action: "Cancel sending", cancel: "Keep sending")
+    }
+}
+
+enum SendWaitStatus: Hashable {
+    case sending
+    case waitingToReconnect
+    case blockedByEarlierFailure
+    case savingEdit
+    case deleting
+
+    var label: String {
+        switch self {
+        case .sending: "Sending…"
+        case .waitingToReconnect: "Waiting to reconnect"
+        case .blockedByEarlierFailure: "Waiting on an earlier message"
+        case .savingEdit: "Saving edit…"
+        case .deleting: "Deleting…"
+        }
+    }
+
+    var showsImmediately: Bool {
+        self == .waitingToReconnect || self == .blockedByEarlierFailure
+    }
+
+    static func resolve(
+        pendingSend: Bool, sendFailure: MessageSendFailure?, pendingChange: ChatMessage.PendingChange?,
+        waitingToReconnect: Bool, blockedByEarlierFailure: Bool
+    ) -> Self? {
+        if pendingSend {
+            guard sendFailure == nil else { return nil }
+            if waitingToReconnect { return .waitingToReconnect }
+            if blockedByEarlierFailure { return .blockedByEarlierFailure }
+            return .sending
+        }
+        guard let pendingChange else { return nil }
+        if waitingToReconnect { return .waitingToReconnect }
+        switch pendingChange {
+        case .editing: return .savingEdit
+        case .deleting: return .deleting
+        }
     }
 }
 
@@ -467,12 +540,29 @@ enum MatrixMapping {
         result.readBy = Array(item.readReceipts.keys)
         if let state = item.localSendState {
             switch state {
-            case .notSentYet: result.sendState = "sending"
+            case .notSentYet(let progress):
+                result.sendState = "sending"
+                if let progress, progress.progress.total > 0 {
+                    result.uploadProgress = min(
+                        1, max(0, Double(progress.progress.current) / Double(progress.progress.total)))
+                }
             case .sendingFailed: result.sendState = "failed"
             case .sent: result.sendState = "sent"
             }
         }
+        result.pendingChange = pendingChange(edit: item.editSendState, redaction: item.redactionSendState)
         return result
+    }
+
+    private static func pendingChange(edit: EventSendState?, redaction: EventSendState?) -> ChatMessage.PendingChange? {
+        if let redaction, !isSent(redaction) { return .deleting }
+        if let edit, !isSent(edit) { return .editing }
+        return nil
+    }
+
+    private static func isSent(_ state: EventSendState) -> Bool {
+        if case .sent = state { return true }
+        return false
     }
 
     static func searchMessages(_ results: [SearchServiceResult], roomID: String?) -> [ChatMessage] {
@@ -754,6 +844,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var failedSendRoomIDs = Set<String>()
     private(set) var queuedSendCount = 0
     private(set) var pendingSendActions = Set<SendQueueMessageKey>()
+    /// Failed messages currently retrying so the row immediately transitions out of red "Not delivered".
+    private(set) var retryingSendKeys = Set<SendQueueMessageKey>()
     /// Messages and files sent from this device so far, by the room and the thread they went to.
     private(set) var sends: [Conversation: Int] = [:]
     private var mainSendFailures: [SendQueueMessageKey: MessageSendFailure] = [:]
@@ -1321,6 +1413,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         pinnedMessages.attach(newClient)
         sharedFiles.attach(newClient)
         homeserverURL = try newClient.session().homeserverUrl
+        newClient.enableSendQueueUploadProgress(enable: true)
         let generation = sessionGeneration
         clientDelegateHandle = try? newClient.setDelegate(
             delegate: SessionAuthObserver { [weak self] isSoftLogout in
@@ -1538,6 +1631,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         failedSendRoomIDs = []
         queuedSendCount = 0
         pendingSendActions = []
+        retryingSendKeys = []
         let oldPersistence = persistence
         persistence = nil
         await Task.detached(priority: .userInitiated) { oldPersistence?.deactivate() }.value
@@ -2316,6 +2410,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             firstUnreadEventID = UnreadMapping.firstUnreadEventID(in: marks)
         }
         sendFailures = mainSendFailures.merging(threadSendFailures) { _, latest in latest }
+        if !retryingSendKeys.isEmpty {
+            let remaining = retryingSendKeys.filter { $0.roomID != roomID || sendFailures[$0] != nil }
+            if remaining != retryingSendKeys {
+                retryingSendKeys = remaining
+                publishGlobalSendQueue()
+            }
+        }
         return projected
     }
 
@@ -3635,12 +3736,45 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
     func handleSendQueueUpdate(roomID: String, update: RoomSendQueueUpdate) {
         globalSendQueue.apply(roomID: roomID, update: update)
+        switch update {
+        case .sendError(let id, _, _), .sentEvent(let id, _), .cancelledLocalEvent(let id):
+            retryingSendKeys.remove(SendQueueMessageKey(roomID: roomID, messageID: id))
+        case .newLocalEvent, .replacedLocalEvent, .retryEvent, .mediaUpload:
+            break
+        }
         publishGlobalSendQueue()
+    }
+    func displayedSendFailure(for key: SendQueueMessageKey) -> MessageSendFailure? {
+        guard !retryingSendKeys.contains(key), let failure = sendFailures[key] else { return nil }
+        return failure.shown(offline: suppressesRecoverableSendFailures)
+    }
+    func displayedSendFailures() -> [SendQueueMessageKey: MessageSendFailure] {
+        let suppressing = suppressesRecoverableSendFailures
+        var result: [SendQueueMessageKey: MessageSendFailure] = [:]
+        for (key, failure) in sendFailures where !retryingSendKeys.contains(key) {
+            if let shown = failure.shown(offline: suppressing) { result[key] = shown }
+        }
+        return result
+    }
+    /// Whether `roomID` has a displayed send failure outside `visibleIDs` (e.g., scrolled away or on the other surface).
+    func hasExternalSendFailure(in roomID: String, visibleIDs: Set<String>) -> Bool {
+        let suppressing = suppressesRecoverableSendFailures
+        if globalSendQueue.hasFailure(
+            in: roomID, excluding: visibleIDs, retryingKeys: retryingSendKeys, suppressingRecoverable: suppressing)
+        {
+            return true
+        }
+        return sendFailures.contains { key, failure in
+            key.roomID == roomID && !visibleIDs.contains(key.messageID) && !retryingSendKeys.contains(key)
+                && failure.shown(offline: suppressing) != nil
+        }
     }
     private func publishGlobalSendQueue() {
         let suppressing = suppressesRecoverableSendFailures
-        var failed = globalSendQueue.failedRoomIDs(suppressingRecoverable: suppressing)
-        for (key, failure) in sendFailures where !suppressing || failure.kind != .recoverable {
+        var failed = globalSendQueue.failedRoomIDs(
+            suppressingRecoverable: suppressing, excluding: retryingSendKeys)
+        for (key, failure) in sendFailures
+        where !retryingSendKeys.contains(key) && (!suppressing || failure.kind != .recoverable) {
             failed.insert(key.roomID)
         }
         if failed != failedSendRoomIDs { failedSendRoomIDs = failed }
@@ -3950,9 +4084,22 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard let failure = sendFailure(for: message) else {
             throw MatrixServiceError.request("This message is not waiting for a manual retry.")
         }
+        let key = SendQueueMessageKey(roomID: message.roomID, messageID: message.eventID)
         try await performSendAction(context, message: message) {
-            _ = try await SendQueueActions.retry(
-                failure, itemID: context.itemID, room: context.room, timeline: context.timeline)
+            self.retryingSendKeys.insert(key)
+            self.publishGlobalSendQueue()
+            do {
+                let retried = try await SendQueueActions.retry(
+                    failure, itemID: context.itemID, room: context.room, timeline: context.timeline)
+                if !retried {
+                    self.retryingSendKeys.remove(key)
+                    self.publishGlobalSendQueue()
+                }
+            } catch {
+                self.retryingSendKeys.remove(key)
+                self.publishGlobalSendQueue()
+                throw error
+            }
         }
     }
 
@@ -3968,10 +4115,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
         if cancelled {
             connectionRecovery.cancelRoomResume(roomID: message.roomID)
+            retryingSendKeys.remove(SendQueueMessageKey(roomID: message.roomID, messageID: message.eventID))
             if case .transactionId(let id) = context.itemID {
                 globalSendQueue.remove(roomID: message.roomID, transactionID: id)
-                publishGlobalSendQueue()
             }
+            publishGlobalSendQueue()
         }
         return cancelled
     }

@@ -105,6 +105,48 @@ struct MatrixMappingTests {
         #expect(html.formattedBody == "<b>Rich body</b>")
         #expect(unknown.formattedBody == nil && unknown.body == "Literal <tag>")
     }
+
+    @Test("Upload progress, pending edits, and pending deletions project onto ChatMessage")
+    func uploadProgressAndPendingChanges() {
+        func makeItem(
+            local: EventSendState? = nil, edit: EventSendState? = nil, redaction: EventSendState? = nil
+        ) -> EventTimelineItem {
+            EventTimelineItem(
+                isRemote: local == nil,
+                eventOrTransactionId: local == nil ? .eventId(eventId: "$ev") : .transactionId(transactionId: "tx"),
+                sender: "@alice:example.org", senderProfile: .unavailable, forwarder: nil, forwarderProfile: nil,
+                isOwn: true, isEditable: true, content: .msgLike(content: content()), reactions: [],
+                eventTypeRaw: "m.room.message", timestamp: 0, localSendState: local, editSendState: edit,
+                redactionSendState: redaction, localCreatedAt: nil, readReceipts: [:], origin: nil,
+                canBeRepliedTo: true, lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
+        }
+        let half = MatrixMapping.message(
+            makeItem(
+                local: .notSentYet(
+                    progress: MediaUploadProgress(index: 0, progress: AbstractProgress(current: 50, total: 100)))),
+            roomID: "!r", ownUserID: "@alice:example.org")
+        #expect(half?.uploadProgress == 0.5)
+
+        let zeroTotal = MatrixMapping.message(
+            makeItem(
+                local: .notSentYet(
+                    progress: MediaUploadProgress(index: 0, progress: AbstractProgress(current: 10, total: 0)))),
+            roomID: "!r", ownUserID: "@alice:example.org")
+        #expect(zeroTotal?.uploadProgress == nil)
+
+        let editing = MatrixMapping.message(
+            makeItem(edit: .notSentYet(progress: nil)), roomID: "!r", ownUserID: "@alice:example.org")
+        #expect(editing?.pendingChange == .editing)
+
+        let edited = MatrixMapping.message(
+            makeItem(edit: .sent(eventId: "$edit")), roomID: "!r", ownUserID: "@alice:example.org")
+        #expect(edited?.pendingChange == nil)
+
+        let deleting = MatrixMapping.message(
+            makeItem(edit: .notSentYet(progress: nil), redaction: .notSentYet(progress: nil)),
+            roomID: "!r", ownUserID: "@alice:example.org")
+        #expect(deleting?.pendingChange == .deleting)
+    }
 }
 
 struct ReplyPreviewMappingTests {

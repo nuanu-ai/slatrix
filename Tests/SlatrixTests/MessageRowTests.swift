@@ -137,4 +137,30 @@ struct MessageRowTests {
         #expect(await eventually { host.sizeThatFits(in: offered).height > 0 })
         #expect(host.sizeThatFits(in: offered).width <= offered.width)
     }
+
+    @Test("A message waiting on an earlier failed send shows why it is blocked; a pending edit keeps its row height")
+    func blockedAndPendingEditRowsMeasure() {
+        var sending = message([])
+        sending.sendState = "sending"
+        let normalHeight = NSHostingView(
+            rootView: MessageRow(message: sending, own: true, sendWaitStatus: .sending).frame(width: 400)
+                .environmentObject(AppearanceStore()).environment(\.metrics, m)
+        ).fittingSize.height
+        let blockedHeight = NSHostingView(
+            rootView: MessageRow(message: sending, own: true, sendWaitStatus: .blockedByEarlierFailure).frame(
+                width: 400
+            )
+            .environmentObject(AppearanceStore()).environment(\.metrics, m)
+        ).fittingSize.height
+        #expect(blockedHeight > normalHeight)
+
+        var editing = message([])
+        editing.pendingChange = .editing
+        let sentHeight = height(message([]), width: 400)
+        let editingHeight = NSHostingView(
+            rootView: MessageRow(message: editing, own: true, sendWaitStatus: .savingEdit).frame(width: 400)
+                .environmentObject(AppearanceStore()).environment(\.metrics, m)
+        ).fittingSize.height
+        #expect(editingHeight == sentHeight)
+    }
 }

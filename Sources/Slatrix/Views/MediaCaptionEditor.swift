@@ -34,7 +34,8 @@ struct MediaCaptionEditor: View {
                 : ModalAction("Save", disabled: !canSave, shortcut: nil, action: save)
         ) {
             if accepted {
-                Label("Caption saved", systemImage: "checkmark.circle").foregroundStyle(colors.success)
+                let savedNotice = MediaCaptionSaveNotice.forConnection(matrix.connectionState)
+                Label(savedNotice.text, systemImage: savedNotice.symbol).foregroundStyle(colors.textSecondary)
             } else {
                 Text(snapshot?.filename ?? target.message.attachment?.name ?? "Attachment")
                     .font(m.font(.body, .semibold)).textSelection(.enabled)

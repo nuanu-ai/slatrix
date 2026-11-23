@@ -252,4 +252,93 @@ struct SendQueueStaleMessageTests {
             roomID: "!bg:example.org", update: .sentEvent(transactionId: "t1", eventId: "$sent"))
         #expect(service.failedSendRoomIDs.isEmpty && service.queuedSendCount == 0)
     }
+
+    @Test("Recoverable failures are suppressed while reconnecting, not only while offline")
+    func recoverableFailuresSuppressedWhileReconnecting() {
+        let service = MatrixService.scratch()
+        for state in [MatrixConnectionState.offline, .connecting, .stopped, .failed] {
+            service.applyConnection(
+                MatrixConnectionFeedback(state: state, isRetrying: false, canRetry: false, errorMessage: nil))
+            #expect(service.suppressesRecoverableSendFailures)
+        }
+        service.applyConnection(
+            MatrixConnectionFeedback(state: .running, isRetrying: false, canRetry: false, errorMessage: nil))
+        #expect(!service.suppressesRecoverableSendFailures)
+    }
+
+    @Test("Retrying a failed message immediately hides its red failure until it fails again or resolves")
+    func retryImmediatelySuppressesFailure() async throws {
+        let f = ActionFixture()
+        let service = f.service
+        f.room.enableSendQueue(enable: false)
+        service.applyConnection(
+            MatrixConnectionFeedback(state: .running, isRetrying: false, canRetry: false, errorMessage: nil))
+        let failedEvent = EventTimelineItem(
+            isRemote: false, eventOrTransactionId: .transactionId(transactionId: "tx1"),
+            sender: f.userID, senderProfile: .unavailable, forwarder: nil, forwarderProfile: nil,
+            isOwn: true, isEditable: true,
+            content: .msgLike(
+                content: MsgLikeContent(
+                    kind: .message(
+                        content: MessageContent(
+                            msgType: .text(content: TextMessageContent(body: "Hi", formatted: nil)), body: "Hi",
+                            isEdited: false, mentions: nil)),
+                    inReplyTo: nil, threadRoot: nil, threadSummary: nil)),
+            reactions: [], eventTypeRaw: "m.room.message", timestamp: 1_000,
+            localSendState: .sendingFailed(error: .genericApiError(msg: "502"), isRecoverable: true),
+            editSendState: nil, redactionSendState: nil, localCreatedAt: nil, readReceipts: [:], origin: nil,
+            canBeRepliedTo: true, lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
+        service.projectMediaCaptionForChecks([FakeTimelineItem(failedEvent)], roomID: f.roomID, inThread: false)
+        let message = try #require(service.messages.first)
+        let key = SendQueueMessageKey(roomID: f.roomID, messageID: "tx1")
+        #expect(service.displayedSendFailure(for: key) != nil)
+
+        try await service.retryMessage(message)
+        #expect(service.displayedSendFailure(for: key) == nil)
+        #expect(service.retryingSendKeys.contains(key))
+
+        service.handleSendQueueUpdate(
+            roomID: f.roomID,
+            update: .sendError(transactionId: "tx1", error: .genericApiError(msg: "502"), isRecoverable: true))
+        #expect(!service.retryingSendKeys.contains(key))
+        #expect(service.displayedSendFailure(for: key) != nil)
+    }
+
+    @Test("Offline cancel prompt does not falsely warn that the message may already have been delivered")
+    func cancelPromptCopy() {
+        let offline = SendCancelPrompt.copy(failed: false, offline: true)
+        #expect(!offline.message.contains("already have been delivered"))
+        #expect(offline.message.contains("offline"))
+
+        let online = SendCancelPrompt.copy(failed: false, offline: false)
+        #expect(online.message.contains("already have been delivered"))
+
+        let failed = SendCancelPrompt.copy(failed: true, offline: true)
+        #expect(failed.title == "Delete message?" && failed.action == "Delete")
+    }
+
+    @Test("Wait status distinguishes sending, reconnecting, head-of-line blocking, edits, and deletions")
+    func sendWaitStatusResolution() {
+        #expect(
+            SendWaitStatus.resolve(
+                pendingSend: true, sendFailure: nil, pendingChange: nil,
+                waitingToReconnect: false, blockedByEarlierFailure: false) == .sending)
+        #expect(
+            SendWaitStatus.resolve(
+                pendingSend: true, sendFailure: nil, pendingChange: nil,
+                waitingToReconnect: true, blockedByEarlierFailure: false) == .waitingToReconnect)
+        let blocked = SendWaitStatus.resolve(
+            pendingSend: true, sendFailure: nil, pendingChange: nil,
+            waitingToReconnect: false, blockedByEarlierFailure: true)
+        #expect(blocked == .blockedByEarlierFailure && blocked?.showsImmediately == true)
+        #expect(blocked?.label == "Waiting on an earlier message")
+        #expect(
+            SendWaitStatus.resolve(
+                pendingSend: false, sendFailure: nil, pendingChange: .editing,
+                waitingToReconnect: false, blockedByEarlierFailure: false) == .savingEdit)
+        #expect(
+            SendWaitStatus.resolve(
+                pendingSend: false, sendFailure: nil, pendingChange: .deleting,
+                waitingToReconnect: false, blockedByEarlierFailure: false) == .deleting)
+    }
 }
