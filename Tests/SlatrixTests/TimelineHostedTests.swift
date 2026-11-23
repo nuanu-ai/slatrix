@@ -1812,7 +1812,7 @@ struct MessageRowLayoutTests {
         #expect(height(pane: 700) > height(pane: 744))
     }
 
-    @Test("A sender's one-line message takes 49 pt with the gap above it, and each one under it 24")
+    @Test("A sender's one-line message takes 50 pt with the gap above it, and each one under it 24")
     func rhythm() {
         let appearance = AppearanceStore()
         let saved = appearance.density
@@ -1826,7 +1826,7 @@ struct MessageRowLayoutTests {
                 .environmentObject(appearance)
             return NSHostingController(rootView: row).sizeThatFits(in: CGSize(width: 744, height: 10_000)).height
         }
-        #expect(abs(height(grouped: false) - 49) <= 0.5, "\(height(grouped: false))")
+        #expect(abs(height(grouped: false) - 50) <= 0.5, "\(height(grouped: false))")
         #expect(abs(height(grouped: true) - 24) <= 0.5, "\(height(grouped: true))")
     }
 

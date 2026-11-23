@@ -3,11 +3,13 @@ import SwiftUI
 
 /// Text roles at 100% zoom: the macOS text styles, plus Reading for messages. Views pick a role, never a point size.
 enum TextRole: CaseIterable {
-    /// 11/14: times, section titles, day dividers, badges, captions.
+    /// 11/14: times, section titles, day dividers, badges, (edited).
     case subheadline
-    /// 13/16: the sidebar, lists, buttons, fields and messages' authors. Unread is semibold.
+    /// 12/16: channel topics, reply previews, inline errors, thread previews.
+    case caption
+    /// 13/16: the sidebar, lists, buttons and fields. Unread is semibold.
     case body
-    /// 14/20: messages and the composer. The one size off the macOS scale.
+    /// 14/20: messages, message authors and the composer. The one size off the macOS scale.
     case reading
     /// 15/20: window, thread and sheet titles; the space name. A message's h3 to h6.
     case title3
@@ -23,6 +25,7 @@ enum TextRole: CaseIterable {
     var points: CGFloat {
         switch self {
         case .subheadline: 11
+        case .caption: 12
         case .body: 13
         case .reading: 14
         case .title3: 15
@@ -37,7 +40,7 @@ enum TextRole: CaseIterable {
     var lineHeight: CGFloat {
         switch self {
         case .subheadline: 14
-        case .body: 16
+        case .caption, .body: 16
         case .reading, .title3: 20
         case .title2: 22
         case .title1: 26

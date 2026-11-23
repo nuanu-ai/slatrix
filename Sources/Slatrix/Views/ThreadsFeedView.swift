@@ -158,7 +158,7 @@ private struct ThreadFeedRow: View {
                     AvatarView(
                         name: rootMessage.senderName, size: m.avatar, matrix: matrix, source: rootMessage.avatarURL)
                     VStack(alignment: .leading, spacing: m.sp4) {
-                        Text(rootMessage.senderName).font(m.font(.body, .semibold)).foregroundStyle(
+                        Text(rootMessage.senderName).font(m.font(.reading, .semibold)).foregroundStyle(
                             colors.textPrimary)
                         previewBody(rootMessage, state: root.state, shape: item.root).font(m.font(.reading))
                             .foregroundStyle(
@@ -175,10 +175,10 @@ private struct ThreadFeedRow: View {
                             name: message.senderName, size: m.avatarMedium, matrix: matrix, source: message.avatarURL)
                         VStack(alignment: .leading, spacing: m.sp4) {
                             HStack(spacing: m.sp8) {
-                                Text(message.senderName).font(m.font(.subheadline, .semibold))
-                                Text("Latest reply").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                                Text(message.senderName).font(m.font(.caption, .semibold))
+                                Text("Latest reply").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                             }
-                            previewBody(message, state: latest.state, shape: snapshot).font(m.font(.subheadline))
+                            previewBody(message, state: latest.state, shape: snapshot).font(m.font(.caption))
                                 .foregroundStyle(
                                     colors.textSecondary
                                 ).lineLimit(2).multilineTextAlignment(.leading)
@@ -195,7 +195,7 @@ private struct ThreadFeedRow: View {
                     Image(systemName: "chevron.right").font(m.font(.subheadline, .semibold))
                 }.foregroundStyle(colors.accent).padding(.leading, m.avatar + m.sp12)
                 if failed {
-                    Text("Preview unavailable").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                    Text("Preview unavailable").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                         .padding(.leading, m.avatar + m.sp12).help(
                             root.error ?? latest?.error ?? "Right-click to retry")
                 }

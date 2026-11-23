@@ -71,7 +71,7 @@ struct PinnedMessagesView: View {
                         Button {
                             profile(message)
                         } label: {
-                            Text(message.senderName).font(m.font(.body, .semibold))
+                            Text(message.senderName).font(m.font(.reading, .semibold))
                         }.buttonStyle(.row).linkCursor().help("View profile")
                         Text(message.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute()).font(
                             m.font(.subheadline)

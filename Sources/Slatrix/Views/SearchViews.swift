@@ -550,7 +550,8 @@ private struct MessageResultRow: View {
                     AvatarView(name: message.senderName, size: m.avatar, matrix: matrix, source: message.avatarURL)
                     VStack(alignment: .leading, spacing: m.sp2) {
                         HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
-                            Text(message.senderName).font(m.font(.reading, .bold)).foregroundStyle(colors.textPrimary)
+                            Text(message.senderName).font(m.font(.reading, .semibold)).foregroundStyle(
+                                colors.textPrimary)
                             Text(message.timestamp.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
                                 .font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
                         }.lineLimit(1)
@@ -602,7 +603,7 @@ private struct ChannelResultRow: View {
                         Text(room.name).font(m.font(.reading, .semibold)).foregroundStyle(colors.textPrimary)
                         if room.membership == "invite" { TagLabel(text: "Invited") }
                     }
-                    Text(room.topic.isEmpty ? "\(room.memberCount) members" : room.topic).font(m.font(.subheadline))
+                    Text(room.topic.isEmpty ? "\(room.memberCount) members" : room.topic).font(m.font(.caption))
                         .foregroundStyle(colors.textSecondary)
                 }.lineLimit(1)
                 Spacer(minLength: 0)

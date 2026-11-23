@@ -220,7 +220,7 @@ struct MessageComposer: View {
                         Text(errorMessage).textSelection(.enabled)
                         Spacer(minLength: m.sp4)
                         Button("Try again", action: send).buttonStyle(.textLink).disabled(!canSend)
-                    }.font(m.font(.subheadline)).foregroundStyle(colors.destructive)
+                    }.font(m.font(.caption)).foregroundStyle(colors.destructive)
                         .accessibilityElement(children: .combine)
                 }
                 if let attachmentError {
@@ -228,16 +228,12 @@ struct MessageComposer: View {
                         Image(systemName: "exclamationmark.circle").accessibilityHidden(true)
                         Text(attachmentError)
                         Spacer(minLength: m.sp4)
-                        Button {
-                            self.attachmentError = nil
-                        } label: {
-                            Image(systemName: "xmark")
-                        }.buttonStyle(.row).help("Dismiss").accessibilityLabel("Dismiss attachment error")
-                    }.font(m.font(.subheadline)).foregroundStyle(colors.destructive).accessibilityElement(
+                        CloseButton(label: "Dismiss attachment error") { self.attachmentError = nil }
+                    }.font(m.font(.caption)).foregroundStyle(colors.destructive).accessibilityElement(
                         children: .combine)
                 }
                 if requiresTextForSend && !attachments.isEmpty {
-                    Text("Add a message to reply").font(m.font(.subheadline)).foregroundStyle(muted)
+                    Text("Add a message to reply").font(m.font(.caption)).foregroundStyle(muted)
                 }
             }
             .padding(.horizontal, m.sp12).padding(.vertical, m.sp8)

@@ -86,7 +86,7 @@ struct ChannelHeader: View {
                         }
                         // Who is typing shows under the name, as Telegram shows it, in place of the topic.
                         if let line = typing ?? (room.topic.isEmpty ? nil : room.topic) {
-                            Text(line).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                            Text(line).font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                         }
                     }.lineLimit(1).truncationMode(.tail).animation(Motion.content, value: typing)
                 }

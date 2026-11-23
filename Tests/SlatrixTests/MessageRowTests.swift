@@ -137,4 +137,48 @@ struct MessageRowTests {
         #expect(await eventually { host.sizeThatFits(in: offered).height > 0 })
         #expect(host.sizeThatFits(in: offered).width <= offered.width)
     }
+
+    @Test("Compact density takes less vertical space than comfortable for both grouped bursts and distinct senders")
+    func compactIsShorterThanComfortable() {
+        let saved = UserDefaults.standard.object(forKey: "appearance.density")
+        defer { UserDefaults.standard.set(saved, forKey: "appearance.density") }
+        let base = Date(timeIntervalSince1970: 1_800_000_000)
+        let burst = (0..<5).map { i in
+            ChatMessage(
+                id: "$b\(i)", roomID: "!room:example.org", senderID: "@anna:example.org", senderName: "Anna",
+                body: "Follow-up message number \(i + 1)", timestamp: base.addingTimeInterval(Double(i) * 30))
+        }
+        let mixed = ["Anna", "Bo", "Cara", "Dan", "Eve"].enumerated().map { i, name in
+            ChatMessage(
+                id: "$m\(i)", roomID: "!room:example.org", senderID: "@\(name.lowercased()):example.org",
+                senderName: name, body: "Short reply from \(name)",
+                timestamp: base.addingTimeInterval(Double(i) * 30))
+        }
+        func totalHeight(_ messages: [ChatMessage], density: MessageDensity, groupedInCompact: Bool) -> CGFloat {
+            let appearance = AppearanceStore()
+            appearance.density = density
+            let rows = TimelineLayout.rows(
+                messages, unreadBoundaryEventID: nil, groups: density == .comfortable || groupedInCompact,
+                now: base, calendar: .current, locale: .current)
+            return rows.reduce(0) { sum, row in
+                guard case .message(let msg, let grouped, let time) = row.kind else { return sum }
+                let h = NSHostingView(
+                    rootView: MessageRow(message: msg, grouped: grouped, timeLabel: time)
+                        .frame(width: 600).environmentObject(appearance).environment(\.metrics, m)
+                ).fittingSize.height
+                return sum + h
+            }
+        }
+        let burstComfortable = totalHeight(burst, density: .comfortable, groupedInCompact: false)
+        let burstCompact = totalHeight(burst, density: .compact, groupedInCompact: false)
+        #expect(
+            burstCompact < burstComfortable,
+            "Compact burst (\(burstCompact)) must be shorter than comfortable (\(burstComfortable))")
+
+        let mixedComfortable = totalHeight(mixed, density: .comfortable, groupedInCompact: false)
+        let mixedCompact = totalHeight(mixed, density: .compact, groupedInCompact: false)
+        #expect(
+            mixedCompact < mixedComfortable,
+            "Compact mixed (\(mixedCompact)) must be shorter than comfortable (\(mixedComfortable))")
+    }
 }

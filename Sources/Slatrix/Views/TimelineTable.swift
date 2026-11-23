@@ -1358,8 +1358,8 @@ private struct TimelineWelcomeRow: View {
                         : "This is the beginning of the \(welcome.name) channel."
             ).font(m.font(.reading)).foregroundStyle(colors.textSecondary).lineSpacing(m.lineSpacing(.reading))
             if welcome.isEncrypted {
-                Image(systemName: "lock.shield").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-                    .help("End-to-end encrypted").accessibilityLabel("End-to-end encrypted")
+                Label("End-to-end encrypted", systemImage: "lock.shield")
+                    .font(m.font(.caption)).foregroundStyle(colors.textSecondary)
             }
         }.frame(maxWidth: .infinity, alignment: .leading).padding(m.sp20)
     }

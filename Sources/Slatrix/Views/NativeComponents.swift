@@ -31,7 +31,7 @@ struct InlineErrorView: View {
     var body: some View {
         HStack(spacing: m.sp8) {
             Image(systemName: "exclamationmark.circle").foregroundStyle(colors.warning)
-            Text(message).font(m.font(.subheadline)).textSelection(.enabled).frame(
+            Text(message).font(m.font(.caption)).textSelection(.enabled).frame(
                 maxWidth: .infinity, alignment: .leading)
             if let dismiss { CloseButton(label: "Dismiss error", action: dismiss) }
         }.padding(.horizontal, m.sp12).padding(.vertical, m.sp8).background(colors.warning.opacity(0.08))

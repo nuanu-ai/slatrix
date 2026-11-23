@@ -27,10 +27,10 @@ struct ReplyPreviewView: View {
                         if let thread { onOpenThread?(thread.root) }
                     } label: {
                         VStack(alignment: .leading, spacing: m.sp4) {
-                            Text("replied to a thread:").font(m.font(.subheadline))
+                            Text("replied to a thread:").font(m.font(.caption))
                                 .foregroundStyle(appearance.colors.textSecondary)
                             if let thread {
-                                Text(thread.preview).font(m.font(.subheadline, .medium))
+                                Text(thread.preview).font(m.font(.caption, .medium))
                                     .foregroundStyle(appearance.colors.accent)
                             } else {
                                 SkeletonLines(widths: [240])
@@ -47,12 +47,12 @@ struct ReplyPreviewView: View {
                     }.buttonStyle(.row).disabled(onOpen == nil).help("Show original message")
                 } else if preview.state == .failed {
                     HStack(spacing: m.sp8) {
-                        Text("Original message unavailable").font(m.font(.subheadline))
+                        Text("Original message unavailable").font(m.font(.caption))
                             .foregroundStyle(appearance.colors.textSecondary)
                         Button("Retry") { [target = origin] in
                             guard let target else { return }
                             Task { await matrix.loadReplyPreview(for: target) }
-                        }.buttonStyle(.textLink).font(m.font(.subheadline)).disabled(origin == nil)
+                        }.buttonStyle(.textLink).font(m.font(.caption)).disabled(origin == nil)
                     }
                 } else {
                     // Over the reserve rather than beside it: at some zooms two bars stand taller than two lines.
@@ -80,9 +80,9 @@ struct ReplyPreviewView: View {
 
     private func lines(sender: String, body: String, deleted: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: m.sp4) {
-            Text(sender).font(m.font(.subheadline, .semibold)).lineLimit(1)
+            Text(sender).font(m.font(.caption, .semibold)).lineLimit(1)
             if !body.isEmpty {
-                Text(body).italic(deleted).font(m.font(.subheadline)).foregroundStyle(appearance.colors.textSecondary)
+                Text(body).italic(deleted).font(m.font(.caption)).foregroundStyle(appearance.colors.textSecondary)
                     .lineLimit(1)
             }
         }
