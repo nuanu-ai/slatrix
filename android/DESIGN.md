@@ -1,136 +1,149 @@
 ---
 name: Slatrix for Android
-description: Slack-familiar conversations on Matrix.
+description: Slack-familiar conversations on Matrix, built for Android 15 (Design B).
 colors:
-  dark-canvas: "#1c1d21"
-  dark-raised: "#24262a"
-  dark-overlay: "#222529"
-  dark-text-primary: "#f5f5f5"
-  dark-text-body: "#d1d2d3"
-  dark-text-secondary: "#abadb1"
-  dark-border: "#383a3e"
-  dark-border-strong: "#5a5c61"
-  dark-accent: "#8195ff"
   light-canvas: "#ffffff"
-  light-raised: "#f8f8f8"
-  light-text-primary: "#1d1c1d"
-  light-text-secondary: "#616061"
-  light-border: "#e3e3e3"
-  light-accent: "#334ec9"
-  aubergine-dark-frame: "#350d36"
-  aubergine-light-frame: "#ede4ef"
-  aubergine-dark-selection: "#713783"
-  aubergine-light-selection: "#f0e6f4"
-  lagoon-dark-frame: "#0e293b"
-  lagoon-light-frame: "#e2edf4"
-  lagoon-dark-selection: "#195b7c"
-  lagoon-light-selection: "#dceef8"
-  button-primary: "#007a5a"
+  light-raised: "#f1f2f4"
+  light-sunken: "#e6e8eb"
+  light-overlay: "#ffffff"
+  light-text-primary: "#0f1115"
+  light-text-secondary: "#555961"
+  light-text-tertiary: "#696d75"
+  light-border: "#e2e4e8"
+  light-border-strong: "#c4c7cd"
+  light-accent: "#1a64d6"
+  light-wallpaper: "#e6ebf2"
+  light-wallpaper-doodle: "#1a64d6/0.07"
+  light-bubble-in: "#ffffff"
+  light-bubble-edge: "#000000/0"
+  light-glass: "#ffffff/0.6"
+  light-glass-header: "#ffffff/0.72"
+  dark-canvas: "#0f1012"
+  dark-raised: "#1c1d21"
+  dark-sunken: "#0a0b0d"
+  dark-overlay: "#26272c"
+  dark-text-primary: "#f1f2f4"
+  dark-text-secondary: "#aeb1b9"
+  dark-text-tertiary: "#9a9da5"
+  dark-border: "#2c2e33"
+  dark-border-strong: "#45474d"
+  dark-accent: "#7aa9ff"
+  dark-wallpaper: "#101317"
+  dark-wallpaper-doodle: "#ffffff/0.045"
+  dark-bubble-in: "#2a2c33"
+  dark-bubble-edge: "#000000/0"
+  dark-glass: "#28292e/0.55"
+  dark-glass-header: "#16171a/0.62"
+  accent-fill: "#1a64d6"
   on-accent: "#ffffff"
-  mention: "#e01e5a"
-  focus-ring: "#1d9bd1"
+  mention-you-light-text: "#8a5a00"
+  mention-you-light-fill: "#f2c744/0.4"
+  mention-you-dark-text: "#f2c744"
+  mention-you-dark-fill: "#f2c744/0.2"
 rounded:
-  small: "4dp"
-  default: "6dp"
-  large: "8dp"
-  panel: "12dp"
+  extraSmall: "4dp"
+  small: "8dp"
+  medium: "12dp"
+  large: "16dp"
+  bubble: "20dp"
+  extraLarge: "28dp"
 spacing:
+  line: "2dp"
   tiny: "4dp"
   small: "8dp"
   medium: "12dp"
   large: "16dp"
   section: "24dp"
-components:
-  button-primary:
-    backgroundColor: "{colors.button-primary}"
-    textColor: "{colors.on-accent}"
-    rounded: "{rounded.small}"
-  composer-dark:
-    backgroundColor: "{colors.dark-canvas}"
-    textColor: "{colors.dark-text-body}"
-    rounded: "{rounded.panel}"
-  conversation-header-dark:
-    backgroundColor: "{colors.dark-raised}"
-    textColor: "{colors.dark-text-primary}"
-    rounded: "{rounded.panel}"
 ---
 
 # Design System: Slatrix for Android
 
-## Overview
+Slatrix Android follows Slack's navigation, wording, and keyboard behavior while wearing Material 3 chrome and a messenger look (Design B). Neutral surfaces hold lists and forms, one saturated blue accent marks interactive elements and outgoing bubbles, and conversations sit on a tinted wallpaper canvas under frosted glass bars.
 
-**Creative North Star: "Slack on Android"**
+All visual tokens, dimensions, and animation specs live in `ui/designsystem/`. `../design/tokens.json` (`"android"` section plus shared `fileColors` and `avatarColors`) owns every color and corner radius, `DesignTokens.kt` mirrors it, and `DesignTokensTest` verifies them together. Android's `DesignTokenDetector` lint rule rejects raw `Color`, literal `.dp` / `.sp` / `.em` values, and raw Compose animation specs anywhere outside `ui/designsystem/`.
 
-Conversations lead. Familiar Slack navigation, compact rows and clear unread states sit inside native Android controls. The workspace frame carries the chosen palette; the conversation canvas stays neutral.
+## Color and Surfaces
 
-**Key Characteristics:**
+Light and dark themes use neutral cool grays (`canvas`, `raised`, `sunken`, `overlay`) with one accent (`accent` for text and icons, `accentFill` under `onAccent` for filled controls and your own bubbles). Read colors through `SlatrixTheme.colors` so light mode, dark mode, and optional Material You wallpaper theming (`wallpaperColors = true`) stay coherent.
 
-- Dense, readable conversation lists.
-- Quiet surfaces with restrained color.
-- Native text scaling, Back and keyboard behavior.
+In conversations, messages float over a tinted `wallpaper` surface (`#e6ebf2` light, `#101317` dark) patterned with a tiled 240 dp doodle shader (`Wallpaper.kt`). The doodles stay clearly present without competing with message text: `#1a64d6/0.07` in light mode and `#ffffff/0.045` in dark mode (or matching `primary/0.07` and `onSurface/0.045` under Material You).
 
-## Colors
+Incoming bubbles fill with `bubbleIn` (`#ffffff` light, `#2a2c33` dark) and have no border stroke (`bubbleEdge` is `#000000/0` in both modes, and `BubbleNode` skips the edge pass whenever alpha is zero). Outgoing bubbles use `accentFill` wrapped in `OnAccentFill`, which maps text to `onAccent`, metadata to `bubbleOutMeta` (`#ffffff/0.9`), dividers to `bubbleOutRule` (`#ffffff/0.22`), and underlines links so they stay legible on the accent fill.
 
-The frontmatter lists the reused roles for the two palettes exposed in Preferences. `../design/tokens.json` owns all shared colors and radii; `DesignTokens.kt` mirrors it. Extend those sources together when adding roles.
+Mentions of other people use `mentionText` and `mentionFill` in the accent hue. Mentions of you use warm amber (`#f2c744` fill at 40% light / 20% dark, with `#8a5a00` light / `#f2c744` dark text), matching the jump highlight wash so messages addressed to you catch the eye immediately.
 
-### Primary
-
-Green marks account actions. The theme's accent marks links, input focus and send actions. Selected navigation uses the palette's selection fill with primary text.
-
-### Secondary
-
-Aubergine and Lagoon tint the workspace frame and selection. Color mode and palette are independent choices. System default is the initial mode; Aubergine is the initial palette.
-
-### Neutral
-
-Canvas holds conversations. Raised surfaces distinguish headers, overlay surfaces hold transient controls, and secondary text carries timestamps and supporting details. Mention badges use the shared mention role with white text.
-
-**The Role Color Rule.** Read colors through `SlatrixTheme.colors`; preserve the light and dark role pairs.
+Shared file colors (`design/tokens.json`) tint attachment badges calmly. On neutral surfaces and incoming bubbles, `AppColors.fileTileFill` draws a 14% tinted square (`40dp`, `shapes.small`) behind a crisp `AppColors.fileTileIcon` glyph in the file color. Inside outgoing bubbles, `fileTileFill` switches to `bubbleOutRule` and `fileTileIcon` to `onAccent` so blue document icons remain readable against the blue bubble.
 
 ## Typography
 
-Use the Material 3 type ramp supplied by `SlatrixTheme`, set in Lato (Slack's typeface, bundled under the SIL Open Font License) with no added tracking. Account headings use `headlineMedium`; workspace headings use `headlineSmall`; profile names use `titleLarge`; conversation headers and section labels use `titleSmall`, which the theme maps to `titleMedium`. These titles are bold where the screen requests it. Message bodies and list labels use `bodyLarge`, supporting details use `bodyMedium`, and timestamps use `bodySmall`. Avatar initials use the bold `labelLarge` role.
+`SlatrixType.kt` bundles Roboto as a single variable font covering Normal, Medium, SemiBold, Bold, and Black weights with italics so metrics stay consistent across OEMs. The theme maps Roboto across the full Material 3 type scale with `0.sp` tracking so small captions and timestamps stay tight on narrow phones.
 
-**The Scaled Type Rule.** Use theme type roles and allow Android system font scaling. Do not replace them with fixed text sizes. Lato ships in regular, italic, bold, bold italic and black.
+Every size uses `sp` and scales with the Android system font size. Message bodies use `MaterialTheme.typography.message`, which applies `LocalMessageScale` on top of the system font scale with tighter `22.sp` base leading so multi-line bubbles read as cohesive blocks.
 
-## Layout
+Screen titles use `titleLarge` or `titleMedium`, section labels use `ListHeading` (`titleSmall` in `textSecondary`), primary row titles use `bodyLarge` (bold for unread rows, medium for filenames and secondary cards), supporting previews use `bodyMedium`, and timestamps use `labelSmall` in `textSecondary`. Tab labels use `Typography.tabFit` auto-sizing so large system fonts shrink gracefully instead of clipping.
 
-Use `UiMetrics`: the spacing steps are in the frontmatter. Lists use large horizontal gutters and small vertical row padding. Interactive rows have a minimum touch height (48dp), and conversation list rows and section headers Slack's (44dp), with content allowed to grow for larger text. Root headers have a minimum height (60dp) and sit on the palette's dark frame color with white text in both modes, as Slack's do. Account forms are centered with a maximum width (480dp).
+## Shapes, Avatars, and Layout Rhythm
 
-Below the expanded threshold (600dp), Home and DMs use bottom navigation. At the threshold, navigation moves into a rail. You opens from the header avatar as a page with Back, as Slack's does. Honor status bars, navigation bars and the keyboard. Keep conversation identity stable as content changes.
+Corner radii come from `MaterialTheme.shapes` and `DesignTokens.radii`: `extraSmall` (4dp), `small` (8dp), `medium` (12dp), `large` (16dp), `bubble` (20dp), and `extraLarge` (28dp).
 
-## Elevation & Depth
+People avatars are always circles (`CircleShape`), including uploaded profile photo previews and message facepiles. Each initials avatar shades from its shared avatar color down to 16% darker at the bottom (`AvatarStyle.fill`) with auto-sized bold initials, and swaps in the loaded Matrix picture inside the same fixed box so rows never shift. Workspace icons remain rounded squares so workspaces read apart from people.
 
-The main screens separate areas with neutral surface tones, thin borders and dividers (1dp). Menus, dialogs and snackbars use native Material treatments. Do not add decorative shadows to conversation rows.
+Chat bubbles use `bubbleShape(own, grouped, last)`: `20dp` outer corners, `8dp` where adjacent bubbles from the same sender meet, and a `4dp` tail on the last bubble of a run. Vertical spacing between bubbles follows three explicit steps in `UiMetrics`:
+- `BubbleGroupedGap` (`3dp`) between grouped text bubbles from the same sender.
+- `BubbleAfterAttachmentGap` (`6dp`) when a grouped bubble follows an image, video, or file attachment so media keeps breathing room.
+- `BubbleSenderGap` (`12dp`) when the sender changes.
 
-## Shapes
+Outgoing bubbles leave a `12%` far-side gutter (`BubbleGutter`), and incoming bubbles leave a gutter that grows smoothly from `24dp` on 320dp phones to `56dp` on 412dp phones.
 
-Use the four shared radii in the frontmatter. The top content panel rounds its top corners and keeps its bottom corners square. Conversation headers and the composer use the panel radius; search uses the large radius. Account buttons and compact avatar tiles use the small radius.
+Consistent rhythm across screens comes from `UiMetrics`:
+- Lists use `GapLarge` (`16dp`) horizontal gutters, `ConversationRow` (`72dp`) with `RowAvatar` (`48dp`) for two-line conversation rows, `CompactRow` (`48dp`) for one-line entries, and `Touch` (`48dp`) minimum hit targets on every interactive row and button.
+- Search fields use capsule styling (`CircleShape`, `SearchBar = 48dp` or `SearchField = 40dp`).
+- Form inputs, profile action buttons, and detail rows standardize on `shapes.medium` (`12dp`).
+- Bottom sheets clip their top corners to `SlatrixTheme.topPanelShape` (`28dp` top, `0dp` bottom) over `colors.overlay`, open with a `32x4dp` grab handle, and render actions through the shared `MenuItem` row.
+- Dividers (`1dp` in `colors.border`) sit only between items, never trailing after the last row.
 
-## Components
+On compact screens (below 600dp), Home, DMs, Activity, and You sit in a floating frosted glass capsule (`TabBar = 64dp`, `TabInset = 4dp`, `GlassBlur = 24dp`, `GlassLift = 12dp`) above a swipeable `HorizontalPager`. At 600dp and above, navigation moves to a vertical rail. Inside conversations, headers (`HeaderRow = 64dp`) and the composer sit on full-width `glassBar` surfaces blurring the wallpapered `glassSource` timeline scrolling behind them.
 
-Account actions are full-width green buttons with white labels. Browser alternatives can use an outlined button. Cancel and Retry use text buttons. Let Material provide interaction and disabled states.
+## Motion System
 
-The Search tab opens with the cursor in a single-line rounded field (40dp) under the header, a search icon before the text and a clear button after it. While the field is empty it lists Recent searches, each with a clock icon. Typing lists the best-matching channels and people, after any recent searches that match; searching lists message hits with their conversation, sender and time, the matched words bold on the highlight color. The composer is a rounded raised field on a bar under a hairline, with an accent cursor and the send icon inside the field; it expands to five text lines. Keep its keyboard semantics and accessible label.
+Slatrix Android targets Android 15 (`minSdk = 35`) and uses spring physics in `Motion.kt` so gestures carry velocity, stay 100% interruptible, and exit as smoothly as they enter. No surface snaps or teleports closed.
 
-The Home header shows the open workspace's rounded-square icon (its initials on the palette's strong selection color), its name in black weight and a chevron; they open the workspace switcher, a sheet of the top-level workspaces, plus All conversations while a channel has no workspace. Home groups conversations under Starred (only while something is starred), Channels and Direct messages. Each section header pairs a thin icon and a bold 14 sp title with a small chevron after it, and a chevron at the end that collapses it; a collapsed section still shows its unread conversations. Conversation rows pair a channel icon (a lock for a private channel) or initials tile with a single-line title and optional unread count; read titles use the body color, unread ones bold primary. A long press opens a sheet to star or unstar the conversation, mark it read or unread, and mark every unread conversation in view read. Invitations, while there are any, lead Home under an Invitations header with a mail icon and nothing to collapse, each a bold row with its channel icon or initials tile. One opens a pushed page titled with what it invites you to, its icon or tile centered over "You’re invited to …", who sent it, and equal Decline (outlined) and Join (filled; Join workspace for a workspace) buttons; a spinner keeps its place under them. Where channels can be browsed, the Channels title opens Browse channels and only its end chevron collapses the section, and an Add channel row with a plus closes the section, opening a sheet with Browse channels and Create a channel. Browse channels is a pushed page with a search field over rows of a channel icon, the bold name, and a secondary line of members, who may join and the topic; a joined channel says Joined at the end, and one that needs an invitation shows a lock and does not respond. Create a channel takes a name with a # prefix and an optional topic, with Create in the bar. The bottom bar sits on the raised surface under a hairline, with a pill behind the selected tab's filled icon and a bold label. Rows in the DMs tab add the time and up to two lines of the latest message. Unread titles are bold, and unread state is announced as a state description. Initials tiles have a fixed size; the initials shrink to fit. Workspace, direct message, profile and search tiles show their Matrix picture over the initials once it loads, in the same box, so nothing moves; a picture already loaded this session shows at once. Message rows align an initials tile with sender, timestamp and body text; a sender's run within five minutes drops the tile and name. The body shows its formatting, mention pills, quotes beside a bar, lists and code blocks, and ends an edit with "(edited)". A reply quotes its parent's sender and first line above the body; a tap opens the parent where it is. Images show inline in a box reserved from their size and open full screen; other files show as a row with a tile in the kind's color. Reaction chips and a thread's replies line sit under the body. Day dividers read Today, Yesterday or the date. A long press opens the message sheet with Mark unread, which leaves the channel, Copy message, and Retry and Delete message for a failed send. Preserve stable message keys. Once the connection has been down for two seconds, a dark pill under the header says you're offline, floating over the list so nothing moves, and goes when sync runs again. Home's top holds Slack's Later card, an outlined rounded tile with a bookmark, Later and how many items; it opens Later, a pushed page of saved messages newest first, each with its conversation, sender, time and text, and a filled bookmark that removes it. The message sheet's Save for later, or Remove from Later, sits above Copy link.
+### Physics Vocabulary
 
-Home and the DMs tab carry Slack's + at the bottom end, a 56dp dark rounded square with a plus, which opens New message: a pushed page whose search field (To) lists your direct messages while empty and the directory's people as you type, each with a list avatar, the bold name and the Matrix ID. Search's People section lists the directory's people after your direct messages. A profile is a page pushed over what was open, under a bar with Back and Profile: a 120dp picture tile, the name in black weight, a full-width outlined Message button for anyone but you, then Contact information with the Matrix ID on the accent color beside a sunken at-sign tile. A sender's name and picture, a mention pill and a direct message's header open it. A failed Message shows as a snackbar over the page. Your own profile offers an outlined Edit profile instead of Message, reached from You's View profile row. Edit profile is a pushed page with Save in its bar: the 120dp photo tile, an outlined Upload photo button, a destructive Remove photo text button while there is a photo, and the Display name field. Upload photo opens the system photo picker, then a dark crop page with Cancel, Crop photo and Save: the photo fit to the space, shaded outside a square frame with a knob at each corner; dragging inside moves the frame and a corner resizes it, never outside the photo.
+- `Motion.spatial()` (damping `0.88`, stiffness `380`): critically damped spatial movement for page push/pop, bottom sheet entrance and snap-back, composer banner height changes, and message focus lift.
+- `Motion.snappy()` (damping `0.78`, stiffness `520`): crisp tactile response for swipe-to-reply snap-back, timeline item placement, quick-reaction stagger, reaction chip pop, and jump-to-bottom button entry.
+- `Motion.gentle()` (damping `0.94`, stiffness `320`): smooth exits and fades for bottom sheet dismissal, scrims, focus blur unwind, jump highlight fade-out, media viewer dismissal, and Later swipe completion.
 
-Preferences uses full-row selection with radio semantics for color mode and palette. Errors appear as snackbars over the content. Connection progress waits (400ms); its reserved space prevents the account form from moving.
+Normalized 0..1 progress animations pass `Motion.UnitThreshold` (`0.001f`) and pixel-space animations pass `Motion.PixelThreshold` (`1f`) so springs settle right as motion visually completes without a long sub-pixel tail.
 
-## Do's and Don'ts
+### Navigation and Predictive Back
 
-### Do:
+`LiveWorkspace` coordinates pushed pages with `rememberPredictiveBack` through `LocalBackProgress`:
+- Pushing a page slides it in from the right on `Motion.spatial(UnitThreshold)` with a soft left-edge shadow (`pageEdgeShadow`) while the covered page parallaxes left by `18%` (`Motion.PushParallax`) under a dark scrim up to `22%` alpha (`Motion.ScrimMaxAlpha`, `pageScrim`).
+- Swiping from the screen edge tracks the finger 1:1 on the top page, glides the covered page back from `-18%` toward `0%`, and fades the scrim proportionally. Releasing early springs smoothly back to `0`.
+- Tapping the Back button keeps the popped page mounted in its existing composition slot (with touches and semantics cleared and its lifecycle lowered to `CREATED`) while sliding it off to the right on `Motion.spatial(UnitThreshold)` as the underlying page glides home. Re-pushing mid-exit cancels the old exit cleanly and starts fresh.
 
-- Do follow Slack Android conventions for supported actions and wording.
-- Do use shared color roles, shared radii and Android spacing tokens.
-- Do preserve readable foregrounds in both modes and at larger text sizes.
-- Do show cached content immediately and keep rows still as details arrive.
+### Conversations, Sheets, Composer, and Media
 
-### Don't:
+- Interactive keyboard dismissal: the timeline `LazyColumn` attaches `Modifier.imeNestedScroll()` whenever `WindowInsets.isImeVisible` is true, so dragging down smoothly tracks the IME with the thumb.
+- Timeline arrivals: message rows apply `Modifier.animateItem(fadeInSpec = Motion.gentle(), placementSpec = Motion.snappy(), fadeOutSpec = Motion.gentle())` so sent and incoming bubbles settle upward without jumping.
+- Swipe to reply: dragging a bubble right reveals a `32dp` circular badge (`ReplySwipeBadge`) that scales up and fills with `colors.accentFill` plus a `GestureThresholdActivate` haptic tick at `UiMetrics.Swipe` (`64dp`), then springs back on `Motion.snappy(PixelThreshold)`.
+- Message focus lift and reactions: long-pressing a message lifts the bubble above the sheet while blurring (`SheetBlur = 3dp`) and dimming the conversation behind it on `Motion.spatial(UnitThreshold)`. Quick-reaction buttons stagger in by `18ms` (`Motion.ReactionStaggerMillis`) on `Motion.snappy(UnitThreshold)`, and reaction chips pop when added or when their count changes. Dismissing the sheet fires `onDismissing` right away so the bubble lowers and the blur fades out on `Motion.gentle(UnitThreshold)` in lockstep with the sheet sliding down.
+- Jump-to-bottom and highlights: the scroll-to-bottom FAB scales and fades both in (`Motion.snappy()`) and out (`Motion.gentle()`), and tapping it uses `animateScrollToItem(0)`. Jump highlights hold for `1500ms` (`UiMetrics.HighlightMillis`), then fade out smoothly on `Motion.gentle(UnitThreshold)`.
+- Bottom sheets: `BottomSheet` springs up on `Motion.spatial(UnitThreshold)`, tracks downward drags and nested scroll handoffs 1:1 with the scrim, carries release fling velocity into `settle` and `dismiss`, consumes touches while exiting so actions never double-fire, and slides completely off-screen on `Motion.gentle(PixelThreshold)` before calling `onDismissRequest`.
+- Composer: reply, edit, and also-send banners resize the bar smoothly via `animateContentSize(Motion.spatial())`, and `ComposerSendButton` morphs cleanly between disabled and filled accent states while keeping its `"Send message"` or `"Save changes"` accessibility label intact.
+- Media viewer: when zoom is `1x`, dragging vertically tracks the image 1:1 while scaling it slightly and fading both backdrop and top bar; releasing past `UiMetrics.ViewerDismiss` (`120dp`) or flicking past `SheetDismissVelocity` dismisses smoothly on `Motion.gentle(PixelThreshold)`, and shorter drags spring back on `Motion.snappy(PixelThreshold)`. Zoomed images pan freely without triggering dismiss.
+- Later cards: swiping past `UiMetrics.Swipe` animates the card off-screen on `Motion.gentle(PixelThreshold)`, and cancelled swipes spring home on `Motion.snappy(PixelThreshold)`.
 
-- Don't expose controls without a working action.
-- Don't replace native icons with text glyphs.
-- Draw Slack's thin outlined icons from `SlackIcons`; Material's outlined set reads heavier than Slack's.
-- Don't cover visible content with loading UI or add loading explanations.
+### Performance and Reduced Motion
+
+Per-frame animation reads stay inside `graphicsLayer`, `drawBehind`, or `offset` lambdas so moving surfaces never recompose Compose trees on every frame.
+
+Every custom animation checks `CoroutineContext.isMotionReduced(context)` (reading both Compose's `MotionDurationScale` and Android's `ValueAnimator.areAnimatorsEnabled()` / `ANIMATOR_DURATION_SCALE`). When reduced motion is enabled, transitions snap directly to their target state without intermediate frames.
+
+## Rules of Thumb
+
+- Read every color from `SlatrixTheme.colors`, every dimension from `UiMetrics`, every radius from `MaterialTheme.shapes` or `DesignTokens.radii`, and every animation spec from `Motion`.
+- Show cached content immediately and reserve fixed dimensions for avatars, images, and loading indicators (which wait `400ms` via `ProgressDelayMillis` and never carry `"Loading..."` copy).
+- Keep transient chrome (errors, menus, offline pill, jump button) in overlays so message timelines never jump or reflow.
+- Use `SlackIcons` for Slack's thin-stroke icons where Material's outlined set reads too heavy.
