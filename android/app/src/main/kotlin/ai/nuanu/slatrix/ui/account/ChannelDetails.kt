@@ -11,6 +11,7 @@ import ai.nuanu.slatrix.core.NotificationSetting
 import ai.nuanu.slatrix.core.PinOrder
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.SpaceSummary
+import ai.nuanu.slatrix.ui.designsystem.ListHeading
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -20,6 +21,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -163,8 +165,7 @@ private fun DetailsPage(room: RoomSummary, notifications: NotificationSetting?, 
                     }
                     if (workspaces.isNotEmpty()) Text("In " + if (workspaces.size > 1) workspaces.dropLast(1).joinToString(", ") + " and " + workspaces.last() else workspaces.single(), style = MaterialTheme.typography.bodyMedium,
                         color = colors.textSecondary)
-                    Text("Description", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
-                        color = colors.textPrimary, modifier = Modifier.padding(top = UiMetrics.GapSmall))
+                    ListHeading("Description", Modifier.padding(top = UiMetrics.GapSmall))
                     Text(room.topic.ifBlank { "No description" }, style = MaterialTheme.typography.bodyLarge,
                         color = if (room.topic.isBlank()) colors.textSecondary else colors.textBody)
                 }
@@ -205,7 +206,7 @@ private fun DetailsRow(icon: ImageVector, label: String, value: String? = null, 
     Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(enabled, role = Role.Button, onClick = onClick)
         .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
-        Icon(icon, null, Modifier.size(UiMetrics.LargeIcon), tint = color)
+        Icon(icon, null, Modifier.size(UiMetrics.LargeIcon), tint = if (color == colors.textPrimary) colors.textSecondary else color)
         Column(Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.bodyLarge, color = color)
             if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
@@ -285,8 +286,8 @@ private fun MembersPage(room: RoomSummary, me: String?, actions: ChannelDetailsA
     }
     PushedPage("Members", onBack) {
         item {
-            Surface(Modifier.fillMaxWidth().padding(UiMetrics.GapLarge), shape = MaterialTheme.shapes.medium, color = colors.raised) {
-                Row(Modifier.heightIn(min = UiMetrics.SearchField).padding(horizontal = UiMetrics.GapMedium),
+            Surface(Modifier.fillMaxWidth().padding(UiMetrics.GapLarge), shape = CircleShape, color = colors.raised) {
+                Row(Modifier.heightIn(min = UiMetrics.SearchBar).padding(horizontal = UiMetrics.GapLarge),
                     verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.Search, null, Modifier.size(UiMetrics.Icon), tint = colors.textSecondary)
                     BasicTextField(query, { query = it }, Modifier.weight(1f).padding(start = UiMetrics.GapSmall)
@@ -416,7 +417,7 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
             // Stays above the list as it scrolls, as the Mac's filter bar does.
             stickyHeader(key = "filters") {
                 Row(Modifier.fillMaxWidth().background(colors.canvas).horizontalScroll(rememberScrollState())
-                    .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapMedium),
+                    .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
                     horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                     FilesFilter.entries.forEach { ChoiceChip(it.name, it == filter) { filter = it } }
                 }
@@ -457,7 +458,7 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
                         }
                     }
                     Column(Modifier.weight(1f)) {
-                        Text(link ?: file?.name ?: message.body, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold,
+                        Text(link ?: file?.name ?: message.body, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium,
                             color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(listOfNotNull(file?.let { kind?.label(it.name) }, "Shared by ${message.senderName}", dayLabel(message.timestamp))
                             .joinToString(" · "), style = MaterialTheme.typography.bodyMedium,
@@ -527,9 +528,9 @@ private fun EditPage(room: RoomSummary, actions: ChannelDetailsActions, scope: C
         item {
             Column(Modifier.fillMaxWidth().padding(UiMetrics.GapLarge), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
                 OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), enabled = room.canEditName && !saving,
-                    label = { Text("Name") }, singleLine = true, isError = name.isBlank())
+                    label = { Text("Name") }, singleLine = true, isError = name.isBlank(), shape = MaterialTheme.shapes.medium)
                 OutlinedTextField(topic, { topic = it }, Modifier.fillMaxWidth(), enabled = room.canEditTopic && !saving,
-                    label = { Text("Description") })
+                    label = { Text("Description") }, shape = MaterialTheme.shapes.medium)
                 error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = SlatrixTheme.colors.destructive) }
             }
         }
@@ -555,7 +556,7 @@ private fun AddPeoplePage(actions: ChannelDetailsActions, scope: CoroutineScope,
         item {
             Column(Modifier.fillMaxWidth().padding(UiMetrics.GapLarge), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                 OutlinedTextField(id, { id = it }, Modifier.fillMaxWidth(), enabled = !inviting, label = { Text("Matrix ID") },
-                    placeholder = { Text("@name:example.org") }, singleLine = true,
+                    placeholder = { Text("@name:example.org") }, singleLine = true, shape = MaterialTheme.shapes.medium,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done))
                 error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = SlatrixTheme.colors.destructive) }
             }

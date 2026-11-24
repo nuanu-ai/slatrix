@@ -4,6 +4,7 @@ import androidx.compose.ui.unit.dp
 
 object UiMetrics {
     val GapTiny = 4.dp
+    val LineGap = 2.dp
     val GapSmall = 8.dp
     val GapMedium = 12.dp
     val GapLarge = 16.dp
@@ -66,6 +67,10 @@ object UiMetrics {
     val IncomingGutterWide = 56.dp
     /** How far a row is swiped to act on it: a message to reply, a Later card to remove it. */
     val Swipe = 64.dp
+    /** Circular pill badge behind the swipe-to-reply icon. */
+    val SwipeBadge = 32.dp
+    /** Vertical drag distance before releasing the full-screen media viewer dismisses it. */
+    val ViewerDismiss = 120.dp
     val NarrowPhone = 320.dp
     val WidePhone = 412.dp
     val GlassBlur = 24.dp

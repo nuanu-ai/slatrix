@@ -337,7 +337,7 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: Mutable
         Box(Modifier.padding(top = UiMetrics.GapTiny).size(UiMetrics.Avatar)) {
             preview?.let { LiveAvatar(it.senderName, url = it.avatarUrl) }
         }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.Hairline * 4)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.LineGap)) {
             // The reminder shares the conversation's line, so setting one never changes the card's height.
             Row(horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
                 Text(when {
@@ -358,7 +358,7 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: Mutable
                 Text(shown?.senderName ?: "", style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (shown != null) Text("${dayLabel(shown.timestamp)} at ${timeLabel(shown.timestamp)}", Modifier.weight(1f, fill = false),
-                    style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    style = MaterialTheme.typography.labelSmall, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Text(when {
                 shown != null -> shown.body

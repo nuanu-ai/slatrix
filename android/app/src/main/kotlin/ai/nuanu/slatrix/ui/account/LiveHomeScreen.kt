@@ -19,6 +19,7 @@ import ai.nuanu.slatrix.ui.designsystem.AvatarStyle
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.BottomSheet
+import ai.nuanu.slatrix.ui.designsystem.MenuItem
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.glass
 import ai.nuanu.slatrix.ui.designsystem.tabFit
@@ -425,8 +426,7 @@ private fun WorkspaceSwitcher(state: RoomListState, selectedSpaceId: String?, on
     val entries = remember(state.spaces, state.rooms) { WorkspaceRail.entries(state.spaces, state.rooms) }
     BottomSheet(onDismissRequest = onDismiss, containerColor = SlatrixTheme.colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
-            Text("Workspaces", Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
-                style = MaterialTheme.typography.titleMedium)
+            ListHeading("Workspaces", Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall))
             for (space in entries) {
                 val selected = space?.id == selectedSpaceId
                 Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.WorkspaceRow)
@@ -665,8 +665,7 @@ private fun ConversationNotifications(read: suspend () -> NotificationSetting, s
     }
     BottomSheet(onDismissRequest = onDismiss, containerColor = SlatrixTheme.colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
-            Text("Notify me about", Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
-                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            ListHeading("Notify me about", Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall))
             // Saves through Home's scope, so closing the sheet doesn't cancel a change on its way.
             NotificationChoices(setting, save, scope, { setting = Result.success(it) }) { loads++ }
         }
@@ -682,29 +681,18 @@ private fun ConversationActions(room: RoomSummary, anyUnread: Boolean, onStar: (
     fun afterHiding(action: () -> Unit) { action(); onDismiss() }
     BottomSheet(onDismissRequest = onDismiss, containerColor = SlatrixTheme.colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
-            Text(room.name, Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
-                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            ListHeading(room.name, Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall))
             val starred = room.starred
-            SheetRow(if (starred) SlackIcons.StarFilled else SlackIcons.Star, if (starred) "Unstar $noun" else "Star $noun") {
+            MenuItem(if (starred) SlackIcons.StarFilled else SlackIcons.Star, if (starred) "Unstar $noun" else "Star $noun") {
                 afterHiding { onStar(!starred) }
             }
             val unread = room.unread != UnreadBadge.None
-            SheetRow(if (unread) SlackIcons.MarkRead else SlackIcons.MarkUnread, if (unread) "Mark as read" else "Mark unread") {
+            MenuItem(if (unread) SlackIcons.MarkRead else SlackIcons.MarkUnread, if (unread) "Mark as read" else "Mark unread") {
                 afterHiding { onMarkUnread(!unread) }
             }
-            if (anyUnread) SheetRow(SlackIcons.MarkAllRead, "Mark all as read") { afterHiding(onMarkAllRead) }
-            SheetRow(SlackIcons.Bell, "Notifications") { afterHiding(onNotifications) }
+            if (anyUnread) MenuItem(SlackIcons.MarkAllRead, "Mark all as read") { afterHiding(onMarkAllRead) }
+            MenuItem(SlackIcons.Bell, "Notifications") { afterHiding(onNotifications) }
         }
-    }
-}
-
-@Composable
-private fun SheetRow(icon: ImageVector, label: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button, onClick = onClick)
-        .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge),
-        verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, Modifier.size(UiMetrics.Icon))
-        Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }
 

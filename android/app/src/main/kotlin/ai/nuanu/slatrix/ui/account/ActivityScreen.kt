@@ -92,7 +92,7 @@ fun ActivityScreen(items: List<ActivityItem>, onOpenItem: (ActivityItem) -> Unit
     }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-            .padding(start = UiMetrics.GapLarge, end = UiMetrics.GapLarge, bottom = UiMetrics.GapTiny),
+            .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
             horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
             // Slack's Unreads narrows any filter to what you haven't opened, so it leads the row.
             ChoiceChip("Unreads", unreadOnly) { unreadOnly = !unreadOnly }

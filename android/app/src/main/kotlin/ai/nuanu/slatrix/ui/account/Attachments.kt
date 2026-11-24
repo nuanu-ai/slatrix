@@ -250,11 +250,12 @@ private fun FileRow(attachment: MessageAttachment, opening: Boolean, onLongPress
     val shape = MaterialTheme.shapes.large
     // Straight on the bubble, as a messenger sets a file, without a card of its own.
     Row(Modifier.clip(shape)
-        .combinedClickable(onClickLabel = "Open file", onLongClickLabel = "Message actions", onLongClick = onLongPress) { if (!opening) onOpen() },
+        .combinedClickable(onClickLabel = "Open file", onLongClickLabel = "Message actions", onLongClick = onLongPress) { if (!opening) onOpen() }
+        .padding(vertical = UiMetrics.GapTiny),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium), verticalAlignment = Alignment.CenterVertically) {
         FileTile(kind)
         Column(Modifier.weight(1f)) {
-            Text(attachment.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = colors.textPrimary,
+            Text(attachment.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = colors.textPrimary,
                 maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
             Text(details, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, maxLines = 1)
         }
@@ -267,12 +268,14 @@ private fun FileRow(attachment: MessageAttachment, opening: Boolean, onLongPress
     }
 }
 
-/** A file's tile, in its kind's color, as file rows and the Files list show it. */
+/** A file's tile: a soft tinted container with a crisp icon in its kind's color (or high-contrast white on outgoing bubbles). */
 @Composable
 internal fun FileTile(kind: FileKind) {
-    Box(Modifier.size(UiMetrics.FileTile).background(DesignTokens.fileColors.getValue(kind.token), MaterialTheme.shapes.medium),
+    val colors = SlatrixTheme.colors
+    val fileColor = DesignTokens.fileColors.getValue(kind.token)
+    Box(Modifier.size(UiMetrics.FileTile).background(colors.fileTileFill(fileColor), MaterialTheme.shapes.medium),
         contentAlignment = Alignment.Center) {
-        Icon(Icons.Outlined.Description, null, Modifier.size(UiMetrics.Icon), tint = SlatrixTheme.colors.onAvatar)
+        Icon(Icons.Outlined.Description, null, Modifier.size(UiMetrics.Icon), tint = colors.fileTileIcon(fileColor))
     }
 }
 

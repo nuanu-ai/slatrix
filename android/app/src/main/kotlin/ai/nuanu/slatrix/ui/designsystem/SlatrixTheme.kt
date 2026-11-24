@@ -89,6 +89,12 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
     /** A person's color, from the shared avatar colors; in dark it is lightened so their name reads on a dark bubble. */
     fun person(colorIndex: Int): Color = DesignTokens.avatarColors[colorIndex].let { if (dark) lerp(it, Color.White, PersonLift) else it }
 
+    /** Soft tinted container behind a file-type icon; on your own bubble uses the translucent bubble rule for contrast. */
+    fun fileTileFill(color: Color): Color = if (underlineLinks) accentTint else color.copy(alpha = FileTileTintAlpha)
+
+    /** Crisp file-type icon tint; on your own bubble uses [textPrimary] ([onAccent]) so blue files never vanish. */
+    fun fileTileIcon(color: Color): Color = if (underlineLinks) textPrimary else color
+
     /** The roles inside your own bubble, on [accentFill]: text, links and marks in [onAccent] and its quieter tints. */
     internal val onFill: AppColors by lazy {
         val on = roles.getValue("onAccent")
@@ -101,7 +107,10 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
         ), dark, underlineLinks = true)
     }
 
-    private companion object { const val PersonLift = 0.45f }
+    private companion object {
+        const val PersonLift = 0.45f
+        const val FileTileTintAlpha = 0.14f
+    }
 }
 
 /** Draws [content] on the accent's fill, as your own bubbles are, with every role it reads turned to suit. */

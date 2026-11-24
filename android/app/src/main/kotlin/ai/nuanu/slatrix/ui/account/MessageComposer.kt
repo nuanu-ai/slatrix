@@ -9,6 +9,7 @@ import ai.nuanu.slatrix.core.MentionCandidate
 import ai.nuanu.slatrix.core.MentionPeople
 import ai.nuanu.slatrix.core.MentionSearch
 import ai.nuanu.slatrix.ui.designsystem.BottomSheet
+import ai.nuanu.slatrix.ui.designsystem.MenuItem
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import android.net.Uri
@@ -41,7 +42,6 @@ import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.PhotoLibrary
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.EmojiEmotions
@@ -284,25 +284,15 @@ private fun AttachSheet(open: Boolean, onAttach: (List<Uri>) -> Unit, onClose: (
     val media = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { if (it.isNotEmpty()) onAttach(it) }
     val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { if (it.isNotEmpty()) onAttach(it) }
     val camera = rememberCamera { onAttach(listOf(it)) }
-    if (open) BottomSheet(onDismissRequest = onClose, containerColor = colors.canvas) {
+    if (open) BottomSheet(onDismissRequest = onClose, containerColor = colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
-            AttachChoice(Icons.Outlined.PhotoLibrary, "Photos & videos") {
+            MenuItem(Icons.Outlined.PhotoLibrary, "Photos & videos") {
                 onClose()
                 media.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
             }
-            camera?.let { AttachChoice(Icons.Outlined.PhotoCamera, "Camera") { onClose(); it() } }
-            AttachChoice(Icons.Outlined.Description, "Files") { onClose(); files.launch(arrayOf("*/*")) }
+            camera?.let { MenuItem(Icons.Outlined.PhotoCamera, "Camera") { onClose(); it() } }
+            MenuItem(Icons.Outlined.Description, "Files") { onClose(); files.launch(arrayOf("*/*")) }
         }
-    }
-}
-
-@Composable
-private fun AttachChoice(icon: ImageVector, label: String, onClick: () -> Unit) {
-    val colors = SlatrixTheme.colors
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(onClick = onClick).padding(horizontal = UiMetrics.GapLarge),
-        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, Modifier.size(UiMetrics.SheetIcon), tint = colors.textPrimary)
-        Text(label, style = MaterialTheme.typography.bodyLarge, color = colors.textPrimary)
     }
 }
 
@@ -310,7 +300,7 @@ private fun AttachChoice(icon: ImageVector, label: String, onClick: () -> Unit) 
 @Composable
 private fun MentionList(candidates: List<MentionCandidate>, onPick: (MentionCandidate) -> Unit) {
     val colors = SlatrixTheme.colors
-    Column(Modifier.fillMaxWidth().background(colors.canvas)) {
+    Column(Modifier.fillMaxWidth().background(colors.overlay)) {
         HorizontalDivider(color = colors.border)
         LazyColumn(Modifier.heightIn(max = UiMetrics.MentionListHeight)) {
             items(candidates, key = { (it as? MentionCandidate.Member)?.person?.id ?: "@room" }) { candidate ->
@@ -346,7 +336,7 @@ private fun TargetBar(target: ComposerTarget, onCancel: () -> Unit) {
     val reply = target as? ComposerTarget.Reply
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(start = UiMetrics.GapLarge, top = UiMetrics.GapSmall),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.width(UiMetrics.QuoteBar).fillMaxHeight().background(colors.accent, MaterialTheme.shapes.small))
+        Box(Modifier.width(UiMetrics.QuoteBar).fillMaxHeight().background(colors.accent, MaterialTheme.shapes.extraSmall))
         Column(Modifier.weight(1f)) {
             Text(if (reply != null) "Replying to ${reply.senderName}" else "Editing message",
                 style = MaterialTheme.typography.labelLarge, color = colors.accent, maxLines = 1, overflow = TextOverflow.Ellipsis)

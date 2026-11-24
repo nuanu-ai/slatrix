@@ -19,6 +19,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Search
@@ -67,11 +68,11 @@ internal fun EmojiPickerSheet(recent: List<String>, onPick: (String) -> Unit, on
             }
         }
     }
-    BottomSheet(onDismissRequest = onDismiss, containerColor = colors.canvas) {
+    BottomSheet(onDismissRequest = onDismiss, containerColor = colors.overlay) {
         Column(Modifier.fillMaxHeight()) {
-            Surface(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge), shape = MaterialTheme.shapes.medium,
+            Surface(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge), shape = CircleShape,
                 color = colors.raised) {
-                Row(Modifier.heightIn(min = UiMetrics.Touch).padding(horizontal = UiMetrics.GapMedium),
+                Row(Modifier.heightIn(min = UiMetrics.SearchBar).padding(horizontal = UiMetrics.GapLarge),
                     verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Outlined.Search, null, Modifier.size(UiMetrics.Icon), tint = colors.textSecondary)
                     BasicTextField(query, { query = it }, Modifier.weight(1f).padding(start = UiMetrics.GapSmall)

@@ -34,6 +34,18 @@ class DesignTokensTest {
         assertEquals(Color(0xffffffff).copy(alpha = 0.045f).toArgb(), dark.getValue("wallpaperDoodle").toArgb())
     }
 
+    @Test fun `file tiles use soft 14 percent tint on neutral surfaces and high contrast on outgoing bubbles`() {
+        val doc = DesignTokens.fileColors.getValue("document")
+        for (dark in listOf(false, true)) {
+            val colors = AppColors(DesignTokens.colors(dark), dark)
+            assertEquals(doc.copy(alpha = 0.14f).toArgb(), colors.fileTileFill(doc).toArgb())
+            assertEquals(doc.toArgb(), colors.fileTileIcon(doc).toArgb())
+            val onFill = colors.onFill
+            assertEquals(onFill.accentTint.toArgb(), onFill.fileTileFill(doc).toArgb())
+            assertEquals(onFill.textPrimary.toArgb(), onFill.fileTileIcon(doc).toArgb())
+        }
+    }
+
     @Test fun `in dark theirs stand off every stop of the wallpaper`() {
         val colors = DesignTokens.colors(true)
         for (stop in listOf("wallpaper")) {

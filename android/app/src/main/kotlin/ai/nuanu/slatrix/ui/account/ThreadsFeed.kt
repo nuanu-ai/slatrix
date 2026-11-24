@@ -18,7 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -55,8 +55,8 @@ fun ThreadsFeed(state: ThreadFeedState, unreadOnly: Boolean = false, onOpenThrea
                 else if (waited) CircularProgressIndicator(Modifier.size(UiMetrics.Icon))
             }
         }
-        items(shown, key = { it.roomId + " " + it.rootId }) { thread ->
-            HorizontalDivider(color = colors.border)
+        itemsIndexed(shown, key = { _, it -> it.roomId + " " + it.rootId }) { index, thread ->
+            if (index > 0) HorizontalDivider(color = colors.border)
             ThreadRow(thread) { onOpenThread(thread) }
         }
     }
@@ -70,9 +70,10 @@ private fun ThreadRow(thread: ThreadFeedItem, onClick: () -> Unit) {
         verticalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
             Text(if (thread.direct) thread.roomName else "#${thread.roomName}", Modifier.weight(1f, fill = false),
-                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = if (thread.unread) FontWeight.SemiBold else FontWeight.Medium,
                 color = if (thread.unread) colors.textPrimary else colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (thread.unread) Box(Modifier.size(UiMetrics.GapSmall).background(colors.mention, CircleShape))
+            if (thread.unread) Box(Modifier.size(UiMetrics.GapSmall).background(colors.accent, CircleShape))
         }
         ThreadMessage(thread.root, UiMetrics.Avatar, 3)
         thread.latest?.let {
@@ -80,7 +81,7 @@ private fun ThreadRow(thread: ThreadFeedItem, onClick: () -> Unit) {
         }
         Text(if (thread.replies == 1) "1 reply" else "${thread.replies} replies",
             Modifier.padding(start = UiMetrics.Avatar + UiMetrics.GapSmall), style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold, color = colors.accent)
+            fontWeight = FontWeight.Medium, color = colors.accent)
     }
 }
 
@@ -92,8 +93,8 @@ private fun ThreadMessage(message: ThreadFeedMessage, avatar: Dp, lines: Int) {
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                 Text(message.senderName, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(latestTime(message.timestamp), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, maxLines = 1)
+                    fontWeight = FontWeight.SemiBold, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(latestTime(message.timestamp), style = MaterialTheme.typography.labelSmall, color = colors.textSecondary, maxLines = 1)
             }
             Text(message.body, style = MaterialTheme.typography.message, color = colors.textBody, maxLines = lines,
                 overflow = TextOverflow.Ellipsis)
