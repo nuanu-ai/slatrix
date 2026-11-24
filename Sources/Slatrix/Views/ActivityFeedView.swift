@@ -168,7 +168,11 @@ struct ActivityFeedView: View {
                         m.font(.body, unread ? .semibold : .regular)
                     ).foregroundStyle(colors.textPrimary).lineLimit(1)
                     Text(
-                        item.kind == .invite ? "invited you" : item.hasMention ? "mentioned you" : "in \(item.roomName)"
+                        item.kind == .invite
+                            ? "invited you"
+                            : item.kind == .reaction
+                                ? "reacted in \(item.roomName)"
+                                : item.hasMention ? "mentioned you" : "in \(item.roomName)"
                     ).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary).lineLimit(1)
                     Spacer()
                     Text(item.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute()).font(

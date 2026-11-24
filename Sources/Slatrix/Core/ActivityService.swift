@@ -3,7 +3,7 @@ import MatrixRustSDK
 import Observation
 
 struct ActivityItem: Identifiable, Hashable {
-    enum Kind: String, Hashable { case message, invite }
+    enum Kind: String, Hashable { case message, invite, reaction }
     var id: String
     var roomID: String
     var eventID: String?
@@ -70,7 +70,7 @@ enum ActivityBadge {
     static func isUnread(_ item: ActivityItem, room: ChatRoom?) -> Bool {
         guard !item.opened else { return false }
         if item.kind == .invite { return true }
-        if item.threadRootID != nil && !item.hasMention { return true }
+        if item.kind == .message && item.threadRootID != nil && !item.hasMention { return true }
         guard let room else { return false }
         return item.hasMention ? room.mentions > 0 : room.hasUnread
     }
@@ -102,6 +102,8 @@ enum ActivityBadge {
             // Deleted before it synced, it still notifies; it leaves no row and no banner.
             guard event.senderId() != ownUserID, !MatrixMapping.isRedacted(event) else { return nil }
             var body = "Message preview unavailable"
+            var kind: ActivityItem.Kind = .message
+            var targetEventID = event.eventId()
             if let content = try? event.content() {
                 guard case .messageLike(let like) = content else { return nil }
                 switch like {
@@ -116,6 +118,11 @@ enum ActivityBadge {
                         body = Self.previewBody(value.body, formatted: value.formatted, names: names, reply: reply)
                     default: body = "Shared an attachment"
                     }
+                case .reactionContent(let relatedEventID):
+                    kind = .reaction
+                    targetEventID = relatedEventID
+                    let key = Self.reactionKey(notification.rawEvent)
+                    body = key.isEmpty ? "Reacted to a message" : "Reacted \(key)"
                 case .poll(let question): body = "Poll: " + String(question.prefix(4096))
                 case .sticker: body = "Shared a sticker"
                 case .roomEncrypted: body = "Encrypted message · Unlock encryption to read it"
@@ -123,13 +130,13 @@ enum ActivityBadge {
                 }
             }
             item = ActivityItem(
-                id: Self.key(roomID: roomID, eventID: event.eventId()), roomID: roomID, eventID: event.eventId(),
+                id: Self.key(roomID: roomID, eventID: event.eventId()), roomID: roomID, eventID: targetEventID,
                 roomName: notification.roomInfo.displayName, senderID: event.senderId(),
                 senderName: Self.senderName(notification, event.senderId()), body: String(body.prefix(4096)),
                 timestamp: Date(timeIntervalSince1970: Double(event.timestamp()) / 1000),
-                hasMention: notification.hasMention == true,
-                threadRootID: notification.threadId ?? event.threadRootEventId(), kind: .message,
-                avatarURL: notification.senderInfo.avatarUrl)
+                hasMention: kind == .message && notification.hasMention == true,
+                threadRootID: kind == .message ? (notification.threadId ?? event.threadRootEventId()) : nil,
+                kind: kind, avatarURL: notification.senderInfo.avatarUrl)
         case .invite(let sender):
             item = ActivityItem(
                 id: Self.key(roomID: roomID, eventID: "invite:\(sender)"), roomID: roomID, eventID: nil,
@@ -140,6 +147,16 @@ enum ActivityBadge {
         }
         item.allowsNativeNotification = notification.actions.map { $0.contains(.notify) } ?? true
         return record(item) ? item : nil
+    }
+
+    private nonisolated static func reactionKey(_ rawEvent: String) -> String {
+        guard let data = rawEvent.data(using: .utf8),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let content = json["content"] as? [String: Any],
+            let relatesTo = content["m.relates_to"] as? [String: Any],
+            let key = relatesTo["key"] as? String
+        else { return "" }
+        return key
     }
 
     private nonisolated static func senderName(_ notification: NotificationItem, _ userID: String) -> String {

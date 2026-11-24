@@ -210,6 +210,27 @@ struct ActivityTests {
         activity.clear()
         #expect(activity.items.isEmpty && activity.mentions.isEmpty)
     }
+
+    // capability: activity.feed
+    @Test("A reaction notification appears in Activity targeting the reacted message without inflating the badge count")
+    func reactionNotificationShowsInActivity() throws {
+        let event = NotificationEvent(noHandle: .init())
+        event.value = .messageLike(content: .reactionContent(relatedEventId: "$mine"))
+        var raw = notification(event)
+        raw.hasMention = false
+        raw.threadId = nil
+        raw.rawEvent = #"{"content":{"m.relates_to":{"rel_type":"m.annotation","event_id":"$mine","key":"👍"}}}"#
+        let item = try #require(activity.receive(raw, roomID: room.id, ownUserID: me))
+        #expect(item.kind == .reaction)
+        #expect(item.eventID == "$mine")
+        #expect(item.body == "Reacted 👍")
+        #expect(ActivityBadge.count(rooms: [], items: activity.items) == 0)
+        var unreadRoom = room
+        unreadRoom.unread = 1
+        #expect(ActivityBadge.isUnread(item, room: unreadRoom))
+        unreadRoom.unread = 0
+        #expect(!ActivityBadge.isUnread(item, room: unreadRoom))
+    }
 }
 
 @MainActor

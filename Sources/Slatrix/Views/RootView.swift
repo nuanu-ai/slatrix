@@ -3164,10 +3164,12 @@ private struct SeenInputs: Equatable {
     }
 }
 
-/// Pairs a read target with the session's reconnect count so receipts that failed while disconnected re-attempt.
+/// Pairs a read target with the session's reconnect count and unread re-arm token so receipts that failed while
+/// disconnected or that cover new reactions on an already-read message are sent.
 private struct ReconnectReadKey<Target: Equatable>: Equatable {
     let target: Target
     let reconnect: Int
+    let ackToken: Int
 }
 
 /// Marks what the reader can see as read. Apart from the window, so a new message reruns only these checks.
@@ -3181,16 +3183,18 @@ private struct ReadTracking: View {
         let context = inputs.readContext(matrix)
         let thread = inputs.threadReadContext(matrix)
         let reconnect = matrix.reconnectCount
+        let unreadAck = matrix.unreadAckToken
+        let threadAck = matrix.threadAckToken
         Color.clear
             .onChange(of: context) { _, context in onReadContext(context) }
             .task(
                 id: ReadStatePolicy.automaticTarget(context, hold: inputs.readHold).map {
-                    ReconnectReadKey(target: $0, reconnect: reconnect)
+                    ReconnectReadKey(target: $0, reconnect: reconnect, ackToken: unreadAck)
                 }
             ) { await acknowledgeTimeline() }
             .task(
                 id: ThreadReadPolicy.target(thread).map {
-                    ReconnectReadKey(target: $0, reconnect: reconnect)
+                    ReconnectReadKey(target: $0, reconnect: reconnect, ackToken: threadAck)
                 }
             ) { await acknowledgeThread() }
             // Activity takes what the reader has seen off its count, the messages that land in view too.

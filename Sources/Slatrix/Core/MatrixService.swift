@@ -929,6 +929,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         self?.pendingInvitationRoomIDs = pending
     }
     private var lastAutomaticReceipt: ReadReceiptTarget?
+    /// Bumps when an already-open conversation receives a non-own reaction or server unread count increase, so
+    /// ReadTracking re-sends `timeline.markAsRead` even though `latestVisibleEventID` did not change.
+    private(set) var unreadAckToken = 0
+    /// Same re-arm token for non-own reactions arriving in an already-open thread.
+    private(set) var threadAckToken = 0
+    @ObservationIgnored private var observedOpenRoomUnread:
+        (roomID: String, unread: Int, unreadMessages: Int, mentions: Int)?
     var timelineSelectionID: UUID { selection }
     var status: ConnectionStatus = .signedOut
     private(set) var connectionErrorMessage: String?
@@ -1010,6 +1017,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         didSet {
             updateLockedMessages()
             if messages.first?.id != oldValue.first?.id { blankPages = 0 }
+            if Self.hasAddedOtherReaction(from: oldValue, to: messages) {
+                lastAutomaticReceipt = nil
+                unreadAckToken += 1
+            }
             if let root = conversationRoot(), let shown = threadMessages.first,
                 root != Self.threadRootCopy(shown, id: root.id)
             {
@@ -1043,7 +1054,24 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     var threadMessages: [ChatMessage] = [] {
         didSet {
             updateLockedMessages()
+            if Self.hasAddedOtherReaction(from: oldValue, to: threadMessages) {
+                lastThreadReceipt = nil
+                threadAckToken += 1
+            }
             countThreadReplies()
+        }
+    }
+    private static func hasAddedOtherReaction(from old: [ChatMessage], to next: [ChatMessage]) -> Bool {
+        guard !old.isEmpty else { return false }
+        var previous: [String: Int] = [:]
+        previous.reserveCapacity(old.count)
+        for message in old {
+            previous[message.eventID] = message.reactions.reduce(0) { $0 + max(0, $1.count - ($1.mine ? 1 : 0)) }
+        }
+        return next.contains { message in
+            guard let before = previous[message.eventID] else { return false }
+            let after = message.reactions.reduce(0) { $0 + max(0, $1.count - ($1.mine ? 1 : 0)) }
+            return after > before
         }
     }
     /// The open thread's root, and the reply count its opener showed, which stays while the thread shows; nil while no
@@ -1112,6 +1140,18 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var selectedRoom: ChatRoom?
     private func updateSelectedRoom() {
         var room = rooms.first { $0.id == selectedRoomID }
+        if let current = room {
+            if let previous = observedOpenRoomUnread, previous.roomID == current.id,
+                current.unread > previous.unread || current.unreadMessages > previous.unreadMessages
+                    || current.mentions > previous.mentions
+            {
+                lastAutomaticReceipt = nil
+                unreadAckToken += 1
+            }
+            observedOpenRoomUnread = (current.id, current.unread, current.unreadMessages, current.mentions)
+        } else {
+            observedOpenRoomUnread = nil
+        }
         // Accepted elsewhere, an invitation on screen opens as the conversation it now is.
         if let id = room?.id, room?.membership == "join", selectedRoom?.id == id, selectedRoom?.membership == "invite" {
             Task { await selectRoom(id) }
@@ -1695,12 +1735,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                     else { return }
                     // The feed records notifications received this session, before native preference filters.
                     guard item.allowsNativeNotification else { return }
-                    if case .message = item.kind, item.timestamp.timeIntervalSince1970 * 1000 < Double(startedAt) {
+                    if item.kind != .invite, item.timestamp.timeIntervalSince1970 * 1000 < Double(startedAt) {
                         return
                     }
                     if let target = MatrixNotificationTarget(accountID: id, roomID: roomID, eventID: item.eventID) {
                         var (title, body) = (item.roomName, item.body)
-                        if case .message = item.kind {
+                        if item.kind != .invite {
                             (title, body) = DesktopMessageNotification.message(
                                 room: item.roomName, sender: item.senderName,
                                 direct: notification.roomInfo.isDirect, body: item.body)
