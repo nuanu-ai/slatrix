@@ -137,8 +137,7 @@ struct RootView: View {
     @State private var localReady = false
     @State private var localError: String?
     @State private var bootstrapping = true
-    @State private var history: [String] = []
-    @State private var historyIndex = -1
+    @State private var history = NavigationHistory()
     @State private var logoutConfirmation = false
     @StateObject private var logoutRecovery = LogoutRecoveryController()
     @State private var windowCanRead = false
@@ -377,7 +376,7 @@ struct RootView: View {
             ).onAppear { Performance.finishOnScreen(.preferencesOpen) }
         case .switcher:
             QuickSwitcherView(
-                matrix: matrix, visited: history,
+                matrix: matrix, visited: history.entries,
                 onSelect: {
                     selectRoom($0)
                     closeModal()
@@ -877,7 +876,7 @@ struct RootView: View {
         .focusedSceneValue(\.rightPaneShown, paneOpen)
         .overlay(alignment: .topLeading) {
             SearchMenu(
-                bar: searchBar, matrix: matrix, recents: recentSearches, visited: history,
+                bar: searchBar, matrix: matrix, recents: recentSearches, visited: history.entries,
                 top: m.paneHeader + (colors.theme.framed ? m.sidebarInset : 0), onPick: pickSearch)
         }
         // The window moves by its top edge wherever nothing there takes the click, and its buttons sit centered in it,
@@ -1183,15 +1182,14 @@ struct RootView: View {
                 trailing()
                 ToolbarCapsule {
                     IconButton(symbol: "chevron.left", label: "Back", role: .body) { navigateHistory(-1) }
-                        .disabled(historyIndex <= 0)
+                        .disabled(!history.canGoBack)
                     IconButton(symbol: "chevron.right", label: "Forward", role: .body) { navigateHistory(1) }
-                        .disabled(historyIndex >= history.count - 1)
+                        .disabled(!history.canGoForward)
                 }
                 .contextMenu {
-                    ForEach(Array(history.enumerated()).reversed(), id: \.offset) { index, id in
+                    ForEach(Array(history.entries.enumerated()).reversed(), id: \.offset) { index, id in
                         Button(matrix.rooms.first { $0.id == id }?.name ?? "Conversation") {
-                            historyIndex = index
-                            selectRoom(history[index], record: false)
+                            if let target = history.jump(to: index) { selectRoom(target, record: false) }
                         }
                     }
                 }
@@ -1199,7 +1197,7 @@ struct RootView: View {
                     SearchBarField(
                         bar: searchBar,
                         prompt: WorkspaceRail.searchPrompt(workspaceID: workspaceID, workspaces: matrix.workspaces),
-                        matrix: matrix, recents: recentSearches, visited: history, onPick: pickSearch
+                        matrix: matrix, recents: recentSearches, visited: history.entries, onPick: pickSearch
                     ).frame(width: m(Self.searchWidth))
                 }.disabled(matrix.user == nil)
             }
@@ -1924,7 +1922,7 @@ struct RootView: View {
         directMessagesColumn = true
         route = .home
         guard room?.isDirect != true else { return }
-        guard let id = ChatRoom.directMessageToOpen(matrix.rooms, visited: Array(history.prefix(historyIndex + 1)))
+        guard let id = ChatRoom.directMessageToOpen(matrix.rooms, visited: history.visited)
         else { return }
         // Picked in the drawer, the list stays open there.
         let drawer = sidebarDrawer
@@ -1961,11 +1959,7 @@ struct RootView: View {
         let generation = UUID()
         let identity = composerIdentity
         navigationGeneration = generation
-        if record && history.last != id {
-            if historyIndex + 1 < history.count { history = Array(history.prefix(historyIndex + 1)) }
-            history.append(id)
-            historyIndex = history.count - 1
-        }
+        if record { history.record(id) }
         pickedFrom = screen
         pendingRoomID = id
         if let target = matrix.rooms.first(where: { $0.id == id }) {
@@ -2109,10 +2103,8 @@ struct RootView: View {
         }
     }
     private func navigateHistory(_ step: Int) {
-        let next = historyIndex + step
-        guard history.indices.contains(next) else { return }
-        historyIndex = next
-        selectRoom(history[next], record: false)
+        guard let target = history.step(step) else { return }
+        selectRoom(target, record: false)
     }
     /// Opens a message's thread from a place that showed no reply count.
     private var openThreadAction: (ChatMessage) -> Void { threadAction { _ in nil } }
@@ -2465,7 +2457,10 @@ struct RootView: View {
         return BindingScope({ editBinding(target, context: context) }) { text in
             MessageComposer(
                 text: text, placeholder: "Edit message", members: matrix.members,
-                isEditing: true,
+                recentSenders: { [matrix] in
+                    (isThread ? matrix.threadMessages : matrix.messages).reversed().map(\.senderID)
+                },
+                canMentionRoom: matrix.canMentionRoom, isEditing: true,
                 onSend: { body, files in
                     guard files.isEmpty, isCurrentEdit(target, context: context), let action = editActionTarget else {
                         throw CancellationError()
@@ -2902,8 +2897,7 @@ struct RootView: View {
         pinPermissionRoomID = nil
         pinPermission = false
         route = .home
-        history = []
-        historyIndex = -1
+        history = NavigationHistory()
         directMessagesColumn = false
         directMessageSearch = ""
         unreadDirectMessagesOnly = false

@@ -46,3 +46,35 @@ extension ConversationNavigation {
         return from
     }
 }
+
+/// Visited conversation stack for Back and Forward navigation.
+struct NavigationHistory: Equatable {
+    private(set) var entries: [String] = []
+    private(set) var index = -1
+
+    var current: String? { entries.indices.contains(index) ? entries[index] : nil }
+    var canGoBack: Bool { index > 0 }
+    var canGoForward: Bool { index < entries.count - 1 }
+    /// Conversations visited up through the current position.
+    var visited: [String] { index >= 0 ? Array(entries.prefix(index + 1)) : [] }
+
+    mutating func record(_ id: String) {
+        guard current != id else { return }
+        if index + 1 < entries.count { entries = Array(entries.prefix(index + 1)) }
+        entries.append(id)
+        index = entries.count - 1
+    }
+
+    mutating func step(_ delta: Int) -> String? {
+        let next = index + delta
+        guard entries.indices.contains(next) else { return nil }
+        index = next
+        return entries[next]
+    }
+
+    mutating func jump(to target: Int) -> String? {
+        guard entries.indices.contains(target) else { return nil }
+        index = target
+        return entries[target]
+    }
+}

@@ -23,6 +23,10 @@ final class FakeHomeserver: @unchecked Sendable {
     var bodies: [String] {
         queue.sync { messages.reversed().compactMap { ($0["content"] as? [String: Any])?["body"] as? String } }
     }
+    /// The `content` dictionaries of the messages the room holds, oldest first.
+    var contents: [[String: Any]] {
+        queue.sync { messages.reversed().compactMap { $0["content"] as? [String: Any] } }
+    }
     private var fetchedEvents = 0
     /// How many single events clients asked for.
     var eventFetches: Int { queue.sync { fetchedEvents } }

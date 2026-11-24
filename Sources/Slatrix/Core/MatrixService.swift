@@ -3681,10 +3681,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard current.supportsTextEditing, current.senderID == user?.id else {
             throw MatrixServiceError.request("This message can’t be edited.")
         }
+        let message = ComposerFormat.message(draft: body)
+        let content = try MatrixMapping.content(message).withMentions(mentions: mentions(message))
         do {
             try await timeline.edit(
                 eventOrTransactionId: .eventId(eventId: target.message.eventID),
-                newContent: .roomMessage(content: MatrixMapping.content(ComposerFormat.message(draft: body))))
+                newContent: .roomMessage(content: content))
             try validateMessageAction(target)
         } catch {
             try validateMessageAction(target)
