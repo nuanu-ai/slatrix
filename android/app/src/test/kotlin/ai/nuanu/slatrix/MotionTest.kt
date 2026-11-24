@@ -1,17 +1,24 @@
 package ai.nuanu.slatrix
 
+import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationMessage
+import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.ChannelDetailsActions
 import ai.nuanu.slatrix.ui.account.ChannelDetailsScreen
+import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.account.LivePreferencesScreen
 import ai.nuanu.slatrix.ui.account.MessageActions
 import ai.nuanu.slatrix.ui.account.MessageActionsHost
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
+import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import android.app.Application
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.view.View
 import androidx.activity.BackEventCompat
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
@@ -20,12 +27,20 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.semantics.SemanticsActions
+import kotlin.math.abs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -318,6 +333,98 @@ class MotionTest {
         assertEquals(2, mounts)
         assertEquals("fresh", lastMarker)
         compose.onNodeWithText("Page: fresh").assertExists()
+    }
+
+    @Test fun quickReactionsStaggerIntoTheMessageSheetAndLandAligned() {
+        val message = ConversationMessage("a", "\$a", "@mira:example.org", "Mira", "Ship it", null, 1_700_000_000_000L,
+            MessageKind.Text, MessageSendState.Sent, false, "M", 0)
+        val quick = listOf("🎉", "👍", "🙂", "❤️", "💯")
+        var shown by mutableStateOf(false)
+        compose.setContent {
+            SlatrixTheme {
+                if (shown) MessageActionsHost(message, MessageActions(quick = quick, onReact = { _, _ -> }), null, {}, {}, {}) {}
+            }
+        }
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+        compose.runOnUiThread { shown = true; Snapshot.sendApplyNotifications() }
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeByFrame()
+        // Querying mounts the Dialog's window; advancing 56ms then animates index 0 while index 4 (72ms delay) still waits.
+        compose.onNodeWithText("🎉", useUnmergedTree = true).assertExists()
+        compose.mainClock.advanceTimeBy(56)
+        val firstEarly = compose.onNodeWithText("🎉", useUnmergedTree = true).getUnclippedBoundsInRoot().top.value
+        val lastEarly = compose.onNodeWithText("💯", useUnmergedTree = true).getUnclippedBoundsInRoot().top.value
+        assertTrue("Later quick reactions stagger in after the first ($firstEarly vs $lastEarly)", lastEarly > firstEarly + 0.5f)
+        compose.mainClock.advanceTimeBy(800)
+        val firstSettled = compose.onNodeWithText("🎉", useUnmergedTree = true).getUnclippedBoundsInRoot().top.value
+        val lastSettled = compose.onNodeWithText("💯", useUnmergedTree = true).getUnclippedBoundsInRoot().top.value
+        assertEquals("All quick reactions settle on one baseline", firstSettled, lastSettled, 0.5f)
+    }
+
+    @Test fun jumpToBottomFabAnimatesOutSmoothlyWhenReturningToNewest() {
+        val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
+        val many = (1..80).map {
+            ConversationMessage("m$it", "\$m$it", "@mira:example.org", "Mira", "Message $it", null,
+                1_700_000_000_000L + it * 60_000L, MessageKind.Text, MessageSendState.Sent, false, "M", 0)
+        }
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(many, loading = false, hasMore = false),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(40)
+        compose.onNodeWithContentDescription("Jump to recent messages").assertExists()
+
+        compose.mainClock.autoAdvance = false
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeByFrame()
+        // Smooth exit animation keeps the FAB scaling/fading out across frames rather than cutting in 1 frame.
+        compose.onNodeWithContentDescription("Jump to recent messages").assertExists()
+        compose.mainClock.advanceTimeBy(800)
+        compose.onNodeWithContentDescription("Jump to recent messages").assertDoesNotExist()
+    }
+
+    @Test fun dismissingMessageSheetUnblursAndFadesScrimSmoothlyInsteadOfSnapping() {
+        val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
+        val msg = ConversationMessage("a", "\$a", "@mira:example.org", "Mira", "Ship it", null,
+            1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "M", 0)
+        lateinit var view: View
+        compose.setContent {
+            view = LocalView.current
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(msg), loading = false, hasMore = false),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                    actions = MessageActions(quick = listOf("👍"), onReact = { _, _ -> }))
+            }
+        }
+        fun topPixel(): Color {
+            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).also { view.draw(Canvas(it)) }
+            return Color(bitmap.getPixel(view.width / 2, view.height / 4))
+        }
+        compose.waitForIdle()
+        val atRest = topPixel()
+
+        compose.onNodeWithText("Ship it").performTouchInput { longClick() }
+        compose.waitForIdle()
+        val dimmed = topPixel()
+        assertTrue("Opening message sheet dims the conversation behind it", abs(dimmed.red - atRest.red) > 0.05f)
+
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithText("Copy text").performSemanticsAction(SemanticsActions.OnClick)
+        compose.runOnUiThread { Snapshot.sendApplyNotifications() }
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeByFrame()
+        val midDismiss = topPixel()
+        assertTrue("Dismissing fades the scrim smoothly instead of snapping to rest ($midDismiss vs $atRest)",
+            abs(midDismiss.red - atRest.red) > 0.02f)
+
+        compose.mainClock.advanceTimeBy(1_000)
+        val restored = topPixel()
+        assertTrue("Conversation returns to rest after smooth exit ($restored vs $atRest)",
+            abs(restored.red - atRest.red) < 0.02f)
     }
 
     /** After [show], [text] is still on its way in two frames later, and settles cleanly within 600 ms. */

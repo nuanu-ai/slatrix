@@ -15,6 +15,7 @@ import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.ThreadOrigin
 import ai.nuanu.slatrix.ui.designsystem.Motion
+import ai.nuanu.slatrix.ui.designsystem.isMotionReduced
 import ai.nuanu.slatrix.ui.designsystem.ReadTicks
 import ai.nuanu.slatrix.ui.designsystem.OnAccentFill
 import ai.nuanu.slatrix.ui.designsystem.bubble
@@ -50,12 +51,17 @@ import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.material.icons.automirrored.outlined.Reply
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.lerp as lerpColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.animation.ExitTransition
-import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -111,6 +117,7 @@ import java.util.Locale
 import androidx.compose.ui.unit.lerp
 import kotlin.math.roundToInt
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: ComposerState,
     onDraft: (String) -> Unit, onSend: () -> Unit, onBack: () -> Unit, onLoadOlder: () -> Unit, onRead: (String) -> Unit,
@@ -144,6 +151,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     /** Opens a thread to reply in it, from a message's menu; [onOpenThread] opens one to read. */
     onReplyInThread: (rootEventId: String) -> Unit = onOpenThread) {
     val colors = SlatrixTheme.colors
+    val context = LocalContext.current
     val list = rememberLazyListState()
     val videos = rememberVideoPlayback(loadFile)
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -219,8 +227,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         following = true
         onSendShown()
     }
-    // A jump shows its message a third of the way up and highlights it briefly, as on the Mac, once.
+    // A jump shows its message a third of the way up and highlights it briefly, then fades the wash out smoothly.
     var lit by remember(opensAt, state.jump) { mutableStateOf<String?>(null) }
+    val highlightAlpha = remember(opensAt, state.jump) { Animatable(0f) }
     LaunchedEffect(opensAt, state.jump) {
         val target = opensAt ?: return@LaunchedEffect
         val index = snapshotFlow { rows.indexOfLast { it.id == target || (it as? ConversationMessage)?.eventId == target } }.first { it >= 0 }
@@ -245,7 +254,10 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             list.scrollBy(-list.layoutInfo.viewportSize.height / 3f)
             jumped = true
             lit = target
+            highlightAlpha.snapTo(1f)
             delay(UiMetrics.HighlightMillis)
+            if (coroutineContext.isMotionReduced(context)) highlightAlpha.snapTo(0f)
+            else highlightAlpha.animateTo(0f, Motion.gentle(Motion.UnitThreshold))
         } finally {
             jumped = true
             lit = null
@@ -295,10 +307,26 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     }
     val back = rememberPredictiveBack(onBack = onBack)
     var menu by remember { mutableStateOf<Pressed?>(null) }
-    // Where the message sheet's top rests, in the window, while it's up; the pressed message comes forward above it.
+    // Where the message sheet's top rests, in the window, while it's up; the pressed message lifts above it and lowers smoothly on close.
     var sheetTop by remember { mutableStateOf<Float?>(null) }
+    var lifted by remember { mutableStateOf<Pressed?>(null) }
+    var liftedTop by remember { mutableStateOf<Float?>(null) }
     val focus = remember { Animatable(0f) }
-    LaunchedEffect(sheetTop != null) { if (sheetTop != null) focus.animateTo(1f, Motion.pane()) else focus.snapTo(0f) }
+    if (menu != null && sheetTop != null) {
+        lifted = menu
+        liftedTop = sheetTop
+    }
+    LaunchedEffect(sheetTop != null) {
+        if (sheetTop != null) {
+            if (coroutineContext.isMotionReduced(context)) focus.snapTo(1f)
+            else focus.animateTo(1f, Motion.spatial(Motion.UnitThreshold))
+        } else {
+            if (coroutineContext.isMotionReduced(context)) focus.snapTo(0f)
+            else focus.animateTo(0f, Motion.gentle(Motion.UnitThreshold))
+            lifted = null
+            liftedTop = null
+        }
+    }
     // Inside a thread, Reply has nowhere further to go.
     menu?.let { pressed ->
         MessageActionsHost(pressed.message, actions, onReplyInThread.takeIf { threadRoot == null }, onRetrySend, onDeleteUnsent,
@@ -380,18 +408,27 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             // first rows. Scrolled away, the newest is off screen and the room would only move what the reader is looking at.
             val jumpRoom = if (state.focused) UiMetrics.Touch + UiMetrics.GapLarge else UiMetrics.GapSmall
             // A thread reads down from its root, as in Slack, so a short one sits at the top, right under the header.
-            LazyColumn(Modifier.fillMaxSize().alpha(if (jumped || rows.none(::opens)) 1f else 0f),
+            // Attach imeNestedScroll only while the IME is open so scrolling down drags the keyboard down 1:1 without
+            // initiating phantom inset control requests when the keyboard is already closed.
+            val imeVisible = WindowInsets.isImeVisible
+            LazyColumn(Modifier.fillMaxSize().then(if (imeVisible) Modifier.imeNestedScroll() else Modifier)
+                .alpha(if (jumped || rows.none(::opens)) 1f else 0f),
                 state = list, reverseLayout = true,
                 verticalArrangement = if (threadRoot != null) Arrangement.Top else Arrangement.Bottom,
                 contentPadding = PaddingValues(top = header + UiMetrics.GapSmall, bottom = footer + jumpRoom)) {
                 // Zero-height bottom anchor keeps index 0 pinned at the newest end when cold-opened replies arrive above it.
                 item(key = "bottom") { Box(Modifier) }
-                // The pressed message hides while its copy stands forward over the sheet.
-                val forward = menu?.message?.id.takeIf { sheetTop != null }
-                itemsIndexed(reversed, key = { _, row -> row.id }) { index, row -> Box(Modifier.alpha(if (row.id != forward) 1f else 0f)) {
+                // The pressed message hides while its copy lifts over the sheet and glides back down on close.
+                val forward = lifted?.message?.id
+                itemsIndexed(reversed, key = { _, row -> row.id }) { index, row ->
+                    Box(Modifier.animateItem(fadeInSpec = Motion.gentle(), placementSpec = Motion.snappy(), fadeOutSpec = Motion.gentle())
+                        .alpha(if (row.id != forward) 1f else 0f)) {
                     when (row) {
                         is DayDivider -> DayDividerRow(row.timestamp)
-                        is ConversationMessage -> Column(if (lit != null && row.eventId == lit) Modifier.background(colors.highlight) else Modifier) {
+                        is ConversationMessage -> Column(if (lit != null && row.eventId == lit) Modifier.drawBehind {
+                            val a = highlightAlpha.value
+                            if (a > 0f) drawRect(colors.highlight, alpha = a)
+                        } else Modifier) {
                             val first = line != null && row.eventId == line
                             if (first) NewLine()
                             // The newer row, below; a run of one sender's bubbles shows their picture by its last.
@@ -417,11 +454,12 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 }
             }
             val jumps = rememberCoroutineScope()
-            androidx.compose.animation.AnimatedVisibility(jumpShows, Modifier.align(Alignment.BottomEnd).padding(bottom = footer).padding(UiMetrics.GapLarge),
-                enter = fadeIn(Motion.pane()), exit = ExitTransition.None) {
+            AnimatedVisibility(jumpShows, Modifier.align(Alignment.BottomEnd).padding(bottom = footer).padding(UiMetrics.GapLarge),
+                enter = fadeIn(Motion.snappy()) + scaleIn(Motion.snappy(), initialScale = 0.8f),
+                exit = fadeOut(Motion.gentle()) + scaleOut(Motion.gentle(), targetScale = 0.8f)) {
                 Surface({
                     following = true
-                    if (state.focused) onShowNewest() else jumps.launch { list.scrollToItem(0) }
+                    if (state.focused) onShowNewest() else jumps.launch { list.animateScrollToItem(0) }
                 }, Modifier.size(UiMetrics.Touch).semantics { contentDescription = "Jump to recent messages" }, shape = CircleShape,
                     color = colors.bubbleIn, contentColor = colors.textSecondary, shadowElevation = UiMetrics.Hairline * 2) {
                     Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.ArrowDownward, null, Modifier.size(UiMetrics.Icon)) }
@@ -436,9 +474,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         }
     }
     }
-    // As in Slack, the pressed message stands sharp just above the sheet, over the conversation receding behind it.
-    val pressed = menu
-    val top = sheetTop
+    // As in Slack, the pressed message stands sharp just above the sheet and glides smoothly back down on dismiss.
+    val pressed = lifted
+    val top = liftedTop
     if (pressed != null && top != null) {
         var height by remember(pressed) { mutableIntStateOf(0) }
         val gap = with(LocalDensity.current) { UiMetrics.GapMedium.toPx() }
@@ -637,17 +675,23 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, aft
     val place = remember { object { var y = 0f } }
     fun menu() = onMenu(place.y)
     val haptics = LocalHapticFeedback.current
-    // A swipe right replies, as in a messenger: the bubble follows the finger, the reply sign fades in behind it, and
-    // crossing the threshold ticks once; read while drawing, so the drag never recomposes the row.
+    // A swipe right replies, as in a messenger: the bubble follows the finger, a circular reply pill pops with accent tint
+    // and a haptic tick at the threshold, and release springs home; read in graphicsLayer/draw so dragging never recomposes.
     val drag = remember(message.id) { Animatable(0f) }
+    val threshold = remember(message.id) { Animatable(0f) }
+    var activated by remember(message.id) { mutableStateOf(false) }
     val reach = with(LocalDensity.current) { UiMetrics.Swipe.toPx() }
     val swipes = rememberCoroutineScope()
     val reply = onReply?.takeIf { message.eventId != null && !failed }
     Box(Modifier.fillMaxWidth().onGloballyPositioned { place.y = it.positionInWindow().y }
         .then(if (reply == null) Modifier else Modifier.pointerInput(message, reply) {
         var past = false
-        fun settle() { swipes.launch { drag.animateTo(0f, Motion.pane()) } }
-        detectHorizontalDragGestures(onDragStart = { past = false }, onDragCancel = ::settle, onDragEnd = {
+        fun settle() {
+            activated = false
+            swipes.launch { drag.animateTo(0f, Motion.snappy()) }
+            swipes.launch { threshold.animateTo(0f, Motion.gentle(Motion.UnitThreshold)) }
+        }
+        detectHorizontalDragGestures(onDragStart = { past = false; activated = false }, onDragCancel = ::settle, onDragEnd = {
             if (past) reply(message)
             settle()
         }) { change, amount ->
@@ -655,17 +699,16 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, aft
             val next = (drag.value + amount * if (drag.value > reach) 0.3f else 1f).coerceIn(0f, reach * 1.5f)
             if (next != drag.value) change.consume()
             swipes.launch { drag.snapTo(next) }
-            if (next >= reach && !past) haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
-            past = next >= reach
+            val crossed = next >= reach
+            if (crossed != past) {
+                activated = crossed
+                if (crossed) haptics.performHapticFeedback(HapticFeedbackType.GestureThresholdActivate)
+                swipes.launch { threshold.animateTo(if (crossed) 1f else 0f, Motion.snappy(Motion.UnitThreshold)) }
+            }
+            past = crossed
         }
     })) {
-    if (reply != null) Icon(Icons.AutoMirrored.Outlined.Reply, null, Modifier.align(Alignment.CenterStart).padding(start = UiMetrics.GapLarge)
-        .size(UiMetrics.Icon).graphicsLayer {
-            val shown = (drag.value / reach).coerceIn(0f, 1f)
-            alpha = shown
-            scaleX = 0.6f + 0.4f * shown
-            scaleY = scaleX
-        }, tint = colors.textSecondary)
+    if (reply != null) ReplySwipeBadge(drag, threshold, reach, activated, Modifier.align(Alignment.CenterStart).padding(start = UiMetrics.GapLarge))
     Row(Modifier.fillMaxWidth().graphicsLayer { translationX = drag.value }
         // Only a failed message answers a tap, as in Slack; any message opens its menu on a long press, with a tick.
         .then(if (failed) Modifier.combinedClickable(onClickLabel = "Message actions", onLongClickLabel = "Message actions",
@@ -773,6 +816,26 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, aft
         }
         if (own) OnAccentFill(bubble) else bubble()
     }
+    }
+}
+
+/** Circular pill badge behind the swipe-to-reply icon; scales and fills with the accent at the threshold. */
+@Composable
+private fun ReplySwipeBadge(drag: Animatable<Float, *>, threshold: Animatable<Float, *>, reach: Float, activated: Boolean, modifier: Modifier) {
+    val colors = SlatrixTheme.colors
+    Box(modifier.size(UiMetrics.SwipeBadge)
+        .graphicsLayer {
+            val shown = (drag.value / reach).coerceIn(0f, 1f)
+            val pop = 0.6f + 0.4f * shown + 0.12f * threshold.value
+            alpha = shown
+            scaleX = pop
+            scaleY = pop
+        }
+        .drawBehind {
+            drawCircle(lerpColor(colors.bubbleIn, colors.accentFill, threshold.value.coerceIn(0f, 1f)))
+        }, contentAlignment = Alignment.Center) {
+        Icon(Icons.AutoMirrored.Outlined.Reply, null, Modifier.size(UiMetrics.Icon),
+            tint = if (activated) colors.onAccent else colors.textSecondary)
     }
 }
 

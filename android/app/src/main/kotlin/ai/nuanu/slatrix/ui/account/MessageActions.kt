@@ -13,12 +13,16 @@ import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.MenuItem
+import ai.nuanu.slatrix.ui.designsystem.Motion
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
+import ai.nuanu.slatrix.ui.designsystem.isMotionReduced
 import android.content.ClipData
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -70,6 +74,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /** What the message sheet can do; an action left null isn't offered. */
@@ -167,12 +172,12 @@ private fun MessageSheet(message: ConversationMessage, actions: MessageActions, 
             Column {
                 if (react != null) Row(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapMedium).padding(bottom = UiMetrics.GapSmall),
                     horizontalArrangement = Arrangement.SpaceEvenly) {
-                    actions.quick.forEach { emoji ->
-                        ReactionButton("React with $emoji", { react(message, emoji); onDismiss() }) {
+                    actions.quick.forEachIndexed { index, emoji ->
+                        ReactionButton("React with $emoji", index, { react(message, emoji); onDismiss() }) {
                             Text(emoji, style = MaterialTheme.typography.headlineSmall)
                         }
                     }
-                    ReactionButton("Add reaction", { onStep(Step.Picker) }) {
+                    ReactionButton("Add reaction", actions.quick.size, { onStep(Step.Picker) }) {
                         Icon(Icons.Outlined.AddReaction, null, Modifier.size(UiMetrics.SheetIcon), tint = colors.textSecondary)
                     }
                 }
@@ -184,10 +189,27 @@ private fun MessageSheet(message: ConversationMessage, actions: MessageActions, 
     }
 }
 
-/** A round quick reaction, a full touch target wide, so a thumb can't miss it; its fill sits a little inside, so six never touch. */
+/** A round quick reaction, a full touch target wide, springing in with a crisp stagger across the row. */
 @Composable
-private fun ReactionButton(label: String, onClick: () -> Unit, content: @Composable () -> Unit) {
-    Box(Modifier.size(UiMetrics.Touch).clip(CircleShape).clickable(role = Role.Button, onClick = onClick)
+private fun ReactionButton(label: String, index: Int, onClick: () -> Unit, content: @Composable () -> Unit) {
+    val context = LocalContext.current
+    val shown = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        if (coroutineContext.isMotionReduced(context)) {
+            shown.snapTo(1f)
+        } else {
+            if (index > 0) delay(index * Motion.ReactionStaggerMillis)
+            shown.animateTo(1f, Motion.snappy(Motion.UnitThreshold))
+        }
+    }
+    Box(Modifier.size(UiMetrics.Touch).graphicsLayer {
+        val progress = shown.value
+        val scale = 0.65f + 0.35f * progress
+        scaleX = scale
+        scaleY = scale
+        alpha = progress.coerceIn(0f, 1f)
+        translationY = (1f - progress) * UiMetrics.GapSmall.toPx()
+    }.clip(CircleShape).clickable(role = Role.Button, onClick = onClick)
         .semantics { contentDescription = label }.padding(UiMetrics.GapTiny / 2).background(SlatrixTheme.colors.reaction, CircleShape),
         contentAlignment = Alignment.Center) { content() }
 }

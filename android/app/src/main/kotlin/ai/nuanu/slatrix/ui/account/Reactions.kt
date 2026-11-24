@@ -10,9 +10,12 @@ import ai.nuanu.slatrix.core.DisplayNames
 import ai.nuanu.slatrix.core.MessageReaction
 import ai.nuanu.slatrix.core.MessageThread
 import ai.nuanu.slatrix.ui.designsystem.BottomSheet
+import ai.nuanu.slatrix.ui.designsystem.Motion
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
+import ai.nuanu.slatrix.ui.designsystem.isMotionReduced
 import android.text.format.DateUtils
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -31,40 +34,71 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.graphics.compositeOver
 
 /**
  * Slack's reaction chips under a message, each its emoji and count: a tap adds or takes back yours, a long press shows
- * who reacted.
+ * who reacted. Chips already on a message stay still as history scrolls; newly added or toggled chips spring-pop in.
  */
 @OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 internal fun Reactions(reactions: List<MessageReaction>, me: String?, names: Map<String, String>,
     onToggle: ((String) -> Unit)?, onShowWho: () -> Unit) {
     val colors = SlatrixTheme.colors
+    val context = LocalContext.current
+    val mounted = remember { reactions.mapTo(mutableSetOf()) { it.key } }
     FlowRow(Modifier.padding(top = UiMetrics.GapSmall), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall),
         verticalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
         for (reaction in reactions) {
-            // Yours is tinted with the accent, as on the Mac.
-            val fill = (if (reaction.mine) colors.accentTint else colors.reaction).compositeOver(colors.bubbleIn)
-            Row(Modifier.height(UiMetrics.ChipHeight)
-                .background(fill, CircleShape)
-                // Your own bubble tints every chip alike, so there yours also wears an edge in the accent, white there.
-                .then(if (reaction.mine && colors.accentTint == colors.reaction) Modifier.border(UiMetrics.Divider, colors.accent, CircleShape)
-                    else Modifier)
-                .semantics { selected = reaction.mine; contentDescription = chip(reaction, names, me) }
-                .combinedClickable(onLongClickLabel = "See who reacted", onLongClick = onShowWho) { onToggle?.invoke(reaction.key) }
-                .padding(horizontal = UiMetrics.GapSmall),
-                horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically) {
-                Text(reaction.key, style = MaterialTheme.typography.bodyLarge)
-                Text("${reaction.count}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium,
-                    color = if (reaction.mine) colors.accent else colors.textPrimary)
+            key(reaction.key) {
+                val existed = remember { reaction.key in mounted }
+                val scale = remember { Animatable(if (existed) 1f else 0.6f) }
+                LaunchedEffect(Unit) {
+                    mounted += reaction.key
+                    if (!existed) {
+                        if (coroutineContext.isMotionReduced(context)) scale.snapTo(1f)
+                        else scale.animateTo(1f, Motion.snappy(Motion.UnitThreshold))
+                    }
+                }
+                var lastCount by remember { mutableIntStateOf(reaction.count) }
+                LaunchedEffect(reaction.count, reaction.mine) {
+                    if (reaction.count != lastCount) {
+                        lastCount = reaction.count
+                        if (!coroutineContext.isMotionReduced(context)) {
+                            scale.snapTo(0.86f)
+                            scale.animateTo(1f, Motion.snappy(Motion.UnitThreshold))
+                        }
+                    }
+                }
+                // Yours is tinted with the accent, as on the Mac.
+                val fill = (if (reaction.mine) colors.accentTint else colors.reaction).compositeOver(colors.bubbleIn)
+                Row(Modifier.height(UiMetrics.ChipHeight)
+                    .graphicsLayer { scaleX = scale.value; scaleY = scale.value }
+                    .background(fill, CircleShape)
+                    // Your own bubble tints every chip alike, so there yours also wears an edge in the accent, white there.
+                    .then(if (reaction.mine && colors.accentTint == colors.reaction) Modifier.border(UiMetrics.Divider, colors.accent, CircleShape)
+                        else Modifier)
+                    .semantics { selected = reaction.mine; contentDescription = chip(reaction, names, me) }
+                    .combinedClickable(onLongClickLabel = "See who reacted", onLongClick = onShowWho) { onToggle?.invoke(reaction.key) }
+                    .padding(horizontal = UiMetrics.GapSmall),
+                    horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny), verticalAlignment = Alignment.CenterVertically) {
+                    Text(reaction.key, style = MaterialTheme.typography.bodyLarge)
+                    Text("${reaction.count}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium,
+                        color = if (reaction.mine) colors.accent else colors.textPrimary)
+                }
             }
         }
     }
