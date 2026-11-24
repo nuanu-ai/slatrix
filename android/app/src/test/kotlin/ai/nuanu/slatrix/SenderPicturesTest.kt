@@ -71,7 +71,7 @@ class SenderPicturesTest {
         val thread = ThreadFeedItem("!design:example.org", "design", false, "\$root",
             ThreadFeedMessage("Sam", "S", 0, "Shall we ship?", 1_000, "mxc://example.org/sam"),
             ThreadFeedMessage("Mira", "M", 1, "Yes, Friday", 2_000, "mxc://example.org/mira"), replies = 3, unread = true)
-        show { ActivityScreen(emptyList(), {}, {}) { ThreadsFeed(ThreadFeedState(listOf(thread), loading = false), it) } }
+        show { ActivityScreen(emptyList(), {}, {}) { onOpenThread, unreadOnly -> ThreadsFeed(ThreadFeedState(listOf(thread), loading = false), unreadOnly, onOpenThread) } }
         compose.onNodeWithText("Threads").performClick()
         assertAsked("mxc://example.org/sam")
     }

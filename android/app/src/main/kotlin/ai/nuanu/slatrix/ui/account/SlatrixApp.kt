@@ -93,6 +93,9 @@ import androidx.compose.ui.Alignment
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.net.toUri
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
@@ -197,12 +200,6 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                     (id ?: WorkspaceRail.AllToken).let { remembered = it; workspacePreferences.selectedSpaceId = it }
                 }
                 val thread = threads?.selected?.collectAsState()?.value
-                // However a thread opens, its replies count as opened, and so do the ones that land while it shows.
-                LaunchedEffect(activity, thread?.room?.id, thread?.threadRoot) {
-                    val roomId = thread?.room?.id ?: return@LaunchedEffect
-                    val root = thread.threadRoot ?: return@LaunchedEffect
-                    activity?.items?.collect { activity.markThreadRead(roomId, root) }
-                }
                 // A thread's root follows the channel under it, which alone sees the root's edits.
                 LaunchedEffect(thread?.conversation, selected?.conversation) {
                     val channel = selected?.conversation?.takeIf { selected.room.id == thread?.room?.id } ?: return@LaunchedEffect
@@ -281,6 +278,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             } },
                             thread?.let { WorkspaceCover("${it.room.id} ${it.threadRoot}") {
                                 LiveConversation(it, threads, workspace, jump, rooms, media, saved, setSaved, people, { id, name -> person = id to name },
+                                    activity = activity,
                                     onThreadRead = { roomId, rootId, eventId -> activeThreadFeed?.markThreadRead(roomId, rootId, eventId) })
                             } },
                             WorkspaceCover("you") {
@@ -375,13 +373,23 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
 
 /** A channel, or with [OpenChannel.threadRoot] a thread, collected here so its updates recompose only this. */
 @Composable
-private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?,
+internal fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: MatrixWorkspace?,
     jump: (RoomSummary, String, String?) -> Unit, rooms: MatrixRooms?, media: MatrixMedia, saved: List<SavedMessage>,
     onSetSaved: (String, String, Boolean) -> Unit, people: MatrixPeople?, onPerson: (userId: String, name: String?) -> Unit,
+    activity: MatrixActivity? = null,
     onThreadRead: (roomId: String, rootId: String, eventId: String) -> Unit = { _, _, _ -> },
     /** Opens a thread, with the reply count the opener showed, which only the replies bar does, to read it or to reply. */
     onOpenThread: (root: String, row: ConversationMessage?, openedWith: Int?, replying: Boolean) -> Unit = { _, _, _, _ -> }) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    // However a thread opens, its Activity replies clear only while the thread itself is resumed and uncovered.
+    LaunchedEffect(activity, open.room.id, open.threadRoot, lifecycleOwner) {
+        val root = open.threadRoot ?: return@LaunchedEffect
+        val feed = activity ?: return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            feed.items.collect { feed.markThreadRead(open.room.id, root) }
+        }
+    }
     // The room as the list follows it, so a change of name, topic or permissions shows while it's open; read only
     // below, so other rooms' updates don't recompose the conversation.
     val roomList = rooms?.state?.collectAsState()
@@ -440,6 +448,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                 else { if (open.threadRoot != null) owner?.back(); main?.open(target) }
             }, profile, { notice = it }) {
         fun row(root: String) = timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == root } as? ConversationMessage
+        val messageActions = rememberMessageActions(conversation, composer, main, room)
         LiveChannelScreen(room, timeline, draft, { composer?.edit(it); if (draft.target !is ComposerTarget.Edit) open.typing?.changed(it) }, { composer?.send(); open.typing?.stopped() },
             { owner?.back() }, { conversation?.loadOlder() },
             { event ->
@@ -453,7 +462,7 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             { if (draft.error != null) composer?.retry() else if (conversation?.retry() != true) owner?.retry(open) },
             { conversation?.retrySend(it) }, { conversation?.deleteUnsent(it) },
             { root -> onOpenThread(root, row(root), null, false) },
-            open.threadRoot, rememberMessageActions(conversation, composer, main, room).let { actions ->
+            open.threadRoot, messageActions.let { actions ->
                 val savedHere = remember(saved, open.room.id) { saved.filter { it.roomId == open.room.id }.map { it.eventId }.toSet() }
                 remember(actions, savedHere, open.threadRoot) {
                     // Marking a channel unread leaves it, as in Slack, so it shows unread in the list; a thread has its own read state.
@@ -469,7 +478,8 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
                 onNeedPeople = { composer?.loadPeople() },
                 onMention = { start, end, candidate -> composer?.mention(start, end, candidate) },
                 onFormat = { start, end, kind, href -> composer?.format(start, end, kind, href) }, onAlsoToChannel = { composer?.alsoToChannel(it) },
-                onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) }), { conversation?.loadNewer(it) },
+                onAttach = { uris -> conversation?.sendAttachments(uris.map { uri -> { AttachmentImport(context).prepare(uri) } }) },
+                recentEmoji = messageActions.recent, onUseEmoji = { main?.emojiHistory?.use(it) }), { conversation?.loadNewer(it) },
             onShowNewest = { conversation?.showNewest() },
             // A quote doesn't know its parent's thread, so it asks before jumping.
             { eventId -> scope.launch { jump(open.room, eventId, main?.threadRootOf(open.room.id, eventId)) } },
@@ -594,10 +604,10 @@ private fun LiveActivity(activity: MatrixActivity?, rooms: MatrixRooms?, threads
     val items = remember(all, known, selectedSpaceId) { all.inWorkspace(known, selectedSpaceId).readWith(known) }
     ActivityScreen(items, { item -> activity?.markRead(item.id); room(item.roomId)?.let { jump(it, item.eventId, item.threadRoot) } },
         { thread -> room(thread.roomId)?.let { threads?.open(it, thread) } },
-        invitations = invitations, mentionRooms = mentionRooms, onOpenInvitation = onInvitation, onOpenRoom = onOpenRoom) {
+        invitations = invitations, mentionRooms = mentionRooms, onOpenInvitation = onInvitation, onOpenRoom = onOpenRoom) { onOpenThread, unreadOnly ->
         // Asks for the feed only while the Threads filter shows, and again only when the set of conversations changes.
         LaunchedEffect(inScope) { onThreadRooms(inScope) }
-        ThreadsFeed(threadFeed, it)
+        ThreadsFeed(threadFeed, unreadOnly, onOpenThread)
     }
 }
 

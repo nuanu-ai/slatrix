@@ -90,6 +90,8 @@ data class ComposerActions(
     val onFormat: ((start: Int, end: Int, kind: ComposerStyle.Kind, href: String?) -> Unit)? = null,
     /** A thread's "Also send to #channel" checked or not. */
     val onAlsoToChannel: (Boolean) -> Unit = {},
+    val recentEmoji: List<String> = emptyList(),
+    val onUseEmoji: (String) -> Unit = {},
 )
 
 /**
@@ -137,8 +139,9 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
     LaunchedEffect(asking) { if (asking) actions.onNeedPeople() }
     var picking by remember { mutableStateOf(false) }
     var focused by remember { mutableStateOf(false) }
-    if (picking) EmojiPickerSheet(emptyList(), { emoji ->
+    if (picking) EmojiPickerSheet(actions.recentEmoji, { emoji ->
         picking = false
+        actions.onUseEmoji(emoji)
         val selection = shown.selection
         replace(selection.min, selection.max, emoji)
     }) { picking = false }

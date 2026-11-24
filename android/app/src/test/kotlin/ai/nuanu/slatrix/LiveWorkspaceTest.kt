@@ -246,6 +246,60 @@ class LiveWorkspaceTest {
         assertEquals(3, reads.size)
     }
 
+    // capability: activity.badge
+    @Test fun aThreadMarksActivityRepliesReadOnlyWhileResumed() {
+        val room = RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
+        val activity = ai.nuanu.slatrix.core.MatrixActivity("@alex:example.org", scope) { _, _ -> null }
+        fun reply(id: String, at: ULong) = org.matrix.rustcomponents.sdk.NotificationItem(
+            event = org.matrix.rustcomponents.sdk.NotificationEvent.Timeline(object : org.matrix.rustcomponents.sdk.TimelineEvent(org.matrix.rustcomponents.sdk.NoHandle) {
+                override fun content() = org.matrix.rustcomponents.sdk.TimelineEventContent.MessageLike(
+                    org.matrix.rustcomponents.sdk.MessageLikeEventContent.RoomMessage(
+                        org.matrix.rustcomponents.sdk.MessageType.Text(org.matrix.rustcomponents.sdk.TextMessageContent(id, null)), null))
+                override fun eventId() = id
+                override fun senderId() = "@sam:example.org"
+                override fun timestamp() = at
+                override fun threadRootEventId() = "\$root"
+            }),
+            rawEvent = "{}", senderInfo = org.matrix.rustcomponents.sdk.NotificationSenderInfo("Sam", null, false),
+            roomInfo = org.matrix.rustcomponents.sdk.NotificationRoomInfo("Team", null, null, null, null, 2u, 0u, emptyList(), true, false, false, false),
+            isNoisy = true, hasMention = false, threadId = "\$root", actions = null,
+        )
+        activity.listener.onNotification(reply("\$r1", 1_000u), "!team:example.org")
+        val owner = object : LifecycleOwner { override val lifecycle = LifecycleRegistry(this) }
+        compose.runOnUiThread { owner.lifecycle.currentState = Lifecycle.State.RESUMED }
+        val media = ai.nuanu.slatrix.core.MatrixMedia(object : org.matrix.rustcomponents.sdk.Client(org.matrix.rustcomponents.sdk.NoHandle) {},
+            "@alex:example.org", compose.activity.cacheDir)
+        try {
+            compose.setContent {
+                SlatrixTheme {
+                    CompositionLocalProvider(LocalLifecycleOwner provides owner) {
+                        ai.nuanu.slatrix.ui.account.LiveConversation(
+                            ai.nuanu.slatrix.core.OpenChannel(room, threadRoot = "\$root"),
+                            null, null, { _, _, _ -> }, null, media, emptyList(), { _, _, _ -> }, null, { _, _ -> },
+                            activity = activity,
+                        )
+                    }
+                }
+            }
+            compose.waitUntil { activity.items.value.singleOrNull()?.unread == false }
+
+            // Locking the phone drops lifecycle below RESUMED: incoming thread replies must stay unread!
+            compose.runOnIdle { owner.lifecycle.currentState = Lifecycle.State.STARTED }
+            compose.waitForIdle()
+            activity.listener.onNotification(reply("\$r2", 2_000u), "!team:example.org")
+            compose.waitForIdle()
+            assertEquals(listOf("\$r2"), activity.items.value.filter { it.unread }.map { it.eventId })
+
+            // Resuming the screen clears them.
+            compose.runOnIdle { owner.lifecycle.currentState = Lifecycle.State.RESUMED }
+            compose.waitUntil { activity.items.value.none { it.unread } }
+        } finally {
+            activity.close()
+            scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+        }
+    }
+
     @Test fun leavingAPageDiscardsItsSavedStateSoReopeningStartsFresh() {
         val open = mutableStateOf(true)
         var mutate: (() -> Unit)? = null

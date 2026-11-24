@@ -62,7 +62,7 @@ fun ActivityScreen(items: List<ActivityItem>, onOpenItem: (ActivityItem) -> Unit
     mentionRooms: List<RoomSummary> = emptyList(),
     onOpenInvitation: (String) -> Unit = {},
     onOpenRoom: (RoomSummary) -> Unit = {},
-    threads: @Composable (onOpenThread: (ThreadFeedItem) -> Unit) -> Unit = {}) {
+    threads: @Composable (onOpenThread: (ThreadFeedItem) -> Unit, unreadOnly: Boolean) -> Unit = { _, _ -> }) {
     var filter by rememberSaveable { mutableStateOf(ActivityFilter.All) }
     var unreadOnly by rememberSaveable { mutableStateOf(false) }
     val shown = remember(items, filter, unreadOnly) {
@@ -99,7 +99,7 @@ fun ActivityScreen(items: List<ActivityItem>, onOpenItem: (ActivityItem) -> Unit
             ActivityFilter.entries.forEach { ChoiceChip(it.label, it == filter) { filter = it } }
         }
         // Threads lists the threads you're in, as Slack's Threads view does, rather than only the replies that notified you.
-        if (filter == ActivityFilter.Threads) threads(onOpenThread)
+        if (filter == ActivityFilter.Threads) threads(onOpenThread, unreadOnly)
         else LazyColumn(Modifier.fillMaxSize()) {
             if (shownInvitations.isEmpty() && shownMentions.isEmpty() && shown.isEmpty()) item(key = "empty") {
                 Box(Modifier.fillParentMaxSize().padding(UiMetrics.GapLarge), contentAlignment = Alignment.Center) {

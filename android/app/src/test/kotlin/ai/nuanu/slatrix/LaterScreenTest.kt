@@ -285,4 +285,44 @@ class LaterScreenTest {
         }
         assertEquals(AvatarPlaceholder.colorIndex(name), compose.avatarColorBehind("SO", view))
     }
+
+    // capability: message.save
+    @Test fun aFailedPreviewFetchIsNotCachedNullAndRetriesOnReconnectAndRevisit() {
+        val saved = SavedList(listOf(SavedMessage("!design:example.org", "\$one", 1_000)))
+        val previews = androidx.compose.runtime.mutableStateMapOf<Pair<String, String>, SavedPreview?>()
+        val connection = kotlinx.coroutines.flow.MutableStateFlow(ai.nuanu.slatrix.core.ConnectionState.Offline)
+        var online = false
+        var visible by mutableStateOf(true)
+        compose.setContent {
+            SlatrixTheme {
+                ai.nuanu.slatrix.ui.account.ProvideConnection(connection) {
+                    if (visible) LaterScreen(saved, rooms,
+                        { if (online) SavedPreview("@mira:example.org", "Mira Chen", "Back online", 1_700_000_000_000L) else null },
+                        LaterActions({}), previews)
+                }
+            }
+        }
+        compose.onNodeWithText("This message is unavailable.").assertIsDisplayed()
+        assertFalse("A failed fetch must not cache null in previews", ("!design:example.org" to "\$one") in previews)
+
+        online = true
+        connection.value = ai.nuanu.slatrix.core.ConnectionState.Connected
+        compose.onNodeWithText("Back online").assertIsDisplayed()
+        assertTrue(previews["!design:example.org" to "\$one"] != null)
+
+        // Also check leaving and revisiting after a failure retries cleanly.
+        previews.clear()
+        online = false
+        visible = false
+        compose.waitForIdle()
+        visible = true
+        compose.onNodeWithText("This message is unavailable.").assertIsDisplayed()
+        assertFalse(("!design:example.org" to "\$one") in previews)
+
+        online = true
+        visible = false
+        compose.waitForIdle()
+        visible = true
+        compose.onNodeWithText("Back online").assertIsDisplayed()
+    }
 }

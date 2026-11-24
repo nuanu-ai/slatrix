@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix.ui.account
 
+import ai.nuanu.slatrix.core.ConnectionState
 import ai.nuanu.slatrix.core.LaterState
 import ai.nuanu.slatrix.core.ReminderPreset
 import ai.nuanu.slatrix.core.RoomSummary
@@ -271,9 +272,21 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: Mutable
     primaryLabel: String, swipes: Boolean, onOpen: () -> Unit, onPrimary: () -> Unit, onMore: () -> Unit) {
     val colors = SlatrixTheme.colors
     val key = saved.roomId to saved.eventId
-    LaunchedEffect(key) { if (key !in previews) previews[key] = load(saved) }
-    val loaded = key in previews
+    val connected = LocalConnection.current == ConnectionState.Connected
+    var attempted by remember(key) { mutableStateOf(previews[key] != null) }
+    LaunchedEffect(key, connected) {
+        if (previews[key] != null) {
+            attempted = true
+            return@LaunchedEffect
+        }
+        // Don't retry while dropping offline after we already tried this visit.
+        if (attempted && !connected) return@LaunchedEffect
+        val result = load(saved)
+        if (result != null) previews[key] = result
+        attempted = true
+    }
     val preview = previews[key]
+    val loaded = preview != null || attempted
     val haptics = LocalHapticFeedback.current
     // A swipe left marks the card complete, as Slack's Later does: the card follows the finger and the check fades in
     // behind it.
