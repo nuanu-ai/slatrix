@@ -9,7 +9,7 @@ enum TextRole: CaseIterable {
     case caption
     /// 13/16: the sidebar, lists, buttons and fields. Unread is semibold.
     case body
-    /// 14/20: messages, message authors and the composer. The one size off the macOS scale.
+    /// 14/21: messages, message authors and the composer. The one size off the macOS scale.
     case reading
     /// 15/20: window, thread and sheet titles; the space name. A message's h3 to h6.
     case title3
@@ -41,7 +41,8 @@ enum TextRole: CaseIterable {
         switch self {
         case .subheadline: 14
         case .caption, .body: 16
-        case .reading, .title3: 20
+        case .reading: 21
+        case .title3: 20
         case .title2: 22
         case .title1: 26
         case .largeTitle: 32
@@ -103,8 +104,6 @@ struct Metrics: Equatable {
     var sidebarFade: CGFloat { 36 * zoom }
     /// The air under a conversation's newest message, above the composer's own margin.
     var conversationEnd: CGFloat { 22 * zoom }
-    /// A conversation's row, centered in a wider pane: the column of `ConversationGrid` with its inset on each side.
-    var conversationRow: CGFloat { ConversationGrid.rowWidth * zoom }
     /// From a row's edge to its avatar, and from its text to its other edge.
     func conversationInset(thread: Bool) -> CGFloat { ConversationGrid.inset(thread: thread) * zoom }
     /// From a column's leading edge to its text: the avatar and the gap after it.
@@ -213,6 +212,25 @@ private struct ElevationModifier: ViewModifier {
             .shadow(
                 color: .black.opacity(dark ? min(shadow.opacity * 2.5, 0.6) : shadow.opacity),
                 radius: m(shadow.radius), y: m(shadow.y))
+    }
+}
+
+/// Fits its child to its natural width, clamped between `min` and `max` (and never wider than the parent proposal).
+struct FitWidthLayout: Layout {
+    var min: CGFloat = 0
+    var max: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let child = subviews.first else { return .zero }
+        let ceiling = Swift.min(max, proposal.width ?? max)
+        let natural = child.sizeThatFits(ProposedViewSize(width: nil, height: proposal.height))
+        let width = Swift.min(ceiling, Swift.max(Swift.min(min, ceiling), natural.width))
+        let height = child.sizeThatFits(ProposedViewSize(width: width, height: proposal.height)).height
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
     }
 }
 

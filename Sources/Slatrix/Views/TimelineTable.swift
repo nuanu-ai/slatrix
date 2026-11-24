@@ -30,6 +30,7 @@ struct TimelineWelcome: Hashable {
 struct TimelineMessageEntry: Hashable {
     var message: ChatMessage
     var grouped: Bool
+    var followsAttachment: Bool = false
     var time: String
     var saved: Bool
     var pinned: Bool
@@ -451,11 +452,8 @@ struct TimelineTable: NSViewRepresentable {
 
     // MARK: Heights
 
-    /// The width a row lays out at: a thread fills its pane, and a conversation's rows stop at its column.
-    private var rowWidth: CGFloat {
-        guard let context = configuration?.context, !context.isThread else { return width }
-        return min(width, context.metrics.conversationRow)
-    }
+    /// The width a row lays out at: both conversations and threads span their pane cleanly.
+    private var rowWidth: CGFloat { width }
 
     /// Builds and measures the row ahead of display. Returns whether its measured height changed.
     @discardableResult private func prepare(_ row: Int) -> Bool {
@@ -505,7 +503,7 @@ struct TimelineTable: NSViewRepresentable {
                 }
             }
             lines += max(1, ceil(characters / perLine))
-            var height = (row.grouped ? m.sp4 : m(29)) + lines * line
+            var height = (row.grouped ? (row.followsAttachment ? m(14) : m.sp4) : m(29)) + lines * line
             if !row.message.reactions.isEmpty { height += m(30) }
             if row.message.attachment != nil { height += m(300) }
             if row.message.replyPreview != nil { height += m(48) }
@@ -1116,7 +1114,10 @@ struct TimelineTable: NSViewRepresentable {
             x: clip.minX, y: clip.minY + insets.top, width: clip.width,
             height: clip.height - insets.top - insets.bottom)
         let compact = context.appearance?.density == .compact
-        let inset = min(size.height / 2, MessageRow.topInset(m, grouped: entry.grouped, compact: compact))
+        let inset = min(
+            size.height / 2,
+            MessageRow.topInset(m, grouped: entry.grouped, compact: compact, followsAttachment: entry.followsAttachment)
+        )
         let y = min(max(top.y + inset - size.height, visible.minY + m.sp4), visible.maxY - size.height)
         toolbar.frame.origin = NSPoint(x: top.x - m.conversationInset(thread: context.isThread) - size.width, y: y)
         toolbar.isHidden = false
@@ -1335,7 +1336,8 @@ struct TimelineRow: View, Equatable {
                 let message = row.message
                 let own = message.senderID == matrix.user?.id
                 MessageRow(
-                    message: message, grouped: row.grouped, isThread: context.isThread,
+                    message: message, grouped: row.grouped, followsAttachment: row.followsAttachment,
+                    isThread: context.isThread,
                     own: own, highlighted: row.highlighted, isSaved: row.saved,
                     isPinned: row.pinned, sendFailure: row.sendFailure, sendWaitStatus: row.sendWaitStatus,
                     sendBusy: row.sendBusy, hovered: hovered,
@@ -1375,14 +1377,14 @@ struct TimelineRow: View, Equatable {
 }
 
 extension View {
-    /// Keeps a conversation's row to its column, centered in a wider pane. A thread's pane is narrower: its rows fill it.
+    /// Spans the pane width cleanly for both conversations and threads, matching Slack desktop.
     func conversationRow(_ m: Metrics, isThread: Bool) -> some View {
-        frame(maxWidth: isThread ? .infinity : m.conversationRow).frame(maxWidth: .infinity)
+        frame(maxWidth: .infinity)
     }
 
     /// Keeps this view between the edges of `ConversationGrid`'s column, as the composer does under the messages.
     func conversationColumn(_ m: Metrics, isThread: Bool) -> some View {
-        padding(.horizontal, m.conversationInset(thread: isThread)).conversationRow(m, isThread: isThread)
+        padding(.horizontal, m.conversationInset(thread: isThread)).frame(maxWidth: .infinity)
     }
 }
 

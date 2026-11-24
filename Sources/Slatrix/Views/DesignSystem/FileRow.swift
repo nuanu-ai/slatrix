@@ -25,13 +25,13 @@ struct FileRow<Menu: View>: View {
             HStack(spacing: m.sp12) {
                 tileView
                 VStack(alignment: .leading, spacing: m.sp2) {
-                    FileNameText(name, role: .reading, semibold: true).foregroundStyle(colors.textPrimary)
-                    Text(caption).font(m.font(.body)).foregroundStyle(colors.textSecondary).lineLimit(1)
+                    FileNameText(name, role: .body, weight: .medium).foregroundStyle(colors.textPrimary)
+                    Text(caption).font(m.font(.caption)).foregroundStyle(colors.textSecondary).lineLimit(1)
                 }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, m.sp12).padding(.vertical, m.sp8)
-            .background(hovering ? colors.hover : .clear, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+            .background(hovering ? colors.rowHover : .clear, in: RoundedRectangle(cornerRadius: m.radius))
         }
         .buttonStyle(.row).focused($focus, equals: .row).help(name)
         .accessibilityActions { if let onDownload { Button("Download", action: onDownload) } }
@@ -70,15 +70,15 @@ struct FileRow<Menu: View>: View {
                 DelayedProgress().frame(width: m(side), height: m(side))
             } else if let onDownload {
                 IconButton(
-                    symbol: "arrow.down.to.line", label: "Download", role: .reading, side: side, action: onDownload
+                    symbol: "arrow.down.to.line", label: "Download", role: .body, side: side, action: onDownload
                 )
                 .focused($focus, equals: .download)
             }
             SwiftUI.Menu(content: menu) {
-                Image(systemName: "ellipsis").font(m.font(.reading)).frame(width: m(side), height: m(side))
+                Image(systemName: "ellipsis").font(m.font(.body)).frame(width: m(side), height: m(side))
             }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: m(side)).help("More actions")
                 .focused($focus, equals: .menu)
-        }.padding(.horizontal, m.sp2).frame(height: m(side))
+        }.foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp2).frame(height: m(side))
             .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radius))
             .elevation(.e1, cornerRadius: m.radius)
     }
@@ -89,15 +89,24 @@ struct FileRow<Menu: View>: View {
 struct FileNameText: View {
     let name: String
     let role: TextRole
-    var semibold = false
+    var weight: Font.Weight = .regular
     @Environment(\.metrics) private var m
 
-    init(_ name: String, role: TextRole, semibold: Bool = false) {
-        (self.name, self.role, self.semibold) = (name, role, semibold)
+    init(_ name: String, role: TextRole, weight: Font.Weight = .regular) {
+        (self.name, self.role, self.weight) = (name, role, weight)
+    }
+
+    private var nsWeight: NSFont.Weight {
+        switch weight {
+        case .medium: .medium
+        case .semibold: .semibold
+        case .bold: .bold
+        default: .regular
+        }
     }
 
     var body: some View {
-        let font = NSFont.systemFont(ofSize: m.size(role), weight: semibold ? .semibold : .regular)
+        let font = NSFont.systemFont(ofSize: m.size(role), weight: nsWeight)
         // The whole name sets the line's height and how wide it may grow; the cut is drawn over it at the width it got.
         Text(name).lineLimit(1).hidden()
             .overlay(alignment: .leading) {
@@ -109,7 +118,7 @@ struct FileNameText: View {
                     ).lineLimit(1).fixedSize()
                 }
             }
-            .font(m.font(role, semibold ? .semibold : .regular)).accessibilityLabel(name)
+            .font(m.font(role, weight)).accessibilityLabel(name)
     }
 }
 

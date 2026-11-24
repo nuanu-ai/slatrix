@@ -1640,21 +1640,21 @@ extension TimelineHostedTests {
         #expect(toolbar(harness) == nil)
     }
 
-    @Test("In a wide pane the toolbar sits at the column's right edge, however wide the pane")
+    @Test("In a wide pane the toolbar sits at the pane's right inset edge, however wide the pane")
     func toolbarAtColumnEdge() async throws {
         let harness = Harness(messages: Self.actionable(0..<30), width: 1_200, height: 560)
         defer { harness.close() }
         await settle(harness) { harness.top(of: "Message 29") != nil }
-        // The column centers 704 pt of content, so its right edge is 352 from the pane's middle.
+        // Conversation rows span the pane width with a 20 pt edge inset on each side.
         func barEdge() throws -> CGFloat {
             _ = try hover(harness, "Message 29")
             let bar = try #require(toolbar(harness))
             return bar.convert(bar.bounds, to: nil).maxX
         }
-        #expect(abs(try barEdge() - (600 + 352)) < 1)
+        #expect(abs(try barEdge() - (1_200 - 20)) < 1)
         harness.window.setContentSize(NSSize(width: 1_500, height: 560))
         harness.layout()
-        #expect(abs(try barEdge() - (750 + 352)) < 1)
+        #expect(abs(try barEdge() - (1_500 - 20)) < 1)
     }
 
     @Test("A one-line row under the same sender has the toolbar above its line, never over it")
@@ -2127,7 +2127,7 @@ extension TimelineHostedTests {
 /// Rows on their own: no window needed.
 @MainActor
 struct MessageRowLayoutTests {
-    @Test("A long message wraps at the column's 704 pt of content however wide the pane is")
+    @Test("A long message spans wider panes cleanly instead of wrapping at a narrow column cap")
     func wrapsAtTheColumn() {
         let message = ChatMessage(
             id: "$long", roomID: "!timeline:example.org", senderID: "@a:example.org", senderName: "Avery",
@@ -2137,8 +2137,7 @@ struct MessageRowLayoutTests {
                 .environmentObject(AppearanceStore())
             return NSHostingController(rootView: row).sizeThatFits(in: CGSize(width: pane, height: 10_000)).height
         }
-        // 704 of text and the row's 20 pt padding on each side.
-        #expect(height(pane: 2_000) == height(pane: 744))
+        #expect(height(pane: 1_200) < height(pane: 744))
         #expect(height(pane: 700) > height(pane: 744))
     }
 
@@ -2258,7 +2257,7 @@ struct TimelineRowHeightTests {
         #expect(cell.row == nil)
     }
 
-    @Test("Resizing a wide conversation pane keeps cached row heights when the row column width is unchanged")
+    @Test("Reopening a conversation at the same width keeps cached row heights, and a new width invalidates them")
     func widePaneResizePreservesCachedRowHeights() throws {
         let matrix = MatrixService.scratch()
         let key = TimelineMemory.Key(
@@ -2300,7 +2299,7 @@ struct TimelineRowHeightTests {
             return (coordinator, scrollView, table)
         }
 
-        // First open at 1100 pt (> conversationRow = 744): scroll to top so welcome is measured, then hold heights.
+        // First open at 1100 pt: scroll to top so welcome is measured, then hold heights.
         let (first, scroll1, table1) = makeCoordinator(width: 1100)
         scroll1.contentView.scroll(to: .zero)
         scroll1.reflectScrolledClipView(scroll1.contentView)
@@ -2323,9 +2322,13 @@ struct TimelineRowHeightTests {
         #expect(abs(table1.rect(ofRow: 1).height - measuredWelcome) < 1)
         first.holdHeights()
 
-        // Reopen at 900 pt (still > conversationRow = 744): off-screen welcome row keeps its measured height.
-        let (_, _, table2) = makeCoordinator(width: 900)
-        #expect(abs(table2.rect(ofRow: 1).height - measuredWelcome) < 1)
+        // Reopen at the same width (1100 pt): off-screen welcome row keeps its measured height.
+        let (_, _, tableSameWidth) = makeCoordinator(width: 1100)
+        #expect(abs(tableSameWidth.rect(ofRow: 1).height - measuredWelcome) < 1)
+
+        // Reopen at a narrower width (500 pt): rows span the pane width, so the 1100 pt height cache does not apply.
+        let (_, _, tableNarrower) = makeCoordinator(width: 500)
+        #expect(abs(tableNarrower.rect(ofRow: 1).height - measuredWelcome) > 1)
     }
 }
 

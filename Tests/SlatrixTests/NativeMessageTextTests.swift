@@ -203,8 +203,26 @@ struct NativeMessageTextTests {
             }
             return secondLine("One\n\nTwo") - secondLine("One\nTwo")
         }
-        #expect((4...10).contains(gap()))
+        #expect((6...10).contains(gap()))
         #expect(gap(MessageBlock(code: true)) > 14)
+    }
+
+    @Test("Normal paragraphs use paragraph spacing and pushOut line breaking; code blocks keep tight default breaks")
+    func paragraphRhythmAndLineBreakStrategy() throws {
+        let text = NativeSelectableMessageText.attributed(
+            [
+                MessageBodyRun(text: "First paragraph\nSecond paragraph\n"),
+                MessageBodyRun(text: "let a = 1\nlet b = 2\n", style: .code, block: MessageBlock(code: true)),
+                MessageBodyRun(text: "Trailing prose"),
+            ], fontSize: 14, textColor: .labelColor, linkColor: .systemBlue)
+        let normal = try #require(style(text, at: 0))
+        #expect(normal.paragraphSpacing > 2 && normal.paragraphSpacing <= 5)
+        #expect(normal.lineBreakStrategy == .pushOut)
+
+        let codeStart = (text.string as NSString).range(of: "let a = 1").location
+        let codeFirst = try #require(style(text, at: codeStart))
+        #expect(codeFirst.paragraphSpacing == 0)
+        #expect(codeFirst.lineBreakStrategy == [])
     }
 
     @Test("A quote indents past its bar, and the text after it does not")

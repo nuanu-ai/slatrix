@@ -15,6 +15,10 @@ enum MessageBlocks {
     static func quoteIndent(_ fontSize: CGFloat) -> CGFloat { fontSize }
     static func barWidth(_ fontSize: CGFloat) -> CGFloat { fontSize * 0.27 }
     static func codePadding(_ fontSize: CGFloat) -> CGFloat { fontSize * 0.5 }
+    /// Line spacing for reading text (~21 pt lines at the 14 pt reading size), shared by timeline and composer.
+    static func readingLineSpacing(_ fontSize: CGFloat) -> CGFloat { fontSize * 0.27 }
+    /// Space after an explicit paragraph break (`\n`) on non-code paragraphs, distinct from soft-wrapped lines.
+    static func paragraphSpacing(_ fontSize: CGFloat) -> CGFloat { fontSize * 0.25 }
 
     /// h1 and h2 on the macOS title sizes, and h3 to h6 a step above the reading size, scaled from `fontSize`, the
     /// reading size at the current zoom.
@@ -43,6 +47,10 @@ enum MessageBlocks {
     ) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()
         style.lineSpacing = lineSpacing
+        if !code {
+            style.paragraphSpacing = paragraphSpacing(fontSize)
+            style.lineBreakStrategy = .pushOut
+        }
         let indent =
             (quote ? quoteIndent(fontSize) : 0) + CGFloat(list) * listIndent(fontSize)
             + (code ? codePadding(fontSize) : 0)
@@ -68,8 +76,9 @@ enum MessageBlocks {
                     as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle
             else { return }
             style.lineSpacing = 0
-            style.minimumLineHeight = fontSize * 0.35
-            style.maximumLineHeight = fontSize * 0.35
+            style.paragraphSpacing = 0
+            style.minimumLineHeight = fontSize * 0.5
+            style.maximumLineHeight = fontSize * 0.5
             text.addAttribute(.paragraphStyle, value: style, range: enclosing)
         }
     }
@@ -104,7 +113,8 @@ enum MessageBlocks {
     static func draw(
         _ key: NSAttributedString.Key, color: NSColor, lines: NSRect, style: NSParagraphStyle?, fontSize: CGFloat
     ) {
-        let height = lines.height - (style?.lineSpacing ?? 0)
+        let trailingGap = (style?.lineSpacing ?? 0) + (key == .codeBlock ? 0 : (style?.paragraphSpacing ?? 0))
+        let height = lines.height - trailingGap
         if key == .codeBlock {
             let padding = style.map { -$0.tailIndent } ?? codePadding(fontSize)
             let left = (style?.headIndent ?? padding) - padding
