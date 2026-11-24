@@ -45,10 +45,11 @@ struct ActivityFeedView: View {
         let items = filteredItems(scope, roomsByID: roomsByID)
         let summaryRooms = filteredSummaryRooms(scope)
         let hasMarkableUnread =
-            scope.rooms.contains { $0.membership == "join" && ($0.hasUnread || $0.mentions > 0) }
-            || scope.items.contains {
-                $0.kind != .invite && ActivityBadge.isUnread($0, room: roomsByID[$0.roomID])
-            }
+            !matrix.isPreview
+            && (scope.rooms.contains { $0.membership == "join" && ($0.hasUnread || $0.mentions > 0) }
+                || scope.items.contains {
+                    $0.kind != .invite && ActivityBadge.isUnread($0, room: roomsByID[$0.roomID])
+                })
         VStack(spacing: 0) {
             HStack(spacing: m.sp12) {
                 TabBar(tabs: ActivityFilter.allCases.map { .init(value: $0, title: $0.rawValue) }, selection: $filter)
@@ -67,9 +68,9 @@ struct ActivityFeedView: View {
             if items.isEmpty && summaryRooms.isEmpty {
                 EmptyStateView(
                     symbol: filter == .mentions ? "at" : "bell",
-                    title: unreadOnly
-                        ? "You’re all caught up"
-                        : (filter == .mentions ? "No mentions" : "You’re all caught up"))
+                    title: filter == .mentions
+                        ? (unreadOnly ? "No unread mentions" : "No mentions")
+                        : "You’re all caught up")
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -82,7 +83,7 @@ struct ActivityFeedView: View {
                                     summaryRow(room).modifier(FeedRowHover())
                                 }.buttonStyle(.row)
                                     .contextMenu {
-                                        if room.membership == "join" {
+                                        if !matrix.isPreview && room.membership == "join" {
                                             Button("Mark as read") { onMarkRoomRead(room) }
                                         }
                                     }
@@ -99,7 +100,7 @@ struct ActivityFeedView: View {
                                     activityRow(item, unread: unread).modifier(FeedRowHover())
                                 }.buttonStyle(.row)
                                     .contextMenu {
-                                        if unread && item.kind != .invite {
+                                        if !matrix.isPreview && unread && item.kind != .invite {
                                             Button("Mark as read") { onMarkItemRead(item) }
                                         }
                                     }

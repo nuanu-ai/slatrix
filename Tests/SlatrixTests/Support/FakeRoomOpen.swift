@@ -220,7 +220,11 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     override func id() -> String { identifier }
     /// Joined unless the test invites you.
     var joined = true
+    let markedReceipts = Recorder<ReceiptType>()
+    let unreadFlags = Recorder<Bool>()
     override func membership() -> Membership { joined ? .joined : .invited }
+    override func markAsRead(receiptType: ReceiptType) async throws { markedReceipts.append(receiptType) }
+    override func setUnreadFlag(newValue: Bool) async throws { unreadFlags.append(newValue) }
     override func timelineWithConfiguration(configuration: TimelineConfiguration) async throws -> Timeline {
         focuses.append(configuration.focus)
         await buildGate.wait()
