@@ -13,6 +13,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.withFrameNanos
@@ -83,14 +84,49 @@ internal fun CoroutineContext.isMotionReduced(context: Context? = null): Boolean
 
 /**
  * Shared predictive-back state between a workspace container and its top page's [rememberPredictiveBack] handler.
- * Read only in graphicsLayer and draw scopes so dragging never recomposes either page.
+ * Writes are token-owned so a cancelled spring from an earlier page can never leak into a newly pushed page; progress
+ * is read only in graphicsLayer and draw scopes so dragging never recomposes either page.
  */
 class BackProgressCoordinator {
     /** Current predictive-back swipe progress (0f = resting, 1f = fully swiped off). */
     val progress = mutableFloatStateOf(0f)
 
+    /** True while an active gesture owns the coordinator, so a lingering tap-back exit yields immediately. */
+    val active = mutableStateOf(false)
+
     /** Swipe progress captured right when a back gesture commits, so the exit slide continues from the release point. */
     var committedProgress: Float = 0f
+
+    private var owner: Any? = null
+
+    fun begin(token: Any) {
+        owner = token
+        active.value = true
+    }
+
+    fun update(token: Any, value: Float) {
+        if (owner === token) progress.floatValue = value
+    }
+
+    fun commit(token: Any, value: Float) {
+        if (owner === token) committedProgress = value
+    }
+
+    fun finish(token: Any) {
+        if (owner === token) {
+            progress.floatValue = 0f
+            committedProgress = 0f
+            active.value = false
+            owner = null
+        }
+    }
+
+    fun clear() {
+        owner = null
+        progress.floatValue = 0f
+        committedProgress = 0f
+        active.value = false
+    }
 }
 
 /** Provided by `LiveWorkspace` to its top cover so predictive back drives both the top page and underlying parallax. */
@@ -105,46 +141,52 @@ private val ZeroProgress = mutableFloatStateOf(0f)
 @Composable
 fun rememberPredictiveBack(enabled: Boolean = true, onBack: () -> Unit): State<Float> {
     val coordinator = LocalBackProgress.current
+    val token = remember { Any() }
     val progress = remember { Animatable(0f) }
     val back by rememberUpdatedState(onBack)
     val context = LocalContext.current
     val hosted = coordinator != null
     DisposableEffect(coordinator) {
-        onDispose { coordinator?.progress?.floatValue = 0f }
+        onDispose { coordinator?.finish(token) }
     }
     PredictiveBackHandler(enabled) { events ->
         try {
             events.collect { event ->
                 progress.snapTo(event.progress)
-                coordinator?.progress?.floatValue = event.progress
+                coordinator?.begin(token)
+                coordinator?.update(token, event.progress)
             }
         } catch (cancelled: CancellationException) {
             withContext(NonCancellable) {
                 if (coroutineContext.isMotionReduced(context)) {
                     progress.snapTo(0f)
-                    coordinator?.progress?.floatValue = 0f
+                    coordinator?.finish(token)
                 } else {
                     progress.animateTo(0f, Motion.spatial(Motion.UnitThreshold)) {
-                        coordinator?.progress?.floatValue = value
+                        coordinator?.update(token, value)
                     }
+                    coordinator?.finish(token)
                 }
             }
             throw cancelled
         }
-        coordinator?.committedProgress = progress.value
+        coordinator?.commit(token, progress.value)
         back()
         // A page that stays, as one busy saving does, springs smoothly back once the frame that would remove it passes.
         withFrameNanos {}
-        coordinator?.committedProgress = 0f
+        coordinator?.commit(token, 0f)
         if (progress.value > 0f) {
             if (coroutineContext.isMotionReduced(context)) {
                 progress.snapTo(0f)
-                coordinator?.progress?.floatValue = 0f
+                coordinator?.finish(token)
             } else {
                 progress.animateTo(0f, Motion.spatial(Motion.UnitThreshold)) {
-                    coordinator?.progress?.floatValue = value
+                    coordinator?.update(token, value)
                 }
+                coordinator?.finish(token)
             }
+        } else {
+            coordinator?.finish(token)
         }
     }
     // Inside LiveWorkspace the workspace translates the whole cover with its edge shadow, so return 0f to avoid doubling.

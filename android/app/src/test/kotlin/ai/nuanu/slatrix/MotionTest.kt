@@ -63,11 +63,17 @@ import ai.nuanu.slatrix.ui.account.LiveWorkspace
 import ai.nuanu.slatrix.ui.account.WorkspaceCover
 import ai.nuanu.slatrix.ui.designsystem.Motion
 import android.provider.Settings
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -312,12 +318,13 @@ class MotionTest {
     @Test fun poppingAPageSlidesItOutWithoutRecreatingItsCompositionAndReopeningMidExitStartsFresh() {
         var open by mutableStateOf(true)
         var mounts = 0
+        var disposes = 0
         var lastMarker = ""
         var mutate: (() -> Unit)? = null
         compose.setContent {
             SlatrixTheme {
                 LiveWorkspace(listOfNotNull(WorkspaceCover("design") {
-                    androidx.compose.runtime.DisposableEffect(Unit) { mounts++; onDispose {} }
+                    androidx.compose.runtime.DisposableEffect(Unit) { mounts++; onDispose { disposes++ } }
                     var marker by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("fresh") }
                     mutate = { marker = "scrolled" }
                     lastMarker = marker
@@ -329,6 +336,7 @@ class MotionTest {
         }
         compose.waitForIdle()
         assertEquals(1, mounts)
+        assertEquals(0, disposes)
         compose.runOnIdle { mutate?.invoke() }
         compose.waitForIdle()
         assertEquals("scrolled", lastMarker)
@@ -337,14 +345,134 @@ class MotionTest {
         compose.runOnUiThread { open = false; Snapshot.sendApplyNotifications() }
         compose.mainClock.advanceTimeByFrame()
         compose.mainClock.advanceTimeByFrame()
-        assertEquals("Popping must not dispose and recreate the exiting page mid-slide", 1, mounts)
+        assertEquals("Popping must keep the exiting subtree mounted mid-slide", 1, mounts)
+        assertEquals("Popping must not dispose the exiting page before its exit finishes", 0, disposes)
 
-        // Interrupt mid-exit by re-pushing the same key: must start fresh rather than inherit dying saved state.
+        // Interrupt mid-exit by re-pushing the same key: disposes the dying copy and mounts fresh state.
         compose.runOnUiThread { open = true; Snapshot.sendApplyNotifications() }
         compose.mainClock.advanceTimeBy(1_000)
         assertEquals(2, mounts)
+        assertEquals("Dying copy was disposed on interruption", 1, disposes)
         assertEquals("fresh", lastMarker)
         compose.onNodeWithText("Page: fresh").assertExists()
+    }
+
+    @Test fun poppedPageIgnoresTapsWhileSlidingOutAndUncoveredHomeReceivesTaps() {
+        var open by mutableStateOf(true)
+        var exitingClicks = 0
+        var homeClicks = 0
+        compose.setContent {
+            SlatrixTheme {
+                LiveWorkspace(listOfNotNull(WorkspaceCover("prefs") {
+                    Box(Modifier.fillMaxSize().clickable { exitingClicks++ }, contentAlignment = Alignment.Center) {
+                        Text("Prefs action")
+                    }
+                }.takeIf { open })) {
+                    Box(Modifier.fillMaxSize().clickable { homeClicks++ }, contentAlignment = Alignment.CenterStart) {
+                        Text("Home action")
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+        compose.runOnUiThread { open = false; Snapshot.sendApplyNotifications() }
+        compose.mainClock.advanceTimeBy(48)
+
+        // Tap the still-visible right side of the sliding-out page: must be completely inert.
+        compose.onRoot().performTouchInput { click(Offset(width * 0.85f, height * 0.5f)) }
+        assertEquals("Sliding-out page must ignore physical taps", 0, exitingClicks)
+
+        // Tap the revealed left side: passes straight through to the underlying page.
+        compose.onRoot().performTouchInput { click(Offset(width * 0.05f, height * 0.5f)) }
+        assertEquals("Revealed page underneath accepts taps mid-exit", 1, homeClicks)
+    }
+
+    @Test fun cancelledPredictiveBackDoesNotLeakIntoPushedPageAndNewSwipePreemptsTapExit() {
+        var stack by mutableStateOf(listOf("channel"))
+        lateinit var dispatcher: OnBackPressedDispatcher
+        compose.setContent {
+            dispatcher = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+            SlatrixTheme {
+                LiveWorkspace(stack.map { key ->
+                    WorkspaceCover(key) {
+                        ai.nuanu.slatrix.ui.designsystem.rememberPredictiveBack {
+                            if (stack.size > 1) stack = stack.dropLast(1) else stack = emptyList()
+                        }
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) { Text("Page $key") }
+                    }
+                }) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) { Text("Home") }
+                }
+            }
+        }
+        compose.waitForIdle()
+        val width = compose.onRoot().fetchSemanticsNode().size.width.toFloat()
+
+        // Start predictive back on channel, cancel so its spring-back runs, then immediately push thread.
+        compose.mainClock.autoAdvance = false
+        compose.runOnUiThread {
+            dispatcher.dispatchOnBackStarted(BackEventCompat(0f, 0f, 0f, BackEventCompat.EDGE_LEFT))
+            dispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, 0.5f, BackEventCompat.EDGE_LEFT))
+            dispatcher.dispatchOnBackCancelled()
+        }
+        compose.mainClock.advanceTimeBy(16)
+        compose.runOnUiThread { stack = listOf("channel", "thread"); Snapshot.sendApplyNotifications() }
+        compose.mainClock.advanceTimeBy(800)
+        val threadRest = bounds("Page thread").left
+        assertEquals("Pushed thread lands cleanly at rest without inheriting cancelled drag", 0f, threadRest, 1f)
+
+        // Tap Back from thread (starts tap-Back exit), then immediately start predictive back on channel underneath.
+        compose.runOnUiThread { stack = listOf("channel"); Snapshot.sendApplyNotifications() }
+        compose.mainClock.advanceTimeBy(32)
+        val channelRest = bounds("Page channel").left
+        compose.runOnUiThread {
+            dispatcher.dispatchOnBackStarted(BackEventCompat(0f, 0f, 0f, BackEventCompat.EDGE_LEFT))
+            dispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, 0.5f, BackEventCompat.EDGE_LEFT))
+            Snapshot.sendApplyNotifications()
+        }
+        compose.mainClock.advanceTimeByFrame()
+        assertTrue("New predictive back on channel preempts lingering tap-back exit and tracks finger (${bounds("Page channel").left} vs $channelRest)",
+            bounds("Page channel").left > width * 0.4f)
+        compose.runOnUiThread { dispatcher.dispatchOnBackCancelled() }
+        compose.mainClock.advanceTimeBy(800)
+    }
+
+    @Test fun reopenedPageMidExitPreservesSavedStateAcrossConfigurationRestore() {
+        val restoration = StateRestorationTester(compose)
+        var open by mutableStateOf(true)
+        var setQuery: ((String) -> Unit)? = null
+        var currentQuery = ""
+        restoration.setContent {
+            SlatrixTheme {
+                LiveWorkspace(listOfNotNull(WorkspaceCover("members") {
+                    var query by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+                    setQuery = { query = it }
+                    currentQuery = query
+                    Text("Query: $query")
+                }.takeIf { open })) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Home") }
+                }
+            }
+        }
+        compose.waitForIdle()
+        compose.runOnIdle { setQuery?.invoke("first") }
+        compose.waitForIdle()
+
+        // Pop and reopen mid-exit so Members moves to generation 1, then type a new query and emulate rotation.
+        compose.mainClock.autoAdvance = false
+        compose.runOnUiThread { open = false; Snapshot.sendApplyNotifications() }
+        compose.mainClock.advanceTimeBy(32)
+        compose.runOnUiThread { open = true; Snapshot.sendApplyNotifications() }
+        compose.mainClock.advanceTimeBy(800)
+        compose.runOnUiThread { setQuery?.invoke("mira"); Snapshot.sendApplyNotifications() }
+        compose.mainClock.advanceTimeByFrame()
+        assertEquals("mira", currentQuery)
+
+        compose.mainClock.autoAdvance = true
+        restoration.emulateSavedInstanceStateRestore()
+        compose.waitForIdle()
+        assertEquals("Saved state of a mid-exit reopened page survives rotation", "mira", currentQuery)
     }
 
     @Test fun quickReactionsStaggerIntoTheMessageSheetAndLandAligned() {
@@ -439,41 +567,43 @@ class MotionTest {
             abs(restored.red - atRest.red) < 0.02f)
     }
 
-    @Test fun bottomSheetSlidesDownSmoothlyOnDismissBeforeClosing() {
+    @Test fun bottomSheetSlidesDownSmoothlyAndClearsSemanticsOnDismissBeforeClosing() {
         var open by mutableStateOf(true)
         var dismissed = false
+        var itemTop = 0f
         compose.setContent {
             SlatrixTheme {
                 if (open) BottomSheet({ dismissed = true; open = false }, SlatrixTheme.colors.overlay) {
-                    Text("Sheet item")
+                    Text("Sheet item", Modifier.onGloballyPositioned { itemTop = it.positionInRoot().y })
                 }
             }
         }
         compose.waitForIdle()
-        val restTop = compose.onNodeWithText("Sheet item").getUnclippedBoundsInRoot().top.value
+        val restTop = itemTop
         compose.mainClock.autoAdvance = false
         compose.onNodeWithContentDescription("Close").performSemanticsAction(SemanticsActions.OnClick)
         compose.runOnUiThread { Snapshot.sendApplyNotifications() }
         compose.mainClock.advanceTimeBy(48)
         assertFalse("Sheet animates down before calling onDismissRequest", dismissed)
-        val slidingTop = compose.onNodeWithText("Sheet item").getUnclippedBoundsInRoot().top.value
-        assertTrue("Sheet moves downward while dismissing ($slidingTop vs $restTop)", slidingTop > restTop + 1f)
+        assertTrue("Sheet moves downward while dismissing ($itemTop vs $restTop)", itemTop > restTop + 1f)
+        compose.onNodeWithText("Sheet item").assertDoesNotExist()
         compose.mainClock.advanceTimeBy(1_000)
         assertTrue("Sheet finishes dismissing once off-screen", dismissed)
-        compose.onNodeWithText("Sheet item").assertDoesNotExist()
     }
 
-    @Test fun mediaViewerSwipeDownDismissesWhenUnzoomedAndSpringsBackWhenShort() {
+    @Test fun mediaViewerSwipeDownDismissesWhenUnzoomedCancelsCleanlyAndDisablesActionsDuringExit() {
         val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
         val png = ByteArrayOutputStream().also { Bitmap.createBitmap(16, 9, Bitmap.Config.ARGB_8888).compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
         val photo = ConversationMessage("p", "\$p", "@mira:example.org", "Mira", "office.jpg", null,
             1_700_000_000_000L, MessageKind.Attachment, MessageSendState.Sent, false, "M", 0,
             attachment = MessageAttachment(MessageAttachment.Kind.Image, "office.jpg", "image/jpeg", 2_000_000, 1600, 900, TestMediaSource("mxc://example.org/swipe")))
+        var loads = 0
         compose.setContent {
             SlatrixTheme {
                 LiveChannelScreen(room, ConversationState(listOf(photo), loading = false, hasMore = false),
                     ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
-                    loadPicture = { _, _, _, _ -> png })
+                    loadPicture = { _, _, _, _ -> png },
+                    loadFile = { loads++; null })
             }
         }
         compose.onNodeWithContentDescription("office.jpg").performClick()
@@ -484,15 +614,28 @@ class MotionTest {
         compose.onNode(viewer).performTouchInput { swipeDown(startY = centerY, endY = centerY + 40f, durationMillis = 300) }
         compose.onNodeWithContentDescription("Close").assertIsDisplayed()
 
+        // Dragging past threshold and receiving ACTION_CANCEL snaps back instead of dismissing.
+        compose.onNode(viewer).performTouchInput {
+            down(Offset(centerX, top + 100f))
+            moveTo(Offset(centerX, bottom - 50f), delayMillis = 120)
+            cancel()
+        }
+        compose.onNodeWithContentDescription("Close").assertIsDisplayed()
+
         // While zoomed in, a vertical drag pans rather than dismissing.
         compose.onNode(viewer).performTouchInput { doubleClick() }
         compose.onNode(viewer).performTouchInput { swipeDown(startY = top + 100f, endY = bottom - 100f, durationMillis = 300) }
         compose.onNodeWithContentDescription("Close").assertIsDisplayed()
 
-        // Unzoom back to 1x, then a full vertical swipe dismisses the viewer.
+        // Unzoom back to 1x, then a full vertical swipe dismisses the viewer and disables toolbar actions during exit.
         compose.onNode(viewer).performTouchInput { doubleClick() }
+        compose.mainClock.autoAdvance = false
         compose.onNode(viewer).performTouchInput { swipeDown(startY = top + 100f, endY = bottom - 50f, durationMillis = 200) }
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithContentDescription("Share").assertDoesNotExist()
+        compose.mainClock.advanceTimeBy(1_000)
         compose.onNodeWithContentDescription("Close").assertDoesNotExist()
+        assertEquals(0, loads)
     }
 
     @Test fun composerBannerAnimatesHeightAndSendButtonKeepsSemantics() {
@@ -507,6 +650,7 @@ class MotionTest {
         compose.onNodeWithText("Message #design").performClick()
         compose.waitForIdle()
         compose.onNodeWithContentDescription("Send message").assertIsNotEnabled()
+        val sendBefore = compose.onNodeWithContentDescription("Send message").getUnclippedBoundsInRoot()
 
         compose.mainClock.autoAdvance = false
         compose.runOnUiThread {
@@ -516,12 +660,17 @@ class MotionTest {
             )
             Snapshot.sendApplyNotifications()
         }
-        compose.mainClock.advanceTimeBy(32)
-        val midTop = compose.onNodeWithText("Replying to Mira").getUnclippedBoundsInRoot().top.value
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeBy(64)
+        val midQuoteHeight = compose.onNodeWithText("Ship it?").fetchSemanticsNode().boundsInRoot.height
+        val midTitleHeight = compose.onNodeWithText("Replying to Mira").fetchSemanticsNode().boundsInRoot.height
+        val sendMid = compose.onNodeWithContentDescription("Send message").getUnclippedBoundsInRoot()
+        assertEquals("Send button stays bottom-anchored without clipping while the reply banner expands",
+            sendBefore.top.value, sendMid.top.value, 1f)
         compose.mainClock.advanceTimeBy(800)
-        val settledTop = compose.onNodeWithText("Replying to Mira").getUnclippedBoundsInRoot().top.value
-        assertTrue("Reply banner animates the composer upward smoothly instead of snapping ($midTop vs $settledTop)",
-            midTop > settledTop + 1f)
+        val settledTitleHeight = compose.onNodeWithText("Replying to Mira").fetchSemanticsNode().boundsInRoot.height
+        assertTrue("Reply banner expands upward smoothly instead of snapping (quote $midQuoteHeight, title $midTitleHeight -> $settledTitleHeight)",
+            midQuoteHeight > 0f && midTitleHeight < settledTitleHeight - 1f)
         compose.onNodeWithContentDescription("Send message").assertIsEnabled()
     }
 

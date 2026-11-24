@@ -43,6 +43,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.*
 import androidx.compose.animation.core.Animatable
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.foundation.border
@@ -81,6 +82,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.DisposableEffect
@@ -115,9 +118,18 @@ class WorkspaceCover(val key: Any, val content: @Composable () -> Unit)
 
 private const val Home = "home"
 
-private class ExitingCover(val page: WorkspaceCover, val generation: Int, val stateKey: String, val slide: Animatable<Float, *>)
+private class ExitingCover(val page: WorkspaceCover, val generation: Int, val stateKey: String, val start: Float)
 
 private class WorkspaceHistory(var top: Any, var keys: Set<Any>, var topPage: WorkspaceCover?, var topGeneration: Int)
+
+private val GenerationsSaver = listSaver<MutableMap<String, Int>, Any>(
+    save = { map -> map.flatMap { (k, v) -> listOf(k, v) } },
+    restore = { list ->
+        mutableMapOf<String, Int>().apply {
+            for (i in list.indices step 2) put(list[i] as String, list[i + 1] as Int)
+        }
+    },
+)
 
 /**
  * Home with [covers] over it, bottom to top. Pushing slides the new page in from the right on [Motion.spatial] with a
@@ -135,8 +147,10 @@ fun LiveWorkspace(covers: List<WorkspaceCover>, home: @Composable () -> Unit) {
     val keys = pages.map { it.key }.toSet()
     val coordinator = remember { BackProgressCoordinator() }
     val shown = remember { WorkspaceHistory(top, keys, pages.last(), 0) }
-    val generations = remember { mutableMapOf<Any, Int>() }
+    val generations = rememberSaveable(saver = GenerationsSaver) { mutableMapOf() }
     var exiting by remember { mutableStateOf<ExitingCover?>(null) }
+    val exitSlide = remember { Animatable(0f) }
+    var exitStarted by remember { mutableStateOf<ExitingCover?>(null) }
     // Pushed when the previous top stays in the stack; popped when the previous top left and the new top was already under it.
     val pushed = shown.top != top && pages.any { it.key == shown.top }
     val popped = shown.top != top && pages.none { it.key == shown.top } && shown.keys.contains(top)
@@ -148,36 +162,38 @@ fun LiveWorkspace(covers: List<WorkspaceCover>, home: @Composable () -> Unit) {
             val start = maxOf(1f - topSlide.value, coordinator.committedProgress, coordinator.progress.floatValue).coerceIn(0f, 1f)
             val leaving = shown.topPage
             if (leaving != null && start < 1f && !isSystemMotionReduced(context)) {
-                val stateKey = if (shown.topGeneration == 0) leaving.key.toString() else "${leaving.key}#${shown.topGeneration}"
-                ExitingCover(leaving, shown.topGeneration, stateKey, Animatable(start))
+                val base = leaving.key.toString()
+                val stateKey = if (shown.topGeneration == 0) base else "$base#${shown.topGeneration}"
+                ExitingCover(leaving, shown.topGeneration, stateKey, start)
             } else null
         }
+        // A new predictive-back gesture on the revealed top page takes over immediately instead of waiting on a lingering exit.
+        coordinator.active.value -> null
         else -> exiting?.takeUnless { candidate -> pages.any { it.key == candidate.page.key } }
     }
     val replacedExit = exiting?.takeIf { it !== activeExit }
     // If a key re-enters before its previous exit finished, bump its generation so it mounts fresh state.
     if (replacedExit != null && pages.any { it.key == replacedExit.page.key }) {
-        val current = generations[replacedExit.page.key] ?: 0
-        if (current <= replacedExit.generation) generations[replacedExit.page.key] = replacedExit.generation + 1
+        val base = replacedExit.page.key.toString()
+        val current = generations[base] ?: 0
+        if (current <= replacedExit.generation) generations[base] = replacedExit.generation + 1
     }
     val removed = shown.keys - keys
-    val topGeneration = generations[top] ?: 0
+    val topGeneration = generations[top.toString()] ?: 0
     SideEffect {
         removed.forEach { key ->
             if (key != activeExit?.page?.key) {
-                val gen = generations.remove(key) ?: 0
-                saved.removeState(if (gen == 0) key.toString() else "$key#$gen")
+                val base = key.toString()
+                val gen = generations.remove(base) ?: 0
+                saved.removeState(if (gen == 0) base else "$base#$gen")
             }
         }
         if (replacedExit != null) {
             saved.removeState(replacedExit.stateKey)
-            if (pages.none { it.key == replacedExit.page.key }) generations.remove(replacedExit.page.key)
+            if (pages.none { it.key == replacedExit.page.key }) generations.remove(replacedExit.page.key.toString())
         }
         if (exiting !== activeExit) exiting = activeExit
-        if (shown.top != top) {
-            coordinator.progress.floatValue = 0f
-            coordinator.committedProgress = 0f
-        }
+        if (shown.top != top) coordinator.clear()
         shown.top = top
         shown.keys = keys
         shown.topPage = pages.last()
@@ -193,14 +209,17 @@ fun LiveWorkspace(covers: List<WorkspaceCover>, home: @Composable () -> Unit) {
     }
     LaunchedEffect(activeExit) {
         val target = activeExit ?: return@LaunchedEffect
-        if (coroutineContext.isMotionReduced(context)) target.slide.snapTo(1f)
-        else target.slide.animateTo(1f, Motion.spatial(Motion.UnitThreshold))
+        exitSlide.snapTo(target.start)
+        exitStarted = target
+        if (coroutineContext.isMotionReduced(context)) exitSlide.snapTo(1f)
+        else exitSlide.animateTo(1f, Motion.spatial(Motion.UnitThreshold))
         if (exiting === target) {
             exiting = null
             saved.removeState(target.stateKey)
-            if (target.page.key !in shown.keys) generations.remove(target.page.key)
+            if (target.page.key !in shown.keys) generations.remove(target.page.key.toString())
         }
     }
+    fun exitProgress(cover: ExitingCover): Float = (if (exitStarted === cover) exitSlide.value else cover.start).coerceIn(0f, 1f)
     val backingVisible by remember(slide, coordinator) { derivedStateOf { slide.value < 1f || coordinator.progress.floatValue > 0f } }
     // Render active pages and any sliding-out cover in one unified list so the exiting page keeps its exact Compose subtree
     // (scroll position, loaded images, transient UI) without disposing and flashing during the exit slide.
@@ -208,24 +227,33 @@ fun LiveWorkspace(covers: List<WorkspaceCover>, home: @Composable () -> Unit) {
     Box(Modifier.fillMaxSize()) {
         rendered.forEachIndexed { index, page ->
             val leaving = activeExit?.takeIf { index == pages.size }
-            val gen = leaving?.generation ?: (generations[page.key] ?: 0)
-            val stateKey = leaving?.stateKey ?: if (gen == 0) page.key.toString() else "${page.key}#$gen"
+            val base = page.key.toString()
+            val gen = leaving?.generation ?: (generations[base] ?: 0)
+            val stateKey = leaving?.stateKey ?: if (gen == 0) base else "$base#$gen"
             key(page.key, gen) {
                 val depth = if (leaving != null) -1 else pages.lastIndex - index
                 val modifier = when {
                     leaving != null -> Modifier
-                        .clearAndSetSemantics {}
-                        .graphicsLayer { translationX = leaving.slide.value.coerceIn(0f, 1f) * size.width }
+                        // Translate before consuming touches so the uncovered left area hits the page underneath while the
+                        // still-visible exiting pixels remain completely inert to taps, focus, and accessibility.
+                        .graphicsLayer { translationX = exitProgress(leaving) * size.width }
                         .pageEdgeShadow {
-                            val shift = leaving.slide.value.coerceIn(0f, 1f)
+                            val shift = exitProgress(leaving)
                             if (shift < 1f) 1f - shift * 0.5f else 0f
                         }
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                            }
+                        }
+                        .focusProperties { canFocus = false }
+                        .clearAndSetSemantics {}
                     depth == 0 && activeExit != null -> Modifier
                         .graphicsLayer {
-                            val cover = (1f - activeExit.slide.value).coerceIn(0f, 1f)
+                            val cover = (1f - exitProgress(activeExit)).coerceIn(0f, 1f)
                             translationX = -Motion.PushParallax * cover * size.width
                         }
-                        .pageScrim { (1f - activeExit.slide.value).coerceIn(0f, 1f) }
+                        .pageScrim { (1f - exitProgress(activeExit)).coerceIn(0f, 1f) }
                         .pointerInput(Unit) {}
                     depth == 0 -> Modifier
                         .graphicsLayer {
@@ -247,7 +275,6 @@ fun LiveWorkspace(covers: List<WorkspaceCover>, home: @Composable () -> Unit) {
                         .pointerInput(Unit) {}
                     else -> Modifier.clearAndSetSemantics {}.graphicsLayer { alpha = 0f }.pointerInput(Unit) {}
                 }
-                // Exiting cover omits pointerInput so touches pass straight to the revealed page underneath.
                 Box(Modifier.fillMaxSize().then(modifier)) {
                     // Single composition branch keeps subtrees alive across depth and exit transitions; Home inherits outer coordinator.
                     val backCoordinator = if (index == 0) LocalBackProgress.current else coordinator.takeIf { depth == 0 }

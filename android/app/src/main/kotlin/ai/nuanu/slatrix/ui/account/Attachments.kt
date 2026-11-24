@@ -66,10 +66,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -80,6 +83,7 @@ import androidx.compose.material.icons.outlined.Share
 import java.io.File
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -304,13 +308,6 @@ internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, lo
     val scope = rememberCoroutineScope()
     var notice by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(notice) { if (notice != null) { delay(UiMetrics.NoticeMillis); notice = null } }
-    fun withFile(action: suspend (File) -> String?) {
-        val files = loadFile ?: return
-        scope.launch {
-            val file = try { files(attachment) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
-            notice = if (file == null) "Couldn’t download ${attachment.name}." else action(file)
-        }
-    }
     // Saved with the screen rather than in the dialog, whose window keeps its saved state apart.
     var scale by rememberSaveable { mutableFloatStateOf(1f) }
     var offset by rememberSaveable(stateSaver = OffsetSaver) { mutableStateOf(Offset.Zero) }
@@ -318,6 +315,15 @@ internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, lo
     val enter = remember { Animatable(0f) }
     val dismissDrag = remember { Animatable(0f) }
     var dismissing by remember { mutableStateOf(false) }
+    fun withFile(action: suspend (File) -> String?) {
+        if (dismissing) return
+        val files = loadFile ?: return
+        scope.launch {
+            val file = try { files(attachment) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+            if (dismissing) return@launch
+            notice = if (file == null) "Couldn’t download ${attachment.name}." else action(file)
+        }
+    }
     fun closeSmoothly() {
         if (dismissing) return
         dismissing = true
@@ -345,6 +351,11 @@ internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, lo
         fun dragProgress(): Float =
             if (size.height > 0) (abs(dismissDrag.value) / (size.height * 0.5f)).coerceIn(0f, 1f) else 0f
         BoxWithConstraints(Modifier.fillMaxSize()
+            .then(if (dismissing) Modifier.clearAndSetSemantics {}.focusProperties { canFocus = false }.pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                }
+            } else Modifier)
             .drawBehind {
                 val alpha = (1f - dragProgress()) * enter.value.coerceIn(0f, 1f)
                 if (alpha > 0f) drawRect(colors.mediaBackdrop, alpha = alpha)
@@ -357,15 +368,31 @@ internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, lo
                     val slop = viewConfiguration.touchSlop
                     awaitEachGesture {
                         awaitFirstDown(requireUnconsumed = false)
+                        if (dismissing) return@awaitEachGesture
                         val velocityTracker = VelocityTracker()
                         var totalPan = Offset.Zero
                         var currentDrag = dismissDrag.value
                         var draggingDismiss = false
                         var transforming = false
+                        var cancelled = false
                         do {
                             val event = awaitPointerEvent()
+                            if (dismissing) {
+                                cancelled = true
+                                break
+                            }
                             val active = event.changes.filter { it.pressed }
-                            if (active.isEmpty()) break
+                            if (active.isEmpty()) {
+                                val up = event.changes.firstOrNull()
+                                // ACTION_CANCEL arrives as a consumed synthetic up; treat it as cancel rather than release,
+                                // and feed genuine up timestamps to VelocityTracker so pausing before lifting zeros velocity.
+                                if (up == null || up.isConsumed || !up.changedToUp()) {
+                                    cancelled = true
+                                } else if (draggingDismiss) {
+                                    velocityTracker.addPosition(up.uptimeMillis, up.position)
+                                }
+                                break
+                            }
                             val zoom = event.calculateZoom()
                             val pan = event.calculatePan()
                             if (active.size > 1 || zoom != 1f || scale > 1f || transforming) {
@@ -380,7 +407,7 @@ internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, lo
                                 if (active.size > 1 || abs(pan.x) > 0f || abs(pan.y) > 0f) {
                                     event.changes.forEach { it.consume() }
                                 }
-                            } else if (!dismissing) {
+                            } else {
                                 totalPan += pan
                                 if (!draggingDismiss && abs(totalPan.y) > slop && abs(totalPan.y) > abs(totalPan.x)) {
                                     draggingDismiss = true
@@ -396,10 +423,10 @@ internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, lo
                             }
                         } while (event.changes.any { it.pressed })
                         if (draggingDismiss && !dismissing) {
-                            val vy = velocityTracker.calculateVelocity().y
+                            val vy = if (cancelled) 0f else velocityTracker.calculateVelocity().y
                             val distance = currentDrag
-                            val shouldDismiss = abs(distance) > dismissReach ||
-                                (abs(distance) > 0f && abs(vy) > dismissFlick && sign(vy) == sign(distance))
+                            val shouldDismiss = !cancelled && (abs(distance) > dismissReach ||
+                                (abs(distance) > 0f && abs(vy) > dismissFlick && sign(vy) == sign(distance)))
                             if (shouldDismiss) {
                                 dismissing = true
                                 val exitTarget = (if (distance >= 0f) 1f else -1f) * max(size.height.toFloat(), dismissReach * 2f)
@@ -445,7 +472,7 @@ internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, lo
             Row(Modifier.fillMaxWidth()
                 .graphicsLayer { alpha = ((1f - dragProgress() * 2.5f) * enter.value).coerceIn(0f, 1f) }
                 .background(colors.mediaShade).statusBarsPadding(), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = ::closeSmoothly) { Icon(Icons.Outlined.Close, "Close", tint = colors.onMedia) }
+                IconButton(onClick = ::closeSmoothly, enabled = !dismissing) { Icon(Icons.Outlined.Close, "Close", tint = colors.onMedia) }
                 Column(Modifier.weight(1f)) {
                     Text(sender, style = MaterialTheme.typography.titleSmall, color = colors.onMedia, maxLines = 1,
                         overflow = TextOverflow.Ellipsis)
@@ -453,10 +480,10 @@ internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, lo
                         color = colors.onMedia, maxLines = 1)
                 }
                 if (loadFile != null) {
-                    IconButton(onClick = { withFile { shareFile(context, it, attachment); null } }) {
+                    IconButton(onClick = { withFile { shareFile(context, it, attachment); null } }, enabled = !dismissing) {
                         Icon(Icons.Outlined.Share, "Share", tint = colors.onMedia)
                     }
-                    IconButton(onClick = { withFile { saveFile(context, it, attachment) } }) {
+                    IconButton(onClick = { withFile { saveFile(context, it, attachment) } }, enabled = !dismissing) {
                         Icon(Icons.Outlined.FileDownload, "Save to device", tint = colors.onMedia)
                     }
                 }

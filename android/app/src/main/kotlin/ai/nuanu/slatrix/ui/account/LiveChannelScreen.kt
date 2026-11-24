@@ -41,6 +41,7 @@ import androidx.compose.ui.semantics.liveRegion
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
+import ai.nuanu.slatrix.ui.designsystem.deferred
 import ai.nuanu.slatrix.ui.designsystem.rememberPredictiveBack
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -64,6 +65,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -283,25 +285,28 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     // Asks each time the newest row comes into view, and again after a page while it stays there.
     LaunchedEffect(list, state.focused && jumped, newest?.id) {
         if (!state.focused || !jumped) return@LaunchedEffect
-        snapshotFlow { list.layoutInfo.visibleItemsInfo.any { it.index <= 1 } }.distinctUntilChanged().collect { visible ->
+        snapshotFlow { list.layoutInfo.inViewport().any { it.index <= 1 } }.distinctUntilChanged().collect { visible ->
             if (!visible) return@collect
             // The oldest message on screen; the list is reversed, so it has the highest index.
-            val top = list.layoutInfo.visibleItemsInfo.maxOf { it.index }
+            val top = list.layoutInfo.inViewport().maxOfOrNull { it.index } ?: return@collect
             loadNewer((top downTo 1).firstNotNullOfOrNull { (rows.asReversed().getOrNull(it - 1) as? ConversationMessage)?.eventId })
         }
     }
     val loadOlder by rememberUpdatedState(onLoadOlder)
     // Asks again after every page while the top stays near, so pages of hidden events don't stall it.
     val canPage = !state.loading && state.hasMore && !state.loadingHistory && state.error == null
+    val expectedItems = state.rows.size + 2
     // Keyed on row count too, so a fast cached page whose loadingHistory flips between frames still rearms paging.
     LaunchedEffect(list, canPage, state.rows.firstOrNull()?.id, state.rows.size) {
         // Waits for the cached messages, so a conversation that has plenty doesn't page on open, and after a
         // failure waits for Retry.
         if (!canPage) return@LaunchedEffect
         snapshotFlow {
-            val visible = list.layoutInfo.visibleItemsInfo
-            // About three screens ahead, as on the Mac; the list is reversed, so its top is its last index.
-            visible.isNotEmpty() && list.layoutInfo.totalItemsCount - 1 - visible.last().index <= 3 * visible.size
+            val info = list.layoutInfo
+            val visible = info.inViewport()
+            // Wait until LazyColumn has laid out the current row list; about three screens ahead, reversed so top is last.
+            info.totalItemsCount == expectedItems && visible.isNotEmpty() &&
+                info.totalItemsCount - 1 - visible.last().index <= 3 * visible.size
         }.first { it }
         loadOlder()
     }
@@ -388,8 +393,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             }
         },
         containerColor = colors.canvas, contentWindowInsets = WindowInsets(0)) { bars ->
-    val header = bars.calculateTopPadding()
-    val footer = bars.calculateBottomPadding()
+    // Defer reading Scaffold's bar padding into layout so composer banner animations never recompose the timeline.
+    val headerOnly = remember(bars) { bars.deferred(useBottom = false) }
+    val footerOnly = remember(bars) { bars.deferred(useTop = false) }
     // The glass blurs the wallpaper with the messages, so it takes the wallpaper's tint; typing never redraws either.
     Box(Modifier.fillMaxSize().glassSource(glass).wallpaper()) {
         Box(Modifier.fillMaxSize()) {
@@ -407,6 +413,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             // Opened at an older message, the button stays over the newest loaded one, so the list keeps room for it from its
             // first rows. Scrolled away, the newest is off screen and the room would only move what the reader is looking at.
             val jumpRoom = if (state.focused) UiMetrics.Touch + UiMetrics.GapLarge else UiMetrics.GapSmall
+            val listPadding = remember(bars, jumpRoom) { bars.deferred(topExtra = UiMetrics.GapSmall, bottomExtra = jumpRoom) }
             // A thread reads down from its root, as in Slack, so a short one sits at the top, right under the header.
             // Attach imeNestedScroll only while the IME is open so scrolling down drags the keyboard down 1:1 without
             // initiating phantom inset control requests when the keyboard is already closed.
@@ -415,7 +422,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 .alpha(if (jumped || rows.none(::opens)) 1f else 0f),
                 state = list, reverseLayout = true,
                 verticalArrangement = if (threadRoot != null) Arrangement.Top else Arrangement.Bottom,
-                contentPadding = PaddingValues(top = header + UiMetrics.GapSmall, bottom = footer + jumpRoom)) {
+                contentPadding = listPadding) {
                 // Zero-height bottom anchor keeps index 0 pinned at the newest end when cold-opened replies arrive above it.
                 item(key = "bottom") { Box(Modifier) }
                 // The pressed message hides while its copy lifts over the sheet and glides back down on close.
@@ -454,7 +461,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 }
             }
             val jumps = rememberCoroutineScope()
-            AnimatedVisibility(jumpShows, Modifier.align(Alignment.BottomEnd).padding(bottom = footer).padding(UiMetrics.GapLarge),
+            AnimatedVisibility(jumpShows, Modifier.align(Alignment.BottomEnd).padding(footerOnly).padding(UiMetrics.GapLarge),
                 enter = fadeIn(Motion.snappy()) + scaleIn(Motion.snappy(), initialScale = 0.8f),
                 exit = fadeOut(Motion.gentle()) + scaleOut(Motion.gentle(), targetScale = 0.8f)) {
                 Surface({
@@ -465,8 +472,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                     Box(contentAlignment = Alignment.Center) { Icon(Icons.Outlined.ArrowDownward, null, Modifier.size(UiMetrics.Icon)) }
                 }
             }
-            Box(Modifier.padding(top = header)) { OfflineBanner() }
-            val notices = Modifier.align(Alignment.BottomCenter).padding(bottom = footer).padding(UiMetrics.GapLarge)
+            Box(Modifier.padding(headerOnly)) { OfflineBanner() }
+            val notices = Modifier.align(Alignment.BottomCenter).padding(footerOnly).padding(UiMetrics.GapLarge)
             state.notice?.let { Snackbar(notices) { Text(it) } }
             (composer.error ?: state.sendError ?: state.error)?.let { message ->
                 Snackbar(notices, action = { TextButton(onClick = onRetry) { Text("Retry") } }) { Text(message) }
@@ -491,6 +498,10 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
 /** Whether the reversed timeline sits at its newest end (the zero-height bottom anchor or the newest row's start). */
 private fun LazyListState.atBottom() =
     firstVisibleItemScrollOffset == 0 && (firstVisibleItemIndex == 0 || firstVisibleItemIndex == 1)
+
+/** Visible items actually intersecting the viewport, excluding extra items kept off-screen by `animateItem`. */
+private fun LazyListLayoutInfo.inViewport() =
+    visibleItemsInfo.filter { it.offset < viewportEndOffset && (it.size == 0 || it.offset + it.size > viewportStartOffset) }
 
 /** A long-pressed message, as its row showed it, and where its top was in the window. */
 private data class Pressed(val message: ConversationMessage, val last: Boolean, val afterAttachment: Boolean, val y: Float)

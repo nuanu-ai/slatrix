@@ -18,11 +18,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.border
@@ -178,8 +179,10 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
         }) { linking = null }
     }
     var height by remember { mutableIntStateOf(0) }
-    // The field is a capsule on the glass panel under it; banner and toolbar changes animate smoothly.
-    Column(Modifier.fillMaxWidth().animateContentSize(Motion.spatial()).onSizeChanged { height = it.height }
+    var shownTarget by remember { mutableStateOf(composer.target) }
+    if (composer.target != null) shownTarget = composer.target
+    // The field is a capsule on the glass panel under it; banners expand upward from the bottom so the field never clips.
+    Column(Modifier.fillMaxWidth().onSizeChanged { height = it.height }
         .padding(horizontal = UiMetrics.GapTiny, vertical = UiMetrics.GapSmall)) {
         if (suggestions != null && !editing) Popup(Alignment.BottomStart, IntOffset(0, -height),
             properties = PopupProperties(focusable = false)) {
@@ -194,7 +197,11 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
                 actions.onMention(suggestions.start, suggestions.end, candidate)
             }
         }
-        composer.target?.let { TargetBar(it, actions.onCancelTarget) }
+        AnimatedVisibility(visible = composer.target != null,
+            enter = expandVertically(Motion.spatial(), expandFrom = Alignment.Bottom) + fadeIn(Motion.gentle()),
+            exit = shrinkVertically(Motion.gentle(), shrinkTowards = Alignment.Bottom) + fadeOut(Motion.gentle())) {
+            shownTarget?.let { TargetBar(it, actions.onCancelTarget) }
+        }
         val attach = actions.onAttach?.takeIf { !editing }
         var attaching by remember { mutableStateOf(false) }
         // Its launchers stay registered whichever "+" opened it, so a pick always comes back.
@@ -209,7 +216,11 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
             if (keyboardShown && !keyboard && !picking && linking == null) { focus.clearFocus(); formatting = false }
             keyboardShown = keyboard
         }
-        if (expanded) aboveField?.invoke()
+        AnimatedVisibility(visible = expanded && aboveField != null,
+            enter = expandVertically(Motion.spatial(), expandFrom = Alignment.Bottom) + fadeIn(Motion.gentle()),
+            exit = shrinkVertically(Motion.gentle(), shrinkTowards = Alignment.Bottom) + fadeOut(Motion.gentle())) {
+            aboveField?.invoke()
+        }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             if (!expanded) attach?.let { Box(Modifier.padding(start = UiMetrics.GapTiny)) { AttachButton { attaching = true } } }
             Box(Modifier.weight(1f).padding(horizontal = UiMetrics.GapTiny)

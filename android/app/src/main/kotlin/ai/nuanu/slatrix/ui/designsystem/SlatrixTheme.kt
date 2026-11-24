@@ -92,8 +92,12 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
     /** Soft tinted container behind a file-type icon; on your own bubble uses the translucent bubble rule for contrast. */
     fun fileTileFill(color: Color): Color = if (underlineLinks) accentTint else color.copy(alpha = FileTileTintAlpha)
 
-    /** Crisp file-type icon tint; on your own bubble uses [textPrimary] ([onAccent]) so blue files never vanish. */
-    fun fileTileIcon(color: Color): Color = if (underlineLinks) textPrimary else color
+    /** Crisp file-type icon tint lifted in dark and shaded in light for WCAG contrast; uses [textPrimary] on your own bubble. */
+    fun fileTileIcon(color: Color): Color = when {
+        underlineLinks -> textPrimary
+        dark -> lerp(color, Color.White, FileIconDarkLift)
+        else -> lerp(color, Color.Black, FileIconLightShade)
+    }
 
     /** The roles inside your own bubble, on [accentFill]: text, links and marks in [onAccent] and its quieter tints. */
     internal val onFill: AppColors by lazy {
@@ -110,6 +114,8 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
     private companion object {
         const val PersonLift = 0.45f
         const val FileTileTintAlpha = 0.14f
+        const val FileIconDarkLift = 0.38f
+        const val FileIconLightShade = 0.18f
     }
 }
 

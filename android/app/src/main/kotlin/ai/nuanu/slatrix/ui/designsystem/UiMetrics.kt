@@ -1,5 +1,8 @@
 package ai.nuanu.slatrix.ui.designsystem
 
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 
 object UiMetrics {
@@ -122,3 +125,12 @@ object UiMetrics {
     /** Code reads a little smaller than the text around it, as on the Mac. */
     const val CodeTextScale = 0.9f
 }
+
+/** Defers reading [PaddingValues] until layout so animated bars never recompose the content behind them. */
+fun PaddingValues.deferred(topExtra: Dp = 0.dp, bottomExtra: Dp = 0.dp, useTop: Boolean = true, useBottom: Boolean = true): PaddingValues =
+    object : PaddingValues {
+        override fun calculateLeftPadding(layoutDirection: LayoutDirection) = 0.dp
+        override fun calculateRightPadding(layoutDirection: LayoutDirection) = 0.dp
+        override fun calculateTopPadding() = if (useTop) this@deferred.calculateTopPadding() + topExtra else topExtra
+        override fun calculateBottomPadding() = if (useBottom) this@deferred.calculateBottomPadding() + bottomExtra else bottomExtra
+    }

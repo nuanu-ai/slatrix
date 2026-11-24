@@ -43,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -64,6 +65,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Velocity
@@ -142,8 +144,12 @@ fun BottomSheet(onDismissRequest: () -> Unit, containerColor: Color, onTop: ((Fl
         // Content that can't scroll further up hands the rest of a downward drag to the sheet, as Material's sheet does.
         val handOff = remember {
             object : NestedScrollConnection {
-                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset =
-                    if (!dismissing && available.y < 0 && dragged.value > 0f) Offset(0f, available.y).also { drag(available.y) } else Offset.Zero
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    if (dismissing || available.y >= 0f || dragged.value <= 0f) return Offset.Zero
+                    val consumed = available.y.coerceAtLeast(-dragged.value)
+                    drag(consumed)
+                    return Offset(0f, consumed)
+                }
                 override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset =
                     if (!dismissing && available.y > 0 && source == NestedScrollSource.UserInput) Offset(0f, available.y).also { drag(available.y) }
                     else Offset.Zero
@@ -158,8 +164,8 @@ fun BottomSheet(onDismissRequest: () -> Unit, containerColor: Color, onTop: ((Fl
                     val visible = if (height > 0) (shown.value - dragged.value / height).coerceIn(0f, 1f) else shown.value
                     alpha = visible
                 }.background(SlatrixTheme.colors.scrim))
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = { dismiss() })
-                .semantics { contentDescription = "Close" })
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !dismissing, onClick = { dismiss() })
+                .then(if (dismissing) Modifier.clearAndSetSemantics {} else Modifier.semantics { contentDescription = "Close" }))
             // Never under the status bar; the space above the sheet is the scrim's, and takes no touches of its own.
             Box(Modifier.fillMaxSize().statusBarsPadding().padding(top = UiMetrics.GapSection)) {
                 Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
@@ -167,6 +173,7 @@ fun BottomSheet(onDismissRequest: () -> Unit, containerColor: Color, onTop: ((Fl
                     // Before the slide, so it is where the sheet rests.
                     .then(if (onTop != null) Modifier.onGloballyPositioned { if (!dismissing) onTop(it.positionInWindow().y) } else Modifier)
                     .graphicsLayer { translationY = (1 - shown.value) * size.height + dragged.value }
+                    .then(if (dismissing) Modifier.clearAndSetSemantics {}.focusProperties { canFocus = false } else Modifier)
                     .pointerInput(dismissing) {
                         if (!dismissing) return@pointerInput
                         awaitPointerEventScope {

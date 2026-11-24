@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix.ui.designsystem
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import com.google.gson.JsonElement
@@ -34,15 +35,29 @@ class DesignTokensTest {
         assertEquals(Color(0xffffffff).copy(alpha = 0.045f).toArgb(), dark.getValue("wallpaperDoodle").toArgb())
     }
 
-    @Test fun `file tiles use soft 14 percent tint on neutral surfaces and high contrast on outgoing bubbles`() {
-        val doc = DesignTokens.fileColors.getValue("document")
+    @Test fun `file tiles use soft 14 percent tint and meet WCAG icon contrast across light, dark, and outgoing bubbles`() {
+        fun contrast(first: Color, second: Color): Float {
+            val (dark, light) = listOf(first.luminance(), second.luminance()).sorted()
+            return (light + 0.05f) / (dark + 0.05f)
+        }
         for (dark in listOf(false, true)) {
             val colors = AppColors(DesignTokens.colors(dark), dark)
-            assertEquals(doc.copy(alpha = 0.14f).toArgb(), colors.fileTileFill(doc).toArgb())
-            assertEquals(doc.toArgb(), colors.fileTileIcon(doc).toArgb())
             val onFill = colors.onFill
-            assertEquals(onFill.accentTint.toArgb(), onFill.fileTileFill(doc).toArgb())
-            assertEquals(onFill.textPrimary.toArgb(), onFill.fileTileIcon(doc).toArgb())
+            for ((kind, base) in DesignTokens.fileColors) {
+                val fill = colors.fileTileFill(base)
+                val icon = colors.fileTileIcon(base)
+                assertEquals("dark=$dark $kind alpha", 0.14f, fill.alpha, 0.005f)
+                val onBubble = fill.compositeOver(colors.bubbleIn)
+                val ratio = contrast(icon, onBubble)
+                assertTrue("dark=$dark $kind contrast on incoming bubble was $ratio", ratio >= 3.0f)
+                val onCanvas = fill.compositeOver(colors.canvas)
+                val canvasRatio = contrast(icon, onCanvas)
+                assertTrue("dark=$dark $kind contrast on canvas was $canvasRatio", canvasRatio >= 3.0f)
+
+                val outBg = onFill.fileTileFill(base).compositeOver(colors.accentFill)
+                val outRatio = contrast(onFill.fileTileIcon(base), outBg)
+                assertTrue("dark=$dark $kind contrast on outgoing bubble was $outRatio", outRatio >= 3.0f)
+            }
         }
     }
 
