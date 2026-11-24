@@ -354,9 +354,7 @@ struct MessageRowTests {
         let hovered = size(hovering: true, offered: 700)
         #expect(rest.width <= ThreadRepliesBar.maxWidth + 1)
         #expect(hovered.width <= ThreadRepliesBar.maxWidth + 1)
-        #expect(
-            hovered.width < 260,
-            "Hovered replies bar should fit tightly around View thread + chevron, got \(hovered.width)")
+        #expect(abs(rest.width - hovered.width) < 0.5, "Hovering must not shrink the hit area under the pointer")
         #expect(abs(rest.height - hovered.height) < 0.5)
     }
 

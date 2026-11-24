@@ -143,9 +143,10 @@ struct AppColors {
         colors.neutrals.ink = 0xffffff
         (colors.neutrals.canvas, colors.neutrals.sidebar) = (frame.start, frame.start)
         colors.neutrals.rowHover = Self.mix(0xffffff, 0.08, over: frame.start)
-        colors.neutrals.raised = Self.mix(0xffffff, 0.12, over: frame.start)
-        colors.neutrals.surfaceCard = colors.neutrals.raised
         colors.neutrals.control = Self.mix(0xffffff, 0.12, over: frame.start)
+        colors.neutrals.raised = Self.mix(0xffffff, 0.15, over: frame.start)
+        colors.neutrals.surfaceCard = colors.neutrals.raised
+        colors.neutrals.overlay = Self.mix(0xffffff, 0.2, over: frame.start)
         colors.neutrals.onAccent = frame.start
         colors.neutrals.lines = 1.6
         return colors

@@ -76,20 +76,22 @@ struct ThemeTests {
         let colors = AppColors(dark: dark, accent: AppColors.resolve(.systemBlue, dark: dark), theme: theme)
         // Opaque surfaces stop framed-theme wallpaper doodles from bleeding through hovered rows, cards and overlays.
         for (name, surface) in [
-            ("canvas", colors.canvas), ("rowHover", colors.rowHover), ("raised", colors.raised),
-            ("surfaceCard", colors.surfaceCard), ("overlay", colors.overlay),
+            ("canvas", colors.canvas), ("rowHover", colors.rowHover), ("control", colors.control),
+            ("raised", colors.raised), ("surfaceCard", colors.surfaceCard), ("overlay", colors.overlay),
         ] {
             let alpha = NSColor(surface).usingColorSpace(.sRGB)!.alphaComponent
             #expect(alpha >= 0.999, "\(theme) dark=\(dark) \(name) must be opaque, got alpha=\(alpha)")
         }
         let canvas = luminance(colors.canvas)
         let rowHover = luminance(colors.rowHover)
+        let control = luminance(colors.control)
         let raised = luminance(colors.raised)
         let card = luminance(colors.surfaceCard)
         let overlay = luminance(colors.overlay)
         if dark {
             #expect(canvas < rowHover, "\(theme) dark: canvas < rowHover")
-            #expect(rowHover < raised, "\(theme) dark: rowHover < raised")
+            #expect(rowHover < control, "\(theme) dark: rowHover < control")
+            #expect(control < raised, "\(theme) dark: control < raised")
             #expect(raised <= card, "\(theme) dark: raised <= surfaceCard")
             #expect(card < overlay, "\(theme) dark: surfaceCard < overlay")
         } else {
@@ -97,6 +99,13 @@ struct ThemeTests {
             #expect(rowHover > raised, "\(theme) light: rowHover > raised")
             #expect(card > rowHover, "\(theme) light: surfaceCard lifts above rowHover")
             #expect(overlay > rowHover, "\(theme) light: overlay lifts above rowHover")
+        }
+        if theme.framed && !colors.translucentFrame {
+            let side = colors.onFrame
+            #expect(luminance(side.canvas) < luminance(side.rowHover))
+            #expect(luminance(side.rowHover) < luminance(side.control))
+            #expect(luminance(side.control) < luminance(side.raised))
+            #expect(luminance(side.surfaceCard) < luminance(side.overlay))
         }
     }
 

@@ -37,7 +37,7 @@ Mentions that notify you (`@you` and `@room`) use warm amber so they separate im
 - Light mode: `#7a4d00` text on `#f2c744/0.30` fill
 - Dark mode: `#ffe58f` text on `#cc8e14/0.22` fill
 
-Every text, status, and mention pairing meets WCAG AA (`>= 4.5:1`) across all nine themes, in light and dark mode, including over jump highlights and hovered rows.
+Every text, status, and mention pairing meets WCAG AA (`>= 4.5:1`) across all nine themes in light and dark mode on steady-state surfaces (`canvas`, `rowHover`, `raised`, `surfaceCard`, `overlay`, `control`) with the reference blue accent. Warm amber own mentions also meet `>= 4.5:1` over the transient jump highlight.
 
 File-type icons use the shared `fileColors` palette as a soft tinted tile (`0.12` opacity fill in light mode, `0.16` in dark mode) with a subtle tinted hairline (`0.18` / `0.24`) and a deepened light or lifted dark vector symbol (`colors.fileGlyph(_:)`). All ten file kinds maintain at least `3.0:1` graphical contrast against their tile without turning into saturated solid blocks that compete with links.
 
@@ -62,12 +62,12 @@ All sizes come from `TextRole` and `Metrics`, scaling uniformly with window zoom
 | `title1` | `22 / 26` | Page headers, message `h1` |
 | `largeTitle` | `26 / 32` | Empty states, channel welcome titles, sign-in |
 
-Message bodies and the composer share one paragraph geometry in `MessageBlocks`:
+Message bodies and the composer share reading line spacing, paragraph spacing, and line-breaking rules in `MessageBlocks`:
 
 - Reading line spacing scales with `fontSize` (`fontSize * 0.27`, producing ~21 pt lines at 14 pt).
 - Non-code paragraphs carry `paragraphSpacing` (`fontSize * 0.25`, `3.5 pt` at 14 pt) so explicit line breaks (`\n`) separate cleanly from soft-wrapped lines inside the same paragraph.
-- Blank lines between non-code paragraphs collapse to `0.5 * fontSize` (`7 pt` at 14 pt) with zero extra `paragraphSpacing`, giving multi-paragraph posts clear air without full empty lines.
 - Non-code paragraphs enable `lineBreakStrategy = .pushOut` so macOS avoids leaving single-word orphans at the end of wrapped lines.
+- Rendered messages collapse blank lines between non-code paragraphs to `0.5 * fontSize` (`7 pt` at 14 pt) with zero extra `paragraphSpacing`, giving multi-paragraph posts clear air while the composer keeps full editable blank lines for caret placement.
 - Code blocks keep `0` internal paragraph spacing, standard line breaking, and intact blank lines.
 
 File names in `FileCard`, `FileRow`, and staged composer tiles stay visually subordinate to sender names: `.body` (`13 pt`) Medium for the filename and `.caption` (`12 pt`) muted text for type and size metadata.

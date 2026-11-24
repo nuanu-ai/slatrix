@@ -1030,13 +1030,20 @@ struct ThreadRepliesBar: View {
                     if let avatar { avatar }
                     Text("\(count) \(count == 1 ? "reply" : "replies")").font(m.font(.body, .semibold))
                         .foregroundStyle(colors.accent)
-                    if hovering {
-                        Text("View thread").font(m.font(.body)).foregroundStyle(colors.textSecondary)
-                        Image(systemName: "chevron.right").font(m.font(.subheadline, .semibold))
-                            .foregroundStyle(colors.textSecondary)
-                    } else if let lastReply {
-                        Text(ThreadReply.lastReplyText(lastReply.timestamp, now: Date())).font(m.font(.body))
-                            .foregroundStyle(colors.textSecondary)
+                    // Keep both labels in one ZStack so hovering near the trailing edge never shrinks the hit box under
+                    // the pointer.
+                    ZStack(alignment: .leading) {
+                        if let lastReply {
+                            Text(ThreadReply.lastReplyText(lastReply.timestamp, now: Date())).font(m.font(.body))
+                                .foregroundStyle(colors.textSecondary)
+                                .opacity(hovering ? 0 : 1)
+                        }
+                        HStack(spacing: m.sp8) {
+                            Text("View thread").font(m.font(.body)).foregroundStyle(colors.textSecondary)
+                            Image(systemName: "chevron.right").font(m.font(.subheadline, .semibold))
+                                .foregroundStyle(colors.textSecondary)
+                        }
+                        .opacity(hovering ? 1 : 0)
                     }
                 }
                 .lineLimit(1).padding(.horizontal, m.sp8)

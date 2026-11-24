@@ -110,11 +110,13 @@ enum MessageBlocks {
     }
 
     /// A quote's bar or a code block's fill beside or behind `lines`, the union of the block's line fragments.
+    /// `trailingSpacing` is the spacing TextKit actually appended to the final line fragment (zero on a final line with
+    /// no following paragraph or on an empty composer line).
     static func draw(
-        _ key: NSAttributedString.Key, color: NSColor, lines: NSRect, style: NSParagraphStyle?, fontSize: CGFloat
+        _ key: NSAttributedString.Key, color: NSColor, lines: NSRect, style: NSParagraphStyle?, fontSize: CGFloat,
+        trailingSpacing: CGFloat = 0
     ) {
-        let trailingGap = (style?.lineSpacing ?? 0) + (key == .codeBlock ? 0 : (style?.paragraphSpacing ?? 0))
-        let height = lines.height - trailingGap
+        let height = max(1, lines.height - trailingSpacing)
         if key == .codeBlock {
             let padding = style.map { -$0.tailIndent } ?? codePadding(fontSize)
             let left = (style?.headIndent ?? padding) - padding
@@ -145,21 +147,42 @@ extension PillLayoutManager {
         guard let storage = textStorage, storage.length > 0 else { return }
         let characters = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
         let all = NSRange(location: 0, length: storage.length)
+        let text = storage.string as NSString
         for key in [NSAttributedString.Key.codeBlock, .quoteBar] {
             storage.enumerateAttribute(key, in: characters) { value, range, _ in
                 guard let color = value as? NSColor else { return }
                 var block = NSRange()
                 _ = storage.attribute(key, at: range.location, longestEffectiveRange: &block, in: all)
                 var lines = NSRect.null
+                var lastFragment = NSRect.zero
+                var lastUsed = NSRect.zero
+                var lastGlyphRange = NSRange(location: 0, length: 0)
                 enumerateLineFragments(forGlyphRange: glyphRange(forCharacterRange: block, actualCharacterRange: nil)) {
-                    fragment, _, _, _, _ in lines = lines.union(fragment)
+                    fragment, used, _, glyphRange, _ in
+                    lines = lines.union(fragment)
+                    lastFragment = fragment
+                    lastUsed = used
+                    lastGlyphRange = glyphRange
                 }
                 guard !lines.isNull else { return }
-                let style = storage.attribute(.paragraphStyle, at: block.location, effectiveRange: nil)
+                let style =
+                    storage.attribute(.paragraphStyle, at: block.location, effectiveRange: nil)
+                    as? NSParagraphStyle
                 let font = storage.attribute(.font, at: block.location, effectiveRange: nil) as? NSFont
+                let endsWithNewline: Bool =
+                    if lastGlyphRange.length > 0 {
+                        text.character(
+                            at: min(storage.length - 1, characterIndexForGlyph(at: NSMaxRange(lastGlyphRange) - 1)))
+                            == 0x0A
+                    } else { false }
+                let hasTrailingLineSpacing = NSMaxRange(lastGlyphRange) < numberOfGlyphs || endsWithNewline
+                let trailingParagraphSpacing = key == .codeBlock ? 0 : max(0, lastFragment.height - lastUsed.height)
+                let trailingSpacing =
+                    trailingParagraphSpacing + (hasTrailingLineSpacing ? (style?.lineSpacing ?? 0) : 0)
                 MessageBlocks.draw(
                     key, color: color, lines: lines.offsetBy(dx: origin.x, dy: origin.y),
-                    style: style as? NSParagraphStyle, fontSize: font?.pointSize ?? NSFont.systemFontSize)
+                    style: style, fontSize: font?.pointSize ?? NSFont.systemFontSize,
+                    trailingSpacing: trailingSpacing)
             }
         }
     }

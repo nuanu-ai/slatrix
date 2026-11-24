@@ -1672,6 +1672,27 @@ extension TimelineHostedTests {
         #expect(bar.minY >= line.maxY - 0.5, "\(bar) over \(line)")
     }
 
+    @Test(
+        "TimelineView gives a grouped message after an attachment extra top breathing room, and resets after plain text"
+    )
+    func timelineDerivesAttachmentBreathingRoom() async throws {
+        var messages = Self.actionable(0..<6)
+        messages[3].kind = "m.file"
+        messages[3].attachment = MessageAttachment(
+            name: "spec.txt", url: "mxc://example.org/spec", mimeType: "text/plain", size: 1_024)
+        messages[4].timestamp = messages[3].timestamp.addingTimeInterval(10)
+        messages[5].timestamp = messages[4].timestamp.addingTimeInterval(10)
+        let harness = Harness(messages: messages, height: 560)
+        defer { harness.close() }
+        await settle(harness) { harness.top(of: "Message 5") != nil }
+        let afterAttachment = try #require(harness.cell(showing: messages[4].id))
+        let afterText = try #require(harness.cell(showing: messages[5].id))
+        #expect(
+            afterAttachment.frame.height >= afterText.frame.height + 6,
+            "Grouped row after attachment (\(afterAttachment.frame.height)) should have extra breathing room over plain grouped row (\(afterText.frame.height))"
+        )
+    }
+
     @Test("A message passing under the header shows its toolbar below the header, and the header itself hovers none")
     func toolbarBelowHeader() async throws {
         let harness = Harness(messages: Self.actionable(0..<30), height: 560)
