@@ -159,4 +159,27 @@ struct ActivityHostedTests {
         thread.emit([.pushFront(value: FakeTimelineItem(textEvent("$older", body: "Older")))])
         #expect(await eventually { !unread("$older") })
     }
+
+    @Test("Mark all as read in Activity clears an unread reply and surfaces a mention-only room")
+    func markAllAsReadClearsActivityBadge() async throws {
+        let room = FakeOpenRoom("!activity:example.org", cached: [])
+        let body = "Unseen \(UUID().uuidString)"
+        let (matrix, hosting, window) = host(
+            room, item: item("$reply", body: body, root: "$root"), mentions: 1, key: true)
+        VoiceOver.listen()
+        defer {
+            VoiceOver.done()
+            window.contentView = nil
+            window.close()
+        }
+        #expect(
+            await eventually {
+                NotificationCenter.default.post(name: .menuAction, object: nil, userInfo: ["action": "activity"])
+                return !accessible("Mark all as read", in: hosting).isEmpty
+            })
+        // The mention-only room (unread == 0, mentions == 1) is visible under Unread in Activity's All view.
+        #expect(!accessible("1 mention", in: hosting).isEmpty)
+        #expect(accessible("Mark all as read", in: hosting).contains { $0.accessibilityPerformPress?() == true })
+        #expect(await eventually { matrix.activity.items.allSatisfy { $0.opened } })
+    }
 }

@@ -1072,7 +1072,12 @@ struct RootView: View {
         let account = matrix.notificationSessionID
         Task {
             guard matrix.notificationSessionID == account else { return }
-            do { try await matrix.setMarkedUnread(targetRoom.id, value: unread) } catch {
+            do {
+                try await matrix.setMarkedUnread(targetRoom.id, value: unread)
+                if !unread, matrix.notificationSessionID == account {
+                    matrix.activity.markSeen { $0.roomID == targetRoom.id && $0.kind != .invite }
+                }
+            } catch {
                 guard matrix.notificationSessionID == account else { return }
                 if let rollbackContext { readHold.rollbackMarkUnread(rollbackContext) }
                 matrix.errorMessage = MatrixService.safeError(error)
@@ -1546,7 +1551,17 @@ struct RootView: View {
         case .activity:
             ActivityFeedView(
                 matrix: matrix, activity: matrix.activity, workspaceID: $workspaceID, onOpenMessage: openActivity,
-                onOpenRoom: selectRoom
+                onOpenRoom: selectRoom,
+                onMarkRoomRead: { markReadState($0, unread: false) },
+                onMarkItemRead: { item in
+                    matrix.activity.markSeen { $0.id == item.id }
+                    if item.hasMention, let room = matrix.rooms.first(where: { $0.id == item.roomID }),
+                        room.mentions > 0
+                    {
+                        markReadState(room, unread: false)
+                    }
+                },
+                onMarkAllRead: { markAllRead(inWorkspace: workspaceID) }
             )
             // For a deletion since the app last became active.
             .onAppear { matrix.recheckCopies() }
@@ -2344,6 +2359,14 @@ struct RootView: View {
             selectRoom(item.roomID)
         }
     }
+    private func markAllRead(inWorkspace spaceID: String?) {
+        let scope = ActivityBadge.scoped(rooms: matrix.rooms, items: matrix.activity.items, workspaceID: spaceID)
+        for room in scope.rooms where room.membership == "join" && (room.hasUnread || room.mentions > 0) {
+            markReadState(room, unread: false)
+        }
+        let itemIDs = Set(scope.items.filter { $0.kind != .invite }.map(\.id))
+        matrix.activity.markSeen { itemIDs.contains($0.id) }
+    }
     private func updateActionThreadVisibility() {
         matrix.setMessageActionThread(rootID: threadRoot?.eventID == threadReadyID ? threadReadyID : nil)
     }
@@ -2993,9 +3016,7 @@ struct RootView: View {
             case .nothing: break
             }
         case "mark-all-read":
-            for room in matrix.rooms where room.membership == "join" && room.hasUnread {
-                markReadState(room, unread: false)
-            }
+            markAllRead(inWorkspace: nil)
         case "react-last":
             guard route == .home, editTarget == nil, !coverage.conversation,
                 let last = matrix.messages.last(where: { $0.sendState == "sent" && !$0.isRedacted }),

@@ -7,49 +7,69 @@ struct ActivityFeedView: View {
     @Binding var workspaceID: String?
     var onOpenMessage: (ActivityItem) -> Void
     var onOpenRoom: (String) -> Void
+    var onMarkRoomRead: (ChatRoom) -> Void = { _ in }
+    var onMarkItemRead: (ActivityItem) -> Void = { _ in }
+    var onMarkAllRead: () -> Void = {}
     @EnvironmentObject private var appearance: AppearanceStore
     @State private var filter = ActivityFilter.all
+    @State private var unreadOnly = false
     private enum ActivityFilter: String, CaseIterable {
         case all = "All"
         case mentions = "Mentions"
     }
     private var colors: AppColors { appearance.colors }
-    private func inScope(_ roomID: String) -> Bool {
-        guard let workspaceID else { return true }
-        guard let room = matrix.rooms.first(where: { $0.id == roomID }) else { return false }
-        if room.isSpace && room.membership == "invite" { return true }
-        return room.isDirect || room.spaceIDs.contains(workspaceID)
+    private var scoped: (rooms: [ChatRoom], items: [ActivityItem]) {
+        ActivityBadge.scoped(rooms: matrix.rooms, items: activity.items, workspaceID: workspaceID)
     }
-    private var items: [ActivityItem] {
-        activity.items.filter { item in
-            inScope(item.roomID) && (filter == .all || item.hasMention)
-                && (item.kind != .invite || matrix.rooms.contains { $0.id == item.roomID && $0.membership == "invite" })
+    private func filteredItems(
+        _ scope: (rooms: [ChatRoom], items: [ActivityItem]), roomsByID: [String: ChatRoom]
+    ) -> [ActivityItem] {
+        scope.items.filter { item in
+            (filter == .all || item.hasMention)
+                && (!unreadOnly || ActivityBadge.isUnread(item, room: roomsByID[item.roomID]))
         }
         .sorted { $0.timestamp == $1.timestamp ? $0.id < $1.id : $0.timestamp > $1.timestamp }
     }
-    private var summaryRooms: [ChatRoom] {
-        matrix.rooms.filter {
-            $0.membership != "leave" && inScope($0.id)
-                && ($0.membership == "invite" || (filter == .mentions ? $0.mentions > 0 : $0.hasUnread))
-        }
-        .sorted {
-            $0.membership == "invite" && $1.membership != "invite"
-                || ($0.membership == $1.membership && $0.name.localizedStandardCompare($1.name) == .orderedAscending)
-        }
+    private func filteredSummaryRooms(_ scope: (rooms: [ChatRoom], items: [ActivityItem])) -> [ChatRoom] {
+        scope.rooms.filter { ActivityBadge.isSummaryRoom($0, mentionsOnly: filter == .mentions) }
+            .sorted {
+                $0.membership == "invite" && $1.membership != "invite"
+                    || ($0.membership == $1.membership
+                        && $0.name.localizedStandardCompare($1.name) == .orderedAscending)
+            }
     }
 
     var body: some View {
+        let scope = scoped
+        let roomsByID = Dictionary(scope.rooms.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let items = filteredItems(scope, roomsByID: roomsByID)
+        let summaryRooms = filteredSummaryRooms(scope)
+        let hasMarkableUnread =
+            scope.rooms.contains { $0.membership == "join" && ($0.hasUnread || $0.mentions > 0) }
+            || scope.items.contains {
+                $0.kind != .invite && ActivityBadge.isUnread($0, room: roomsByID[$0.roomID])
+            }
         VStack(spacing: 0) {
             HStack(spacing: m.sp12) {
                 TabBar(tabs: ActivityFilter.allCases.map { .init(value: $0, title: $0.rawValue) }, selection: $filter)
                 Spacer()
+                if hasMarkableUnread {
+                    Button("Mark all as read", action: onMarkAllRead)
+                        .buttonStyle(.textLink)
+                        .font(m.font(.subheadline, .medium))
+                }
+                Toggle(isOn: $unreadOnly) { Text("Unreads").font(m.font(.body)) }
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
                 FeedWorkspacePicker(matrix: matrix, workspaceID: $workspaceID)
             }.padding(.horizontal, m.sp20).frame(height: m.tabBar)
             Divider().overlay(colors.border)
             if items.isEmpty && summaryRooms.isEmpty {
                 EmptyStateView(
                     symbol: filter == .mentions ? "at" : "bell",
-                    title: filter == .mentions ? "No mentions" : "You’re all caught up")
+                    title: unreadOnly
+                        ? "You’re all caught up"
+                        : (filter == .mentions ? "No mentions" : "You’re all caught up"))
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -61,17 +81,28 @@ struct ActivityFeedView: View {
                                 } label: {
                                     summaryRow(room).modifier(FeedRowHover())
                                 }.buttonStyle(.row)
+                                    .contextMenu {
+                                        if room.membership == "join" {
+                                            Button("Mark as read") { onMarkRoomRead(room) }
+                                        }
+                                    }
                                 Divider().overlay(colors.border).padding(.leading, m.sp20 + m.avatar + m.sp12)
                             }
                         }
                         if !items.isEmpty {
                             sectionLabel("Recent")
                             ForEach(items) { item in
+                                let unread = ActivityBadge.isUnread(item, room: roomsByID[item.roomID])
                                 Button {
                                     onOpenMessage(item)
                                 } label: {
-                                    activityRow(item).modifier(FeedRowHover())
+                                    activityRow(item, unread: unread).modifier(FeedRowHover())
                                 }.buttonStyle(.row)
+                                    .contextMenu {
+                                        if unread && item.kind != .invite {
+                                            Button("Mark as read") { onMarkItemRead(item) }
+                                        }
+                                    }
                                 Divider().overlay(colors.border).padding(.leading, m.sp20 + m.avatar + m.sp12)
                             }
                         }
@@ -107,7 +138,9 @@ struct ActivityFeedView: View {
                     room.membership == "invite"
                         ? (room.isSpace ? "You’re invited to this workspace" : "You’re invited to this conversation")
                         : room.mentions > 0
-                            ? "\(room.mentions) \(room.mentions == 1 ? "mention" : "mentions") · \(max(room.unreadMessages, room.unread)) unread"
+                            ? (max(room.unreadMessages, room.unread) > 0
+                                ? "\(room.mentions) \(room.mentions == 1 ? "mention" : "mentions") · \(max(room.unreadMessages, room.unread)) unread"
+                                : "\(room.mentions) \(room.mentions == 1 ? "mention" : "mentions")")
                             : room.unreadMessages > 0 || room.unread > 0
                                 ? "\(max(room.unreadMessages, room.unread)) unread messages" : "Marked unread"
                 )
@@ -123,9 +156,8 @@ struct ActivityFeedView: View {
         }.padding(.horizontal, m.sp20).padding(.vertical, m.sp16).contentShape(Rectangle())
     }
 
-    private func activityRow(_ item: ActivityItem) -> some View {
-        let unread = ActivityBadge.isUnread(item, room: matrix.rooms.first { $0.id == item.roomID })
-        return HStack(alignment: .top, spacing: m.sp12) {
+    private func activityRow(_ item: ActivityItem, unread: Bool) -> some View {
+        HStack(alignment: .top, spacing: m.sp12) {
             AvatarView(
                 name: item.senderName.isEmpty ? item.roomName : item.senderName, size: m.avatar, matrix: matrix,
                 source: item.avatarURL)

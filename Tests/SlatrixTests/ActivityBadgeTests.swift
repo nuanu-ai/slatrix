@@ -73,4 +73,38 @@ struct ActivityBadgeTests {
         mention.opened = true
         #expect(!ActivityBadge.isUnread(mention, room: room))
     }
+
+    @Test("Left rooms and out-of-workspace replies never leave a phantom count on Activity")
+    func scopedExcludesLeftRoomsAndMatchesFeed() {
+        var joined = ChatRoom(id: "!joined", name: "Joined", mentions: 1)
+        joined.spaceIDs = ["!space-a"]
+        var left = ChatRoom(id: "!left", name: "Left", mentions: 2)
+        left.membership = "leave"
+        left.spaceIDs = ["!space-a"]
+        var otherSpace = ChatRoom(id: "!other", name: "Other", mentions: 1)
+        otherSpace.spaceIDs = ["!space-b"]
+        var spaceInvite = ChatRoom(id: "!space-c", name: "Space C")
+        spaceInvite.isSpace = true
+        spaceInvite.membership = "invite"
+
+        let leftReply = ActivityItem(
+            id: "left-reply", roomID: "!left", eventID: "$r1", roomName: "Left",
+            senderID: "@alice:example.org", senderName: "Alice", body: "Reply",
+            timestamp: Date(timeIntervalSince1970: 1), hasMention: false, threadRootID: "$root", kind: .message)
+        let joinedReply = ActivityItem(
+            id: "joined-reply", roomID: "!joined", eventID: "$r2", roomName: "Joined",
+            senderID: "@alice:example.org", senderName: "Alice", body: "Reply",
+            timestamp: Date(timeIntervalSince1970: 2), hasMention: false, threadRootID: "$root", kind: .message)
+
+        let scope = ActivityBadge.scoped(
+            rooms: [joined, left, otherSpace, spaceInvite], items: [leftReply, joinedReply], workspaceID: "!space-a")
+        #expect(scope.rooms.map(\.id) == ["!joined", "!space-c"])
+        #expect(scope.items.map(\.id) == ["joined-reply"])
+        #expect(ActivityBadge.count(rooms: scope.rooms, items: scope.items) == 3)
+        // Every joined room counted by the badge (even with mentions > 0 and hasUnread == false) must appear in All.
+        #expect(ActivityBadge.isSummaryRoom(joined, mentionsOnly: false))
+        #expect(ActivityBadge.isSummaryRoom(joined, mentionsOnly: true))
+        #expect(!ActivityBadge.isSummaryRoom(left, mentionsOnly: false))
+        #expect(ActivityBadge.isSummaryRoom(spaceInvite, mentionsOnly: false))
+    }
 }
