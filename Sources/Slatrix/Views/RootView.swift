@@ -330,7 +330,7 @@ struct RootView: View {
 
     var body: some View {
         ModalHost(
-            top: m.paneHeader + (colors.theme.framed ? m.sidebarInset : 0),
+            top: m.paneHeader,
             onCovered: { shown in
                 modalShown = shown
                 // A notification that arrived while a modal was open opens once it closes.
@@ -358,6 +358,7 @@ struct RootView: View {
     @ViewBuilder private func modal(_ kind: InWindowModal.Kind) -> some View {
         switch kind {
         case .preferences(let tab):
+            let activeWorkspace = matrix.workspaces.first { $0.id == workspaceID }
             PreferencesView(
                 matrix: matrix, onClose: closeModal,
                 onLogout: {
@@ -372,7 +373,7 @@ struct RootView: View {
                 onEditProfile: {
                     closeModal()
                     editingProfile = true
-                }, tab: tab
+                }, tab: tab, workspaceID: activeWorkspace?.id, workspaceName: activeWorkspace?.name
             ).onAppear { Performance.finishOnScreen(.preferencesOpen) }
         case .switcher:
             QuickSwitcherView(
@@ -504,6 +505,9 @@ struct RootView: View {
                     matrix: matrix, notifications: appearance.notifications, onRooms: roomsChanged,
                     onWorkspaces: settleWorkspace)
             )
+            .onChange(of: workspaceID, initial: true) { _, id in
+                appearance.activeWorkspaceID = id
+            }
             .onChange(of: workspaceID) { _, id in
                 Performance.finishOnScreen(.workspaceSwitch)
                 cancelStaleThreadOpen()
@@ -863,7 +867,6 @@ struct RootView: View {
                                 }
                             }
                         }
-                        .frameCard(colors.theme.framed, leading: sidebarCollapsed)
                     }
                     .covered(coverage.drawer)
                     .overlay(alignment: .leading) { drawer }
@@ -877,15 +880,15 @@ struct RootView: View {
         .overlay(alignment: .topLeading) {
             SearchMenu(
                 bar: searchBar, matrix: matrix, recents: recentSearches, visited: history.entries,
-                top: m.paneHeader + (colors.theme.framed ? m.sidebarInset : 0), onPick: pickSearch)
+                top: m.paneHeader, onPick: pickSearch)
         }
         // The window moves by its top edge wherever nothing there takes the click, and its buttons sit centered in it,
-        // level with the toolbar, which a frame theme insets.
+        // level with the toolbar across every theme.
         .background(alignment: .top) {
-            WindowDragArea().frame(height: m.paneHeader + (colors.theme.framed ? 2 * m.sidebarInset : 0))
+            WindowDragArea().frame(height: m.paneHeader)
                 .background(WindowButtonsCentering())
         }
-        .background(FrameBackground(colors: colors, gradient: appearance.windowGradient))
+        .background(colors.canvas)
         .foregroundStyle(colors.textBody).ignoresSafeArea(.container, edges: .top)
     }
 
@@ -1101,14 +1104,14 @@ struct RootView: View {
         return updater.updateAvailable ? ("Update", { updater.checkForUpdates() }) : nil
     }
 
-    /// The conversation list, beside the conversation or in the drawer.
-    /// On a frame theme's frame, where it takes the frame's colors, with AppKit's controls drawn dark on a colored one.
-    private func sidebar(floating: Bool = false) -> some View {
-        Sized(widths, width: sidebarWidth) { sidebarContent(floating: floating) }
-            .environment(\.onFrame, colors.theme.framed)
-            .transformEnvironment(\.colorScheme) { if colors.theme.framed && !colors.translucentFrame { $0 = .dark } }
+    /// The conversation list, as a floating inset panel beside the conversation or in the drawer.
+    /// Draws in `onSidebar`, with AppKit controls forced dark on colored sidebar islands.
+    private func sidebar() -> some View {
+        Sized(widths, width: sidebarWidth) { sidebarContent }
+            .environment(\.onSidebar, true)
+            .transformEnvironment(\.colorScheme) { if colors.coloredSidebar { $0 = .dark } }
     }
-    private func sidebarContent(floating: Bool) -> some View {
+    private var sidebarContent: some View {
         SidebarView(
             matrix: matrix,
             route: Binding(
@@ -1143,7 +1146,7 @@ struct RootView: View {
             }, onEditWorkspace: { roomDetails = DetailsSelection(id: $0) },
             onNotifications: { roomNotifications = DetailsSelection(id: $0) },
             onHide: { handleMenu("toggle-sidebar") }, accessory: sidebarAccessory,
-            onBrowseChannels: presentPublicDirectory, collapsed: $collapsedSections, floating: floating
+            onBrowseChannels: presentPublicDirectory, collapsed: $collapsedSections
         ).layoutIsolated()
     }
 
@@ -1158,7 +1161,7 @@ struct RootView: View {
                     colors.scrim.contentShape(Rectangle())
                 }.buttonStyle(.row)
                     .focusable(false).accessibilityLabel("Close sidebar").transition(.opacity)
-                sidebar(floating: true).padding([.leading, .vertical], m.sidebarInset)
+                sidebar().padding([.leading, .vertical], m.sidebarInset)
                     .transition(.move(edge: .leading))
             }
         }

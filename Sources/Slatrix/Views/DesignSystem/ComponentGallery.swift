@@ -32,7 +32,10 @@ struct ComponentGallery: View {
                     section("Section header") {
                         SectionHeader(title: "Channels", collapsed: false, onToggle: {}, addLabel: "Add channels") {
                             EmptyView()
-                        }.frame(width: m(280)).background(appearance.colors.sidebar)
+                        }.frame(width: m(280))
+                            .background { SidebarBackground(colors: appearance.colors, cornerRadius: m.radius) }
+                            .clipShape(RoundedRectangle(cornerRadius: m.radius))
+                            .environment(\.onSidebar, true)
                     }
                     section("Loading") { loading }
                     section("Tooltip") { tooltips }

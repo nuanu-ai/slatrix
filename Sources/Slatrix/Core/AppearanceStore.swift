@@ -6,75 +6,181 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var name: String { rawValue.capitalized }
 }
-/// The window's neutrals, in light and dark, or, as Slack's themes do, a color for the window's frame around the
-/// conversation. Every theme keeps the system accent.
+
+/// The window's neutrals and its floating sidebar surface, in light and dark. Every theme keeps the system accent.
 enum ColorTheme: String, CaseIterable, Identifiable {
-    case standard, slate, sand, contrast, aubergine, jade, lagoon, midnight, glass
-    var id: String { rawValue }
-    var name: String {
-        switch self {
-        case .contrast: "High Contrast"
-        default: self == .standard ? "Default" : rawValue.capitalized
+    case glass, neutral, sand, aubergine, jade, ocean
+
+    enum Group: String, CaseIterable, Identifiable {
+        case neutral, colored
+        var id: String { rawValue }
+        var title: String { rawValue.capitalized }
+        var themes: [ColorTheme] {
+            switch self {
+            case .neutral: [.glass, .neutral, .sand]
+            case .colored: [.aubergine, .jade, .ocean]
+            }
         }
     }
-    /// The sidebar sits on the window's frame, and the conversation is a card on it.
-    var framed: Bool { ![.standard, .slate, .sand, .contrast].contains(self) }
+
+    var id: String { rawValue }
+    var name: String { rawValue.capitalized }
+    /// A rich colored floating sidebar island with light text and a built-in vertical gradient.
+    var isColored: Bool {
+        switch self {
+        case .aubergine, .jade, .ocean: true
+        case .glass, .neutral, .sand: false
+        }
+    }
+    /// Translucent macOS sidebar material letting the desktop show through under a tint.
+    var isTranslucent: Bool { self == .glass }
+
+    /// Decodes persisted theme values, migrating removed legacy themes cleanly onto the 6 curated themes.
+    static func migrated(_ rawValue: String) -> (theme: ColorTheme, migratedContrast: Bool)? {
+        switch rawValue {
+        case "standard", "slate": (.neutral, false)
+        case "lagoon", "midnight": (.ocean, false)
+        case "contrast": (.neutral, true)
+        default: ColorTheme(rawValue: rawValue).map { ($0, false) }
+        }
+    }
 }
+
 enum MessageDensity: String, CaseIterable, Identifiable {
     case comfortable, compact
     var id: String { rawValue }
 }
 
 @MainActor final class AppearanceStore: ObservableObject {
-    @Published var mode =
-        AppTheme(rawValue: UserDefaults.standard.string(forKey: "appearance.mode") ?? "system") ?? .system
-    { didSet { save(mode.rawValue, "mode") } }
-    @Published var theme =
-        ColorTheme(rawValue: UserDefaults.standard.string(forKey: "appearance.theme") ?? "") ?? .standard
-    { didSet { save(theme.rawValue, "theme") } }
-    /// Slack's window gradient: a frame theme's frame fades into a neighboring hue.
-    @Published var windowGradient = UserDefaults.standard.bool(forKey: "appearance.windowGradient") {
-        didSet { UserDefaults.standard.set(windowGradient, forKey: "appearance.windowGradient") }
+    private let defaults: UserDefaults
+
+    @Published var mode: AppTheme {
+        didSet { save(mode.rawValue, "mode") }
     }
-    @Published var density =
-        MessageDensity(rawValue: UserDefaults.standard.string(forKey: "appearance.density") ?? "comfortable")
-        ?? .comfortable
-    { didSet { save(density.rawValue, "density") } }
+    @Published var theme: ColorTheme {
+        didSet { save(theme.rawValue, "theme") }
+    }
+    /// Repeating doodle texture behind messages; works independently on every theme.
+    @Published var chatWallpaper: Bool {
+        didSet { defaults.set(chatWallpaper, forKey: "appearance.chatWallpaper") }
+    }
+    /// High-contrast surfaces, text and borders; works independently on every theme.
+    @Published var increaseContrast: Bool {
+        didSet { defaults.set(increaseContrast, forKey: "appearance.increaseContrast") }
+    }
+    /// Per-workspace theme overrides keyed by Matrix space ID.
+    @Published var workspaceThemes: [String: ColorTheme] {
+        didSet { saveWorkspaceThemes() }
+    }
+    /// Currently open Matrix space ID, kept in sync by `RootView` so every view resolves the active workspace's theme.
+    @Published var activeWorkspaceID: String?
+    @Published var density: MessageDensity {
+        didSet { save(density.rawValue, "density") }
+    }
     /// Slack's zoom steps; ⌘= / ⌘- move between them and ⌘0 returns to 100%.
     static let zoomSteps: [Double] = [0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2]
-    @Published var zoom = AppearanceStore.validZoom(UserDefaults.standard.double(forKey: "appearance.zoom")) {
-        didSet { UserDefaults.standard.set(zoom, forKey: "appearance.zoom") }
+    @Published var zoom: Double {
+        didSet { defaults.set(zoom, forKey: "appearance.zoom") }
     }
     var canZoomIn: Bool { zoom < Self.zoomSteps.last! }
     var canZoomOut: Bool { zoom > Self.zoomSteps.first! }
     static func zoomedIn(_ zoom: Double) -> Double { zoomSteps.first { $0 > zoom } ?? zoom }
     static func zoomedOut(_ zoom: Double) -> Double { zoomSteps.last { $0 < zoom } ?? zoom }
     static func validZoom(_ value: Double) -> Double { zoomSteps.contains(value) ? value : 1 }
-    @Published var showAvatars = UserDefaults.standard.object(forKey: "appearance.showAvatars") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(showAvatars, forKey: "appearance.showAvatars") }
+    @Published var showAvatars: Bool {
+        didSet { defaults.set(showAvatars, forKey: "appearance.showAvatars") }
     }
-    @Published var notifications = UserDefaults.standard.object(forKey: "notifications.enabled") as? Bool ?? false {
-        didSet { UserDefaults.standard.set(notifications, forKey: "notifications.enabled") }
+    @Published var notifications: Bool {
+        didSet { defaults.set(notifications, forKey: "notifications.enabled") }
     }
-    @Published var notificationPreview = UserDefaults.standard.bool(forKey: "notifications.preview") {
-        didSet { UserDefaults.standard.set(notificationPreview, forKey: "notifications.preview") }
+    @Published var notificationPreview: Bool {
+        didSet { defaults.set(notificationPreview, forKey: "notifications.preview") }
     }
-    @Published var systemIsDark = AppearanceStore.currentSystemIsDark()
+    @Published var systemIsDark: Bool
+    @Published var systemIncreaseContrast: Bool
 
-    private static func currentSystemIsDark() -> Bool {
+    private static func currentSystemIsDark(defaults: UserDefaults) -> Bool {
         if let appearance = NSApp?.effectiveAppearance {
             return appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         }
-        return UserDefaults.standard.string(forKey: "AppleInterfaceStyle") == "Dark"
+        return defaults.string(forKey: "AppleInterfaceStyle") == "Dark"
     }
     var preferredColorScheme: ColorScheme? { mode == .system ? nil : mode == .dark ? .dark : .light }
     var isDark: Bool { mode == .dark || (mode == .system && systemIsDark) }
+    var effectiveIncreaseContrast: Bool { increaseContrast || systemIncreaseContrast }
+    var activeTheme: ColorTheme { effectiveTheme(for: activeWorkspaceID) }
+
+    func effectiveTheme(for workspaceID: String?) -> ColorTheme {
+        workspaceID.flatMap { workspaceThemes[$0] } ?? theme
+    }
+
+    func setTheme(_ theme: ColorTheme, for workspaceID: String) {
+        workspaceThemes[workspaceID] = theme
+    }
+
+    func clearTheme(for workspaceID: String) {
+        workspaceThemes.removeValue(forKey: workspaceID)
+    }
+
     /// The system accent in each theme, resolved once; picking another in System Settings redraws the window.
     private var accents: [Bool: NSColor] = [:]
     @Published private var accentChanges = 0
-    private var accentObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var accentObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var accessibilityObserver: NSObjectProtocol?
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        mode = AppTheme(rawValue: defaults.string(forKey: "appearance.mode") ?? "system") ?? .system
+
+        var migratedContrast = false
+        if let rawTheme = defaults.string(forKey: "appearance.theme"),
+            let decoded = ColorTheme.migrated(rawTheme)
+        {
+            theme = decoded.theme
+            if decoded.migratedContrast { migratedContrast = true }
+            if decoded.theme.rawValue != rawTheme {
+                defaults.set(decoded.theme.rawValue, forKey: "appearance.theme")
+            }
+        } else {
+            theme = .glass
+        }
+
+        var decodedWorkspaceThemes: [String: ColorTheme] = [:]
+        var migratedWorkspaceThemes = false
+        if let rawMap = defaults.dictionary(forKey: "appearance.workspaceThemes") as? [String: String] {
+            for (workspaceID, rawValue) in rawMap {
+                if let decoded = ColorTheme.migrated(rawValue) {
+                    decodedWorkspaceThemes[workspaceID] = decoded.theme
+                    if decoded.migratedContrast { migratedContrast = true }
+                    if decoded.theme.rawValue != rawValue { migratedWorkspaceThemes = true }
+                } else {
+                    migratedWorkspaceThemes = true
+                }
+            }
+        }
+        workspaceThemes = decodedWorkspaceThemes
+
+        chatWallpaper = defaults.object(forKey: "appearance.chatWallpaper") as? Bool ?? true
+        if let explicitContrast = defaults.object(forKey: "appearance.increaseContrast") as? Bool {
+            increaseContrast = explicitContrast
+        } else if migratedContrast {
+            increaseContrast = true
+            defaults.set(true, forKey: "appearance.increaseContrast")
+        } else {
+            increaseContrast = false
+        }
+
+        density =
+            MessageDensity(rawValue: defaults.string(forKey: "appearance.density") ?? "comfortable") ?? .comfortable
+        zoom = Self.validZoom(defaults.double(forKey: "appearance.zoom"))
+        showAvatars = defaults.object(forKey: "appearance.showAvatars") as? Bool ?? true
+        notifications = defaults.object(forKey: "notifications.enabled") as? Bool ?? false
+        notificationPreview = defaults.bool(forKey: "notifications.preview")
+        systemIsDark = Self.currentSystemIsDark(defaults: defaults)
+        systemIncreaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+
+        if migratedWorkspaceThemes { saveWorkspaceThemes() }
+
         accentObserver = NotificationCenter.default.addObserver(
             forName: NSColor.systemColorsDidChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -83,6 +189,18 @@ enum MessageDensity: String, CaseIterable, Identifiable {
                 self?.accentChanges += 1
             }
         }
+        accessibilityObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.systemIncreaseContrast = NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
+            }
+        }
+    }
+
+    deinit {
+        if let accentObserver { NotificationCenter.default.removeObserver(accentObserver) }
+        if let accessibilityObserver { NSWorkspace.shared.notificationCenter.removeObserver(accessibilityObserver) }
     }
 
     func accent(dark: Bool) -> NSColor {
@@ -91,5 +209,14 @@ enum MessageDensity: String, CaseIterable, Identifiable {
         accents[dark] = accent
         return accent
     }
-    private func save(_ value: String, _ key: String) { UserDefaults.standard.set(value, forKey: "appearance.\(key)") }
+
+    private func save(_ value: String, _ key: String) { defaults.set(value, forKey: "appearance.\(key)") }
+
+    private func saveWorkspaceThemes() {
+        if workspaceThemes.isEmpty {
+            defaults.removeObject(forKey: "appearance.workspaceThemes")
+        } else {
+            defaults.set(workspaceThemes.mapValues(\.rawValue), forKey: "appearance.workspaceThemes")
+        }
+    }
 }

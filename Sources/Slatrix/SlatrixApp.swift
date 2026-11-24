@@ -26,7 +26,7 @@ struct SlatrixApp: App {
             RootView(matrix: matrix, localStore: .shared, attachmentDrafts: .shared).environmentObject(appearance)
                 .environment(\.metrics, metrics)
                 .preferredColorScheme(appearance.preferredColorScheme)
-                .background(WindowConfiguration(background: NSColor(appearance.colors.frame).withAlphaComponent(1)))
+                .background(WindowConfiguration(background: NSColor(appearance.colors.canvas).withAlphaComponent(1)))
                 .frame(
                     minWidth: minimumSize.width, minHeight: minimumSize.height)
         }

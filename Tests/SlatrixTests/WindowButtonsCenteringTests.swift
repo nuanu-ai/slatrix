@@ -46,15 +46,16 @@ struct WindowButtonsCenteringTests {
     }
 
     @Test(
-        "The Hide sidebar button shares the window buttons' vertical midline in default and framed themes",
-        arguments: [ColorTheme.standard, .aubergine])
+        "The Hide sidebar button shares the window buttons' vertical midline across all six themes",
+        arguments: ColorTheme.allCases)
     func hideSidebarAlignsWithWindowButtons(theme: ColorTheme) async throws {
         _ = NSApplication.shared
         VoiceOver.listen()
         defer { VoiceOver.done() }
-        let savedTheme = UserDefaults.standard.object(forKey: "appearance.theme")
-        defer { UserDefaults.standard.set(savedTheme, forKey: "appearance.theme") }
-        let appearance = AppearanceStore()
+        let name = "SlatrixButtonsTests-" + UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let appearance = AppearanceStore(defaults: defaults)
         appearance.theme = theme
         let m = Metrics(zoom: 1)
         let matrix = MatrixService.scratch()
@@ -78,10 +79,11 @@ struct WindowButtonsCenteringTests {
                 onMarkUnread: { _ in }, onMarkRead: { _ in }, onInviteWorkspace: { _ in }, onEditWorkspace: { _ in },
                 onNotifications: { _ in }, onHide: {}, onBrowseChannels: {}, collapsed: .constant([])
             )
+            .environment(\.onSidebar, true)
             .padding([.leading, .vertical], m.sidebarInset)
             .frame(width: 240, height: 600)
             .background(alignment: .top) {
-                Color.clear.frame(height: m.paneHeader + (theme.framed ? 2 * m.sidebarInset : 0))
+                Color.clear.frame(height: m.paneHeader)
                     .background(WindowButtonsCentering())
             }
             .environmentObject(appearance).environment(\.metrics, m)

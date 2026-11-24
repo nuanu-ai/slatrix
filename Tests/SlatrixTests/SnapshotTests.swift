@@ -167,19 +167,25 @@ struct Snapshots {
         try write(await settledImage(hosting), "preferences-\(name)")
     }
 
-    @Test("Every theme, with the window gradient where it has one", arguments: ColorTheme.allCases, Theme.allCases)
+    @Test("Every theme, light and dark", arguments: ColorTheme.allCases, Theme.allCases)
     func colorTheme(_ colorTheme: ColorTheme, theme: Theme) async throws {
         _ = NSApplication.shared
         let matrix = MatrixService.scratch()
         matrix.enterPreview()
         let appearance = AppearanceStore()
-        let saved = ["appearance.mode", "appearance.theme", "appearance.windowGradient", "layout.sidebarHidden"].map {
+        let saved = [
+            "appearance.mode", "appearance.theme", "appearance.chatWallpaper", "appearance.increaseContrast",
+            "appearance.workspaceThemes", "layout.sidebarHidden",
+        ].map {
             ($0, UserDefaults.standard.object(forKey: $0))
         }
         defer { for (key, value) in saved { UserDefaults.standard.set(value, forKey: key) } }
         appearance.mode = theme == .dark ? .dark : .light
         appearance.systemIsDark = theme == .dark
         appearance.theme = colorTheme
+        appearance.chatWallpaper = true
+        appearance.increaseContrast = false
+        appearance.workspaceThemes = [:]
         let hosting = NSHostingView(rootView: RootView(scratch: matrix).environmentObject(appearance))
         let window = offscreenWindow(
             NSSize(width: 1280, height: 800),
@@ -195,11 +201,7 @@ struct Snapshots {
         }
         let name = "theme-\(colorTheme.rawValue)-\(theme.rawValue)"
         try write(await settledImage(hosting), name)
-        guard colorTheme.framed else { return }
-        if !appearance.colors.translucentFrame {
-            appearance.windowGradient = true
-            try write(await settledImage(hosting), name + "-gradient")
-        }
+        guard colorTheme.isColored || colorTheme.isTranslucent else { return }
         // Too narrow to dock the sidebar, so it opens as a drawer over the conversation.
         window.setContentSize(NSSize(width: 480, height: 800))
         _ = try await settledImage(hosting)
@@ -975,13 +977,18 @@ struct Snapshots {
         matrix.rooms[index].pinnedEventIDs = ["$hard.6.pinned"]
         matrix.savedMessages.set(roomID: room, eventID: "$hard.6.saved", saved: true)
         let appearance = AppearanceStore()
-        let keys = ["appearance.mode", "appearance.theme", "appearance.windowGradient", "appearance.density"]
+        let keys = [
+            "appearance.mode", "appearance.theme", "appearance.chatWallpaper", "appearance.increaseContrast",
+            "appearance.workspaceThemes", "appearance.density",
+        ]
         let saved = keys.map { ($0, UserDefaults.standard.object(forKey: $0)) }
         defer { for (key, value) in saved { UserDefaults.standard.set(value, forKey: key) } }
         appearance.mode = theme == .dark ? .dark : .light
         appearance.systemIsDark = theme == .dark
         appearance.theme = .glass
-        appearance.windowGradient = true
+        appearance.chatWallpaper = true
+        appearance.increaseContrast = false
+        appearance.workspaceThemes = [:]
         appearance.density = .comfortable
         let hosting = NSHostingView(
             rootView: RootView(scratch: matrix).environmentObject(appearance).environment(

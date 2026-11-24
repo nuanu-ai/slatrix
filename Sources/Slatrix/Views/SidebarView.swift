@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// The sidebar: a panel inset in the window, or in a frame theme the frame itself, with the window buttons on top, the
-/// space's name and its menu, the shortcuts, the conversations, and you at the bottom.
+/// The sidebar: an inset floating panel with the window buttons on top, the space's name and its menu, the shortcuts,
+/// the conversations, and you at the bottom.
 struct SidebarView: View {
     let matrix: MatrixService
     @EnvironmentObject var appearance: AppearanceStore
@@ -30,8 +30,6 @@ struct SidebarView: View {
     var onBrowseChannels: () -> Void
     /// Section titles folded shut; held by the window, so they survive the sidebar moving into the drawer and back.
     @Binding var collapsed: Set<String>
-    /// Over the conversation in the drawer, where a frame theme's sidebar needs a panel of the frame's own.
-    var floating = false
     @State private var connectingTooLong = false
     @Environment(\.metrics) private var m
     @ThemeColors private var colors
@@ -51,7 +49,6 @@ struct SidebarView: View {
     }
 
     var body: some View {
-        let panel = floating || !appearance.theme.framed
         VStack(spacing: 0) {
             VStack(spacing: 0) {
                 HStack {
@@ -59,7 +56,7 @@ struct SidebarView: View {
                     Spacer()
                     IconButton(symbol: "sidebar.left", label: "Hide sidebar", role: .body, action: onHide)
                         .foregroundStyle(colors.textSecondary)
-                }.frame(height: m.paneHeader - (appearance.theme.framed ? 0 : 2 * m.sidebarInset))
+                }.frame(height: m.paneHeader - 2 * m.sidebarInset)
                     .background(WindowDragArea())
                 if route == .directMessages {
                     DirectMessagesColumn(
@@ -74,9 +71,14 @@ struct SidebarView: View {
             Divider().overlay(colors.border)
             footer
         }
-        .background(panel ? colors.sidebar : .clear)
+        .background { SidebarBackground(colors: colors, cornerRadius: m.radiusPanel) }
         .clipShape(RoundedRectangle(cornerRadius: m.radiusPanel))
-        .elevation(panel ? .e1 : nil, cornerRadius: m.radiusPanel)
+        .overlay {
+            if colors.highContrast {
+                RoundedRectangle(cornerRadius: m.radiusPanel).strokeBorder(colors.border, lineWidth: 1)
+            }
+        }
+        .elevation(.e1, cornerRadius: m.radiusPanel)
         .foregroundStyle(colors.textBody)
     }
 
