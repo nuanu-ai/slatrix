@@ -88,16 +88,19 @@ final class FakeThreadRoom: Room, @unchecked Sendable {
     let threads: FakeThreadList
     let timelines: [String: FakeEventTimeline]
     let configurations = Recorder<TimelineConfiguration>()
+    let receiptGate = Gate()
     private let lock = NSLock()
     private var storedReceipts: [ReceiptThread: UserReceipt]
+    private var storedPrivateReceipts: [ReceiptThread: UserReceipt]
     var fail = false
     init(
         threads: FakeThreadList = FakeThreadList(), timelines: [String: FakeEventTimeline] = [:],
-        receipts: [ReceiptThread: UserReceipt] = [:]
+        receipts: [ReceiptThread: UserReceipt] = [:], privateReceipts: [ReceiptThread: UserReceipt] = [:]
     ) {
         self.threads = threads
         self.timelines = timelines
         self.storedReceipts = receipts
+        self.storedPrivateReceipts = privateReceipts
         super.init(noHandle: .init())
     }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
@@ -105,12 +108,21 @@ final class FakeThreadRoom: Room, @unchecked Sendable {
         get { lock.withLock { storedReceipts } }
         set { lock.withLock { storedReceipts = newValue } }
     }
+    var privateReceipts: [ReceiptThread: UserReceipt] {
+        get { lock.withLock { storedPrivateReceipts } }
+        set { lock.withLock { storedPrivateReceipts = newValue } }
+    }
     override func membership() -> Membership { .joined }
     override func threadListService() -> ThreadListService { threads }
     override func loadUserReceipt(receiptType: ReceiptType, thread: ReceiptThread, userId: String) async throws
         -> UserReceipt?
     {
-        receiptType == .read ? lock.withLock { storedReceipts[thread] } : nil
+        await receiptGate.wait()
+        switch receiptType {
+        case .read: return lock.withLock { storedReceipts[thread] }
+        case .readPrivate: return lock.withLock { storedPrivateReceipts[thread] }
+        case .fullyRead: return nil
+        }
     }
     override func timelineWithConfiguration(configuration: TimelineConfiguration) async throws -> Timeline {
         configurations.append(configuration)

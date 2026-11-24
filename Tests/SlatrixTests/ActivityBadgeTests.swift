@@ -143,5 +143,12 @@ struct ActivityBadgeTests {
         #expect(ActivityBadge.isSummaryRoom(mutedMention, mentionsOnly: true))
         #expect(ActivityBadge.isSummaryRoom(mutedMarked, mentionsOnly: false))
         #expect(ActivityBadge.isSummaryRoom(unmuted, mentionsOnly: false))
+
+        let ordinary = ActivityItem(
+            id: "muted-msg", roomID: "!m1", eventID: "$e1", roomName: "Muted", senderID: "@alice:example.org",
+            senderName: "Alice", body: "Hello", timestamp: Date(timeIntervalSince1970: 1), hasMention: false,
+            threadRootID: nil, kind: .message)
+        #expect(!ActivityBadge.isUnread(ordinary, room: mutedChannel))
+        #expect(ActivityBadge.isUnread(ordinary, room: mutedMarked))
     }
 }

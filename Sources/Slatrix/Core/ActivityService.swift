@@ -73,7 +73,7 @@ enum ActivityBadge {
         if item.kind == .invite { return true }
         if item.kind == .message && item.threadRootID != nil && !item.hasMention { return true }
         guard let room else { return false }
-        return item.hasMention ? room.mentions > 0 : room.hasUnread
+        return item.hasMention ? room.mentions > 0 : UnreadBadge(room) != .none
     }
 }
 

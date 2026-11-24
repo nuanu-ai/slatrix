@@ -936,6 +936,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     private(set) var threadAckToken = 0
     @ObservationIgnored private var observedOpenRoomUnread:
         (roomID: String, unread: Int, unreadMessages: Int, mentions: Int)?
+    /// Rooms marked unread locally before sync publishes `isMarkedUnread == true`, so re-entering still clears the flag.
+    @ObservationIgnored private var locallyMarkedUnreadRooms = Set<String>()
     var timelineSelectionID: UUID { selection }
     var status: ConnectionStatus = .signedOut
     private(set) var connectionErrorMessage: String?
@@ -1170,15 +1172,17 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         if room != selectedRoom { selectedRoom = room }
     }
     private func withdrawReadRooms(from previous: [ChatRoom], to current: [ChatRoom]) {
-        guard let notifications, !previous.isEmpty, !current.isEmpty else { return }
-        let previousByID = Dictionary(previous.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        guard let notifications, client != nil, connectionStopTask == nil, !previous.isEmpty else { return }
+        let currentByID = Dictionary(current.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let cleared = Set(
-            current.compactMap { room -> String? in
-                guard let old = previousByID[room.id] else { return nil }
+            previous.compactMap { old -> String? in
+                let now = currentByID[old.id]
                 let wasUnread = old.membership == "join" && (old.hasUnread || old.mentions > 0)
-                let isRead = room.membership == "join" && !room.hasUnread && room.mentions == 0
-                let resolvedInvite = old.membership == "invite" && room.membership != "invite"
-                return (wasUnread && isRead) || resolvedInvite ? room.id : nil
+                let nowReadOrGone =
+                    now == nil || now?.membership == "leave"
+                    || (now?.membership == "join" && now?.hasUnread == false && now?.mentions == 0)
+                let resolvedInvite = old.membership == "invite" && now?.membership != "invite"
+                return (wasUnread && nowReadOrGone) || resolvedInvite ? old.id : nil
             })
         guard !cleared.isEmpty else { return }
         Task { await notifications.withdrawRooms(cleared) }
@@ -1915,6 +1919,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         presence.stop()
         sharedFiles.attach(nil)
         threadFeed.reset()
+        locallyMarkedUnreadRooms = []
         activity.clear()
         roomSubscriptions.attach(nil)
         avatarImages.clear()
@@ -2268,7 +2273,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             // Already on screen; this drops any other conversation that was still opening, or jump being prepared.
             jumping = nil
             selection = live.token
-            if rooms.first(where: { $0.id == id })?.isMarkedUnread == true {
+            if rooms.first(where: { $0.id == id })?.isMarkedUnread == true || locallyMarkedUnreadRooms.contains(id) {
                 lastAutomaticReceipt = nil
                 unreadAckToken += 1
             }
@@ -3983,25 +3988,43 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard isVisible() else { throw CancellationError() }
         let original = try validatedThreadReadTimeline(target)
         var marked = false
-        try await retryingReceipt(retries) {
-            try await readDelivery.perform(roomID: target.identity.roomID) { [weak self] in
-                guard let self else { throw CancellationError() }
-                guard isVisible() else { throw CancellationError() }
-                _ = try self.validatedThreadReadTimeline(target)
-                guard self.lastThreadReceipt != target else { return }
-                // The thread timeline adds the thread ID to the receipt, on its latest event as a channel's is.
-                try await original.markAsRead(receiptType: .read)
-                guard isVisible() else { throw CancellationError() }
-                _ = try self.validatedThreadReadTimeline(target)
-                self.lastThreadReceipt = target
-                marked = true
-                self.requestRefresh()
+        do {
+            try await retryingReceipt(retries) {
+                try await readDelivery.perform(roomID: target.identity.roomID) { [weak self] in
+                    guard let self else { throw CancellationError() }
+                    guard isVisible() else { throw CancellationError() }
+                    _ = try self.validatedThreadReadTimeline(target)
+                    guard self.lastThreadReceipt != target else { return }
+                    // The thread timeline adds the thread ID to the receipt, on its latest event as a channel's is.
+                    try await original.markAsRead(receiptType: .read)
+                    guard isVisible() else { throw CancellationError() }
+                    _ = try self.validatedThreadReadTimeline(target)
+                    self.lastThreadReceipt = target
+                    marked = true
+                    let acknowledgedAt = self.threadMessages.last(where: { $0.eventID == target.eventID })?.timestamp
+                    let loadedEvents = Set(self.threadMessages.map(\.eventID))
+                    self.activity.markSeen { item in
+                        guard item.roomID == target.identity.roomID, item.threadRootID == target.identity.rootID else {
+                            return false
+                        }
+                        if let eventID = item.eventID, loadedEvents.contains(eventID) { return true }
+                        return acknowledgedAt.map { item.timestamp <= $0 } ?? false
+                    }
+                    self.threadFeed.markThreadRead(
+                        roomID: target.identity.roomID, rootID: target.identity.rootID, eventID: target.eventID)
+                    self.requestRefresh()
+                }
             }
+        } catch {
+            if marked, let notifications {
+                Task {
+                    await notifications.withdrawThread(
+                        roomID: target.identity.roomID, rootID: target.identity.rootID)
+                }
+            }
+            throw error
         }
         guard marked else { return }
-        activity.markSeen { $0.roomID == target.identity.roomID && $0.threadRootID == target.identity.rootID }
-        threadFeed.markThreadRead(
-            roomID: target.identity.roomID, rootID: target.identity.rootID, eventID: target.eventID)
         await notifications?.withdrawThread(roomID: target.identity.roomID, rootID: target.identity.rootID)
     }
     /// A receipt the server turns down goes again after each of these, while the read policy still sends it.
@@ -4046,24 +4069,34 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let originalTimeline = try validatedReadTimeline(target)
         let originalRoom = try requireRoom(target.roomID)
         var marked = false
-        try await retryingReceipt(retries) {
-            try await readDelivery.perform(roomID: target.roomID) { [weak self] in
-                guard let self else { throw CancellationError() }
-                // Asked before each write, as when the attempt starts, so Mark unread meanwhile stops the rest.
-                let check = {
-                    _ = try self.validatedReadTimeline(target)
-                    guard isCurrent() else { throw CancellationError() }
+        do {
+            try await retryingReceipt(retries) {
+                try await readDelivery.perform(roomID: target.roomID) { [weak self] in
+                    guard let self else { throw CancellationError() }
+                    // Asked before each write, as when the attempt starts, so Mark unread meanwhile stops the rest.
+                    let check = {
+                        _ = try self.validatedReadTimeline(target)
+                        guard isCurrent() else { throw CancellationError() }
+                    }
+                    try await UnreadSDKActions.acknowledge(
+                        timeline: originalTimeline, eventID: target.eventID, validate: check)
+                    if self.rooms.first(where: { $0.id == target.roomID })?.isMarkedUnread == true
+                        || self.locallyMarkedUnreadRooms.contains(target.roomID)
+                    {
+                        try await originalRoom.setUnreadFlag(newValue: false)
+                        self.locallyMarkedUnreadRooms.remove(target.roomID)
+                        try check()
+                    }
+                    self.lastAutomaticReceipt = target
+                    marked = true
+                    self.requestRefresh()
                 }
-                try await UnreadSDKActions.acknowledge(
-                    timeline: originalTimeline, eventID: target.eventID, validate: check)
-                if self.rooms.first(where: { $0.id == target.roomID })?.isMarkedUnread == true {
-                    try await originalRoom.setUnreadFlag(newValue: false)
-                    try check()
-                }
-                self.lastAutomaticReceipt = target
-                marked = true
-                self.requestRefresh()
             }
+        } catch {
+            if marked, let notifications {
+                Task { await notifications.withdrawRooms([target.roomID], includeThreads: false) }
+            }
+            throw error
         }
         if marked { await notifications?.withdrawRooms([target.roomID], includeThreads: false) }
     }
@@ -4088,28 +4121,44 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
         lastAutomaticReceipt = nil
         lastThreadReceipt = nil
-        try await readDelivery.perform(roomID: roomID) { [weak self] in
-            guard let self, self.sessionGeneration == account, self.connectionStopTask == nil, !self.isPreview else {
-                throw CancellationError()
-            }
-            try Task.checkCancellation()
-            guard room.membership() == .joined else { throw MatrixServiceError.noRoom }
-            if !value {
-                try await UnreadSDKActions.markRoomRead(room: room) {
-                    try Task.checkCancellation()
-                    guard self.sessionGeneration == account, self.connectionStopTask == nil, !self.isPreview,
-                        room.membership() == .joined
-                    else { throw CancellationError() }
+        var markedRead = false
+        do {
+            try await readDelivery.perform(roomID: roomID) { [weak self] in
+                guard let self, self.sessionGeneration == account, self.connectionStopTask == nil, !self.isPreview
+                else {
+                    throw CancellationError()
                 }
+                try Task.checkCancellation()
+                guard room.membership() == .joined else { throw MatrixServiceError.noRoom }
+                let threadSnapshot = !value ? self.threadFeed.snapshotLatestEventIDs(roomID: roomID) : [:]
+                if !value {
+                    try await UnreadSDKActions.markRoomRead(room: room) {
+                        try Task.checkCancellation()
+                        guard self.sessionGeneration == account, self.connectionStopTask == nil, !self.isPreview,
+                            room.membership() == .joined
+                        else { throw CancellationError() }
+                    }
+                }
+                try await room.setUnreadFlag(newValue: value)
+                guard self.sessionGeneration == account, self.connectionStopTask == nil else {
+                    throw CancellationError()
+                }
+                if value {
+                    self.locallyMarkedUnreadRooms.insert(roomID)
+                } else {
+                    self.locallyMarkedUnreadRooms.remove(roomID)
+                    self.threadFeed.markRoomRead(roomID: roomID, snapshot: threadSnapshot)
+                    markedRead = true
+                }
+                self.requestRefresh()
             }
-            try await room.setUnreadFlag(newValue: value)
-            guard self.sessionGeneration == account, self.connectionStopTask == nil else { throw CancellationError() }
-            self.requestRefresh()
+        } catch {
+            if markedRead, let notifications {
+                Task { await notifications.withdrawRooms([roomID], includeThreads: true) }
+            }
+            throw error
         }
-        if !value {
-            threadFeed.markRoomRead(roomID: roomID)
-            await notifications?.withdrawRooms([roomID], includeThreads: true)
-        }
+        if markedRead { await notifications?.withdrawRooms([roomID], includeThreads: true) }
     }
 
     func setFavorite(_ room: ChatRoom, value: Bool) async throws {

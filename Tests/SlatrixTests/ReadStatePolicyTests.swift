@@ -230,13 +230,17 @@ struct ReadStatePolicyTests {
         #expect(hold.blocks(Self.visible))
     }
 
-    @Test("Rolling back a failed Mark unread releases that visit without affecting a newer visit")
+    @Test("Rolling back a failed Mark unread releases that hold without affecting a newer hold or visit")
     func rollbackMarkUnread() {
         var hold = ReadStateHold()
-        hold.markUnread(Self.visible)
-        hold.rollbackMarkUnread(Self.changed { $0.timelineGeneration = UUID() })
+        let first = hold.markUnread(Self.visible)
+        hold.rollbackMarkUnread(Self.changed { $0.timelineGeneration = UUID() }, token: first)
         #expect(hold.blocks(Self.visible))
-        hold.rollbackMarkUnread(Self.visible)
+        // Re-arming on the same timeline produces a newer token; rolling back the older token keeps the newer hold.
+        let second = hold.markUnread(Self.visible)
+        hold.rollbackMarkUnread(Self.visible, token: first)
+        #expect(hold.blocks(Self.visible))
+        hold.rollbackMarkUnread(Self.visible, token: second)
         #expect(!hold.blocks(Self.visible))
     }
 

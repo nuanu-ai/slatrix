@@ -49,12 +49,17 @@ private struct ReadStateVisit: Equatable {
 /// Arm before requesting Mark unread, so an already-visible bottom cannot immediately clear it.
 struct ReadStateHold: Equatable {
     private var heldVisit: ReadStateVisit?
+    private var heldToken: UUID?
 
-    mutating func markUnread(_ context: ReadStateContext) {
+    @discardableResult
+    mutating func markUnread(_ context: ReadStateContext) -> UUID? {
         guard !context.isPreview, context.isJoined, context.isMainTimeline, context.roomID == context.selectedRoomID,
             let visit = ReadStateVisit(context)
-        else { return }
+        else { return nil }
+        let token = UUID()
         heldVisit = visit
+        heldToken = token
+        return token
     }
 
     mutating func observe(_ context: ReadStateContext) {
@@ -62,6 +67,7 @@ struct ReadStateHold: Equatable {
         if !context.isMainTimeline || ReadStateVisit(context) != heldVisit || context.selectedRoomID != heldVisit.roomID
         {
             self.heldVisit = nil
+            self.heldToken = nil
         }
     }
 
@@ -70,12 +76,14 @@ struct ReadStateHold: Equatable {
             heldVisit.sessionGeneration == context.sessionGeneration, heldVisit.roomID == context.roomID
         else { return }
         self.heldVisit = nil
+        self.heldToken = nil
     }
 
-    /// Reverses a provisional Mark unread hold when the server write fails, without touching a newer visit.
-    mutating func rollbackMarkUnread(_ context: ReadStateContext) {
-        guard let heldVisit, heldVisit == ReadStateVisit(context) else { return }
+    /// Reverses a provisional Mark unread hold when the server write fails, without touching a newer hold or visit.
+    mutating func rollbackMarkUnread(_ context: ReadStateContext, token: UUID? = nil) {
+        guard let heldVisit, heldVisit == ReadStateVisit(context), token == nil || heldToken == token else { return }
         self.heldVisit = nil
+        self.heldToken = nil
     }
 
     func blocks(_ context: ReadStateContext) -> Bool {

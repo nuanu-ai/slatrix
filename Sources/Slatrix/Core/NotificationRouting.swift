@@ -126,6 +126,10 @@ enum DesktopNotificationError: LocalizedError {
     /// Banners on their way, each by its message's Activity key, room, and thread. Deleting or reading drops matching
     /// entries, so their banners never stay.
     private var deliveries: [UUID: PendingDelivery] = [:]
+    /// Sequence number of each delivered banner submitted in this session, so a withdrawal never removes a newer banner
+    /// that arrives while Notification Center answers.
+    private var nextSequence: UInt64 = 0
+    private var deliveredSequence: [String: UInt64] = [:]
     /// Whether a banner went up since the last clear; until one does, Notification Center holds none to take back.
     private var hasShown = false
 
@@ -140,6 +144,7 @@ enum DesktopNotificationError: LocalizedError {
     func clear() {
         generation = UUID()
         hasShown = false
+        deliveredSequence = [:]
         transport.clear()
     }
 
@@ -172,8 +177,13 @@ enum DesktopNotificationError: LocalizedError {
         pending: (PendingDelivery) -> Bool,
         delivered: (DeliveredNotification) -> Bool
     ) async {
+        let cutoff = nextSequence
         deliveries = deliveries.filter { !pending($0.value) }
-        for banner in await shown() where delivered(banner) { transport.remove(banner.identifier) }
+        for banner in await shown() where delivered(banner) {
+            if let seq = deliveredSequence[banner.identifier], seq > cutoff { continue }
+            deliveredSequence[banner.identifier] = nil
+            transport.remove(banner.identifier)
+        }
     }
 
     /// This account's message banners in Notification Center.
@@ -217,6 +227,8 @@ enum DesktopNotificationError: LocalizedError {
             transport.remove(request.identifier)
             return false
         }
+        nextSequence += 1
+        deliveredSequence[request.identifier] = nextSequence
         hasShown = true
         return true
     }

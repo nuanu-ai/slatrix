@@ -413,4 +413,55 @@ struct ThreadFeedDiscoveryTests {
         feed.markRoomRead(roomID: rooms[0].id)
         #expect(feed.items.filter(\.isUnread).map(\.root.eventID) == [])
     }
+
+    // capability: threads.feed
+    @Test(
+        "Private read receipts and partial cross-device unread decreases clear read threads without rolling back live replies"
+    )
+    func privateReceiptsCrossDeviceDecreaseAndLiveRace() async throws {
+        let me = "@me:example.org"
+        let privateRead = ThreadListItem(
+            rootEvent: threadEvent("$t-private", timestamp: 1_000),
+            latestEvent: threadEvent("$r-private", timestamp: 5_000), numReplies: 1)
+        let pending = ThreadListItem(
+            rootEvent: threadEvent("$t-pending", timestamp: 1_000),
+            latestEvent: threadEvent("$r-a", timestamp: 5_000), numReplies: 1)
+        let list = FakeThreadList([privateRead, pending])
+        let fakeRoom = FakeThreadRoom(
+            threads: list,
+            privateReceipts: [
+                .thread(threadRootEventId: "$t-private"): UserReceipt(
+                    eventId: "$r-private", receipt: Receipt(timestamp: 5_000))
+            ])
+        let client = FakeThreadClient(fakeRoom)
+        var chatRoom = rooms[0]
+        chatRoom.unread = 3
+        await feed.open(client: client, rooms: [chatRoom], workspaceID: nil, ownUserID: me) { _ in }
+        #expect(feed.items.first { $0.root.eventID == "$t-private" }?.isUnread == false)
+        #expect(feed.items.first { $0.root.eventID == "$t-pending" }?.isUnread == true)
+
+        // A partial unread count decrease (e.g. phone read one thread while main stays unread) refreshes receipts.
+        fakeRoom.receipts = [
+            .thread(threadRootEventId: "$t-pending"): UserReceipt(eventId: "$r-a", receipt: Receipt(timestamp: 5_000))
+        ]
+        chatRoom.unread = 2
+        feed.updateRooms([chatRoom])
+        #expect(await eventually { feed.items.first { $0.root.eventID == "$t-pending" }?.isUnread == false })
+
+        // Pagination suspended during receipt load must never overwrite a newer live reply emitted meanwhile.
+        fakeRoom.receiptGate.arm()
+        let paging = Task {
+            await feed.open(client: client, rooms: [chatRoom], workspaceID: nil, ownUserID: me) { _ in }
+        }
+        #expect(await eventually { fakeRoom.receiptGate.isWaiting })
+        let liveReply = ThreadListItem(
+            rootEvent: threadEvent("$t-pending", timestamp: 1_000),
+            latestEvent: threadEvent("$r-b", timestamp: 6_000), numReplies: 2)
+        list.emit([privateRead, liveReply])
+        await drainMainActor()
+        fakeRoom.receiptGate.release()
+        await paging.value
+        let updated = try #require(feed.items.first { $0.root.eventID == "$t-pending" })
+        #expect(updated.latest?.eventID == "$r-b" && updated.isUnread)
+    }
 }

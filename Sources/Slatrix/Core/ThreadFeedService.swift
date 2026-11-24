@@ -279,6 +279,7 @@ final class RoomSubscriptionCoordinator {
         var unthreadedReceipt: UserReceipt?
         var threadReceipts: [String: UserReceipt] = [:]
         var receiptRevision = 0
+        var receiptTask: Task<Void, Never>?
         /// `values` as rows, kept until they or the room change; projecting every room on each page is the cost.
         var projected: [ThreadFeedItem]?
         var revision = 0
@@ -288,6 +289,8 @@ final class RoomSubscriptionCoordinator {
             self.service = service
         }
         func cancel() {
+            receiptTask?.cancel()
+            receiptTask = nil
             for item in handles { item.cancel() }
             handles = []
         }
@@ -318,9 +321,19 @@ final class RoomSubscriptionCoordinator {
     /// them at once while it checks again; signing out forgets them.
     @ObservationIgnored private var lastShown: (workspaceID: String?, items: [ThreadFeedItem])?
     @ObservationIgnored private var current: [String: ChatMessage] = [:]
+    private struct UnreadSnapshot: Equatable {
+        var unread: Int
+        var unreadMessages: Int
+        var mentions: Int
+        var isMarkedUnread: Bool
+        func decreased(from previous: Self) -> Bool {
+            unread < previous.unread || unreadMessages < previous.unreadMessages || mentions < previous.mentions
+                || (previous.isMarkedUnread && !isMarkedUnread)
+        }
+    }
     /// Latest reply event ID already confirmed read locally, by thread key, so read state clears before sync echoes.
     @ObservationIgnored private var locallyReadThreads: [String: String] = [:]
-    @ObservationIgnored private var unreadByRoom: [String: Bool] = [:]
+    @ObservationIgnored private var unreadByRoom: [String: UnreadSnapshot] = [:]
     private static let firstScreen = 8
     @ObservationIgnored private var publishPending = false
 
@@ -428,30 +441,42 @@ final class RoomSubscriptionCoordinator {
         refreshReceipts(for: roomID)
     }
 
-    /// Clears every thread's unread indicator in `roomID` once the room itself is marked read.
-    func markRoomRead(roomID: String) {
+    /// Captures the current latest reply event ID for each known thread in `roomID`, before an async room-wide read.
+    func snapshotLatestEventIDs(roomID: String) -> [String: String] {
+        var result: [String: String] = [:]
+        if let record = records[roomID] {
+            for value in record.values {
+                if let latestID = value.latestEvent?.eventId {
+                    result[ActivityService.key(roomID: roomID, eventID: value.rootEvent.eventId)] = latestID
+                }
+            }
+        } else if let cached = lastShown {
+            for item in cached.items where item.roomID == roomID {
+                if let latestID = item.latest?.eventID { result[item.id] = latestID }
+            }
+        }
+        return result
+    }
+
+    /// Clears every thread's unread indicator in `roomID` once the room itself is marked read. When `snapshot` is
+    /// passed, only replies known at the time the read started are marked locally read so a newer reply stays unread.
+    func markRoomRead(roomID: String, snapshot: [String: String]? = nil) {
+        let acknowledged = snapshot ?? snapshotLatestEventIDs(roomID: roomID)
+        for (key, latestID) in acknowledged { locallyReadThreads[key] = latestID }
         if var cached = lastShown {
             var changed = false
             for index in cached.items.indices where cached.items[index].roomID == roomID {
-                if records[roomID] == nil, let latestID = cached.items[index].latest?.eventID {
-                    locallyReadThreads[cached.items[index].id] = latestID
-                }
-                if cached.items[index].isUnread {
+                let item = cached.items[index]
+                let covered =
+                    snapshot == nil || item.latest.map { acknowledged[item.id] == $0.eventID } == true
+                if covered && item.isUnread {
                     cached.items[index].isUnread = false
                     changed = true
                 }
             }
             if changed { lastShown = cached }
         }
-        if let record = records[roomID] {
-            for value in record.values {
-                if let latestID = value.latestEvent?.eventId {
-                    let key = ActivityService.key(roomID: roomID, eventID: value.rootEvent.eventId)
-                    locallyReadThreads[key] = latestID
-                }
-            }
-            record.projected = nil
-        }
+        if let record = records[roomID] { record.projected = nil }
         guard isActive, records[roomID] != nil else { return }
         publishItems()
         refreshReceipts(for: roomID)
@@ -467,12 +492,16 @@ final class RoomSubscriptionCoordinator {
                     ? lhs.id < rhs.id : lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             }
         var becameRead: [String] = []
-        var nextUnread: [String: Bool] = [:]
+        var nextUnread: [String: UnreadSnapshot] = [:]
         nextUnread.reserveCapacity(next.count)
         for room in next {
-            let unread = room.hasUnread || room.mentions > 0
-            if unreadByRoom[room.id] == true && !unread { becameRead.append(room.id) }
-            nextUnread[room.id] = unread
+            let current = UnreadSnapshot(
+                unread: room.unread, unreadMessages: room.unreadMessages, mentions: room.mentions,
+                isMarkedUnread: room.isMarkedUnread)
+            if let previous = unreadByRoom[room.id], current.decreased(from: previous) {
+                becameRead.append(room.id)
+            }
+            nextUnread[room.id] = current
         }
         unreadByRoom = nextUnread
         for roomID in becameRead { refreshReceipts(for: roomID) }
@@ -693,18 +722,21 @@ final class RoomSubscriptionCoordinator {
 
     private func refreshReceipts(for roomID: String) {
         guard isActive, let userID = ownUserID, let record = records[roomID] else { return }
+        record.receiptTask?.cancel()
         record.receiptRevision += 1
         let token = generation
         let recordToken = record.token
         let revision = record.receiptRevision
         let room = record.room
         let values = record.values
-        Task { [weak self] in
+        record.receiptTask = Task { [weak self] in
             let receipts = await Self.loadReceipts(room: room, values: values, ownUserID: userID)
+            guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard let self, self.generation == token, let current = self.records[roomID],
                     current.token == recordToken, current.receiptRevision == revision
                 else { return }
+                current.receiptTask = nil
                 current.unthreadedReceipt = receipts.unthreaded
                 current.threadReceipts = receipts.threads
                 current.projected = nil
@@ -713,22 +745,41 @@ final class RoomSubscriptionCoordinator {
         }
     }
 
+    private nonisolated static func loadBestReceipt(
+        room: Room, thread: ReceiptThread, userID: String
+    ) async -> UserReceipt? {
+        let publicReceipt = try? await room.loadUserReceipt(receiptType: .read, thread: thread, userId: userID)
+        let privateReceipt = try? await room.loadUserReceipt(receiptType: .readPrivate, thread: thread, userId: userID)
+        guard let publicReceipt else { return privateReceipt }
+        guard let privateReceipt else { return publicReceipt }
+        let publicTime = publicReceipt.receipt.timestamp ?? 0
+        let privateTime = privateReceipt.receipt.timestamp ?? 0
+        return privateTime > publicTime ? privateReceipt : publicReceipt
+    }
+
     private nonisolated static func loadReceipts(
         room: Room, values: [ThreadListItem], ownUserID: String?
     ) async -> (unthreaded: UserReceipt?, threads: [String: UserReceipt]) {
         guard let ownUserID, !values.isEmpty else { return (nil, [:]) }
-        let unthreaded = try? await room.loadUserReceipt(receiptType: .read, thread: .unthreaded, userId: ownUserID)
+        let unthreaded = await loadBestReceipt(room: room, thread: .unthreaded, userID: ownUserID)
         var threads: [String: UserReceipt] = [:]
         for value in values {
+            if Task.isCancelled { return (unthreaded, threads) }
             guard let latest = value.latestEvent, !latest.isOwn, latest.sender != ownUserID,
                 !ThreadFeedMapping.isRead(latest, by: unthreaded)
             else { continue }
             let rootID = value.rootEvent.eventId
             guard threads[rootID] == nil else { continue }
-            if let receipt = try? await room.loadUserReceipt(
-                receiptType: .read, thread: .thread(threadRootEventId: rootID), userId: ownUserID)
+            let thread = ReceiptThread.thread(threadRootEventId: rootID)
+            let publicReceipt = try? await room.loadUserReceipt(receiptType: .read, thread: thread, userId: ownUserID)
+            if ThreadFeedMapping.isRead(latest, by: publicReceipt) {
+                threads[rootID] = publicReceipt
+            } else if let privateReceipt = try? await room.loadUserReceipt(
+                receiptType: .readPrivate, thread: thread, userId: ownUserID)
             {
-                threads[rootID] = receipt
+                threads[rootID] = privateReceipt
+            } else if let publicReceipt {
+                threads[rootID] = publicReceipt
             }
         }
         return (unthreaded, threads)
@@ -740,11 +791,11 @@ final class RoomSubscriptionCoordinator {
         isLoading = true
         errorMessage = nil
         defer { if generation == token { isLoading = false } }
-        var requests: [(String, Room, ThreadListService)] = []
+        var requests: [(String, Room, ThreadListService, Int, Int)] = []
         for roomID in roomIDs {
             do {
                 let record = try record(for: roomID, client: client)
-                requests.append((roomID, record.room, record.service))
+                requests.append((roomID, record.room, record.service, record.revision, record.receiptRevision))
                 update(roomID) {
                     $0.state = .loading
                     $0.errorMessage = nil
@@ -769,12 +820,15 @@ final class RoomSubscriptionCoordinator {
         let limit = limit
         let userID = ownUserID
         await withTaskGroup(
-            of: (String, String?, [ThreadListItem], (unthreaded: UserReceipt?, threads: [String: UserReceipt])).self
+            of: (
+                String, String?, [ThreadListItem], (unthreaded: UserReceipt?, threads: [String: UserReceipt]), Int, Int
+            )
+            .self
         ) { group in
             var cursor = 0
             func addNext() {
                 guard cursor < requests.count else { return }
-                let (id, room, service) = requests[cursor]
+                let (id, room, service, startRevision, startReceiptRevision) = requests[cursor]
                 cursor += 1
                 group.addTask {
                     let failure: String?
@@ -784,21 +838,27 @@ final class RoomSubscriptionCoordinator {
                     } catch { failure = await MatrixService.safeError(error) }
                     let values = service.items()
                     let receipts = await Self.loadReceipts(room: room, values: values, ownUserID: userID)
-                    return (id, failure, values, receipts)
+                    return (id, failure, values, receipts, startRevision, startReceiptRevision)
                 }
             }
             addNext()
             addNext()
-            for await (roomID, failure, values, receipts) in group {
+            for await (roomID, failure, values, receipts, startRevision, startReceiptRevision) in group {
                 guard generation == token, !Task.isCancelled else {
                     group.cancelAll()
                     continue
                 }
                 if let record = records[roomID] {
-                    // Reading the service snapshot also covers completion arriving before queued listener callbacks.
-                    record.unthreadedReceipt = receipts.unthreaded
-                    record.threadReceipts = receipts.threads
-                    record.values = values
+                    // Only apply the snapshot when no newer live listener callback landed while receipts loaded.
+                    if record.revision == startRevision {
+                        record.values = values
+                        if record.receiptRevision == startReceiptRevision {
+                            record.unthreadedReceipt = receipts.unthreaded
+                            record.threadReceipts = receipts.threads
+                        }
+                    } else if record.receiptRevision == startReceiptRevision {
+                        refreshReceipts(for: roomID)
+                    }
                     update(roomID) {
                         $0.state = failure == nil ? .ready : .error
                         $0.errorMessage = failure

@@ -1065,10 +1065,16 @@ struct RootView: View {
     private var automaticReadTarget: ReadReceiptTarget? { ReadStatePolicy.automaticTarget(readContext, hold: readHold) }
     private func markReadState(_ targetRoom: ChatRoom, unread: Bool) {
         guard !matrix.isPreview, targetRoom.membership == "join" else { return }
-        let rollbackContext =
-            unread && targetRoom.id == matrix.selectedRoomID && !readHold.blocks(readContext) ? readContext : nil
+        var rollback: (context: ReadStateContext, token: UUID)?
         if targetRoom.id == matrix.selectedRoomID {
-            if unread { readHold.markUnread(readContext) } else { readHold.clearForExplicitRead(readContext) }
+            if unread {
+                let context = readContext
+                if !readHold.blocks(context), let token = readHold.markUnread(context) {
+                    rollback = (context, token)
+                }
+            } else {
+                readHold.clearForExplicitRead(readContext)
+            }
         }
         let account = matrix.notificationSessionID
         let seenItemIDs =
@@ -1084,7 +1090,7 @@ struct RootView: View {
                 }
             } catch {
                 guard matrix.notificationSessionID == account else { return }
-                if let rollbackContext { readHold.rollbackMarkUnread(rollbackContext) }
+                if let rollback { readHold.rollbackMarkUnread(rollback.context, token: rollback.token) }
                 matrix.errorMessage = MatrixService.safeError(error)
             }
         }

@@ -136,9 +136,13 @@ struct ActivityHostedTests {
     @Test("An older reply loses its dot when a page of older replies brings it into the open thread")
     func seenOncePaged() async throws {
         let root = FakeTimelineItem(textEvent("$root", body: "Root"))
+        let later = (0..<30).map {
+            FakeTimelineItem(
+                textEvent("$later\($0)", body: String(repeating: "Later words that wrap the line. ", count: 12)))
+        }
         let room = FakeOpenRoom("!activity:example.org", cached: [root])
         room.threadRoots = ["$older": "$root", "$newer": "$root"]
-        room.threadItems = [root, FakeTimelineItem(textEvent("$newer", body: "Newer"))]
+        room.threadItems = [root, FakeTimelineItem(textEvent("$newer", body: "Newer"))] + later
         let body = "Newer \(UUID().uuidString)"
         let (matrix, hosting, window) = host(room, item: item("$newer", body: body, root: "$root"), key: true)
         matrix.activity.record(item("$older", body: "Older", root: "$root"))

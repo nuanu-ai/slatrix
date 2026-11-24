@@ -554,6 +554,24 @@ extension NotificationDeliveryTests {
         // Marking the whole room read clears remaining thread banners in !a, leaving !b untouched.
         await delivery.withdrawRooms(["!a:example.org"])
         #expect(Set(transport.delivered.keys) == [roomB])
+
+        // An in-flight thread banner withdrawn while OS submission is pending never stays delivered.
+        transport.holdsAdds = true
+        let pendingTarget = try #require(
+            MatrixNotificationTarget(accountID: accountA, roomID: "!c:example.org", eventID: "$pending"))
+        let authIndex = transport.authorizationCalls
+        let pendingTask = deliver(
+            DesktopMessageNotification(
+                target: pendingTarget, title: "C", body: "Reply", playSound: true, threadRootID: "$root"))
+        await awaitAuthorization(authIndex)
+        try transport.authorize(authIndex, .success(true))
+        let count = transport.attempts.count
+        #expect(await eventually { transport.attempts.count == count + 1 })
+        let pendingID = try #require(transport.attempts.last).identifier
+        await delivery.withdrawThread(roomID: "!c:example.org", rootID: "$root")
+        try transport.finishAdd(pendingID)
+        #expect(try await !pendingTask.value)
+        #expect(transport.delivered[pendingID] == nil)
     }
 
     // capability: notifications.alert
@@ -606,6 +624,16 @@ extension NotificationDeliveryTests {
             ChatRoom(id: f.roomID, name: "Actions"),
             ChatRoom(id: "!other:example.org", name: "Other", unread: 0),
         ]
+        #expect(await eventually { center.shown.isEmpty })
+
+        // Declining an invite removes it from rooms and withdraws its banner too.
+        let inviteTarget = try #require(
+            MatrixNotificationTarget(accountID: "@owner:example.org", roomID: "!invite:example.org", eventID: nil))
+        #expect(
+            try await serviceDelivery.deliver(
+                DesktopMessageNotification(target: inviteTarget, title: "Invite", body: "Invited", playSound: false)))
+        f.service.rooms = [ChatRoom(id: "!invite:example.org", name: "Invite", membership: "invite")]
+        f.service.rooms = []
         #expect(await eventually { center.shown.isEmpty })
 
         // Explicit Mark as read (setMarkedUnread(..., value: false)) withdraws both main and thread banners for a room.
