@@ -1,5 +1,7 @@
+import AppKit
 import Foundation
 import MatrixRustSDK
+import SwiftUI
 import Testing
 
 @testable import Slatrix
@@ -466,5 +468,70 @@ struct SavedMessagesServiceTests {
 
         matrix.enterPreview()
         #expect(matrix.savedMessages.list.saved.isEmpty)
+    }
+
+    @Test(
+        "Retry on a failed Later preview is not nested inside the row button and reloads even before room membership is joined",
+        arguments: [true, false])
+    func failedPreviewRetryButtonIsNotNestedAndReloads(joinedInSidebar: Bool) async throws {
+        _ = NSApplication.shared
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+
+        let f = ActionFixture()
+        if !joinedInSidebar { f.service.rooms = [] }
+        let reference = SavedMessageReference(roomID: f.roomID, eventID: "$saved")
+        var opened = 0
+        let hosting = NSHostingView(
+            rootView: SavedMessagesView(
+                matrix: f.service, list: SavedMessages(saved: [reference]),
+                actions: LaterActions(
+                    open: { _ in opened += 1 }, move: { _, _ in }, remind: { _, _ in }, remove: { _ in })
+            )
+            .environmentObject(AppearanceStore())
+            .environment(\.metrics, Metrics(zoom: 1)))
+        let window = offscreenWindow(NSSize(width: 700, height: 400))
+        window.contentView = hosting
+        window.makeKeyAndOrderFront(nil)
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+
+        try #require(await eventually(timeout: .seconds(5)) { f.room.timeline.reads.all == ["$saved"] })
+        try #require(await eventually(timeout: .seconds(5)) { !accessible("Retry", in: hosting).isEmpty })
+
+        let path = try #require(accessibilityPath(to: "Retry", in: hosting))
+        #expect(
+            path.filter { $0 == "AXButton" }.count == 1,
+            "Retry must not be nested inside an outer AXButton: \(path)")
+
+        f.room.timeline.event = messageEvent(
+            "$saved", type: .text(content: TextMessageContent(body: "Recovered preview", formatted: nil)))
+        let retry = try #require(accessible("Retry", in: hosting).first)
+        let screenFrame = retry.accessibilityFrame?() ?? .zero
+        try #require(!screenFrame.isEmpty)
+        let windowRect = window.convertFromScreen(screenFrame)
+        let location = NSPoint(x: windowRect.midX, y: windowRect.midY)
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            await drainMainActor()
+            window.sendEvent(
+                try #require(
+                    NSEvent.mouseEvent(
+                        with: type, location: location, modifierFlags: [],
+                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                        context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
+        }
+
+        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        #expect(
+            await eventually(timeout: .seconds(5)) {
+                hosting.layoutSubtreeIfNeeded()
+                return f.room.timeline.reads.all == ["$saved", "$saved"]
+                    && views(hosting).compactMap { $0 as? MessageTextView }.contains {
+                        $0.string == "Recovered preview"
+                    }
+            })
+        #expect(opened == 0)
     }
 }
