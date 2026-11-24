@@ -53,6 +53,11 @@ class PushNotifications(private val context: Context) {
 
     fun clear(roomId: String) = manager.activeNotifications.filter { it.tag == roomId }.forEach { manager.cancel(it.tag, it.id) }
 
+    /** Clears message alerts (for [roomId], or all when null), leaving Later reminders alone. */
+    fun clearMessages(roomId: String? = null) = manager.activeNotifications
+        .filter { it.notification.channelId == CHANNEL && (roomId == null || it.tag == roomId) }
+        .forEach { manager.cancel(it.tag, it.id) }
+
     fun show(userId: String, roomId: String, eventId: String, status: NotificationStatus?, identity: IdentityState? = null,
         mentioned: Map<String, String> = emptyMap()) = synchronized(deliveryLock) {
         val settings = NotificationPreferences(context, userId)

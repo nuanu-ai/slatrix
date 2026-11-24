@@ -9,10 +9,16 @@ import androidx.activity.viewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import ai.nuanu.slatrix.core.MatrixWorkspace
 import ai.nuanu.slatrix.ui.account.SlatrixApp
 import ai.nuanu.slatrix.push.NotificationTarget
 import ai.nuanu.slatrix.push.PushNotifications
@@ -45,10 +51,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 try {
-                    accountModel.workspace.collectLatest { workspace ->
-                        PushNotifications.openRoom = null
-                        workspace?.selected?.collect { PushNotifications.openRoom = it?.room?.id }
-                    }
+                    activeOpenRoom(accountModel.workspace, accountModel.threads).collect { PushNotifications.openRoom = it }
                 } finally {
                     PushNotifications.openRoom = null
                 }
@@ -76,4 +79,13 @@ class MainActivity : ComponentActivity() {
         intent.data = null
     }
 }
+
+/** The room currently on screen, preferring an active thread (e.g. opened from Threads) over the channel under it. */
+@OptIn(ExperimentalCoroutinesApi::class)
+internal fun activeOpenRoom(workspace: StateFlow<MatrixWorkspace?>, threads: StateFlow<MatrixWorkspace?>): Flow<String?> =
+    combine(workspace, threads) { main, thread -> main to thread }.flatMapLatest { (main, thread) ->
+        combine(main?.selected ?: flowOf(null), thread?.selected ?: flowOf(null)) { channel, activeThread ->
+            activeThread?.room?.id ?: channel?.room?.id
+        }
+    }
 

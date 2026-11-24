@@ -5,8 +5,13 @@ import com.google.firebase.messaging.RemoteMessage
 
 class PushMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
-        val roomId = message.data["room_id"] ?: return
-        val eventId = message.data["event_id"] ?: return
+        val roomId = message.data["room_id"]
+        val eventId = message.data["event_id"]
+        if (roomId == null && eventId == null) {
+            if (message.data["unread"] == "0") PushNotifications(this).clearMessages()
+            return
+        }
+        if (roomId == null || eventId == null) return
         if (!roomId.startsWith('!') || !eventId.startsWith('$') ||
             listOf(roomId, eventId).any { it.length > 1024 || it.any(Char::isISOControl) }) return
         PushNotificationWorker.enqueue(this, roomId, eventId, message.priority == RemoteMessage.PRIORITY_HIGH)

@@ -7,6 +7,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.test.runCurrent
@@ -219,6 +220,31 @@ class MatrixRoomsTest {
         val rooms = MatrixRooms(backgroundScope, RoomsClient(listOf(design)))
         assertEquals(2L, rooms.state.first { !it.loading }.rooms.single().mentions)
         rooms.close()
+    }
+
+    @Test fun aRoomTransitioningToReadOnSyncEmitsOnReadRooms() = runTest {
+        val design = TestRoom(roomInfo("!design:example.org", "design").copy(numUnreadMessages = 3u, numUnreadNotifications = 1u))
+        val general = TestRoom(roomInfo("!general:example.org", "general"))
+        val rooms = MatrixRooms(backgroundScope, RoomsClient(listOf(design, general)))
+        val read = Channel<String>(Channel.UNLIMITED)
+        val collector = backgroundScope.launch { rooms.readRooms.collect { read.trySend(it) } }
+        try {
+            rooms.state.first { !it.loading }
+            general.emit(general.info.copy(topic = "Updated"))
+            design.emit(design.info.copy(topic = "Still unread"))
+            rooms.state.first { state -> state.rooms.single { it.id == "!design:example.org" }.topic == "Still unread" }
+            assertTrue("Non-read updates must not emit on readRooms", read.tryReceive().isFailure)
+
+            design.emit(design.info.copy(topic = "Still unread", numUnreadMessages = 0u, numUnreadNotifications = 0u))
+            assertEquals("!design:example.org", read.receive())
+
+            design.emit(design.info.copy(topic = "Already read", numUnreadMessages = 0u, numUnreadNotifications = 0u))
+            rooms.state.first { state -> state.rooms.single { it.id == "!design:example.org" }.topic == "Already read" }
+            assertTrue("Staying read must not emit again", read.tryReceive().isFailure)
+        } finally {
+            collector.cancel()
+            rooms.close()
+        }
     }
 
     // capability: conversation.pins

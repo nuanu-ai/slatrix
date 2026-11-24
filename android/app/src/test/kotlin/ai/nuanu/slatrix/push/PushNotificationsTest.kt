@@ -192,6 +192,29 @@ class PushNotificationsTest {
         val remaining = manager.activeNotifications.single().notification
         assertEquals("!other:example.org", shadowOf(remaining.contentIntent).savedIntent.getStringExtra(PushNotifications.ROOM_ID))
     }
+
+    @Test fun clearMessagesRemovesMessageAlertsWithoutCancellingLaterReminders() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.cancelAll()
+        val notifications = PushNotifications(context)
+        val verified = IdentityState(status = IdentityStatus.Verified)
+
+        notifications.show("@alex:example.org", "!team:example.org", "\$m1", notificationMessage(), verified)
+        notifications.show("@alex:example.org", "!other:example.org", "\$m2", notificationMessage(), verified)
+        notifications.remind("@alex:example.org", "!team:example.org", "\$r1", "Team", "Reminder: Ship it")
+
+        notifications.clearMessages("!team:example.org")
+        assertEquals(setOf("\$m2", "\$r1"), manager.activeNotifications.map {
+            shadowOf(it.notification.contentIntent).savedIntent.getStringExtra(PushNotifications.EVENT_ID)
+        }.toSet())
+
+        notifications.clearMessages()
+        assertEquals(listOf("\$r1"), manager.activeNotifications.map {
+            shadowOf(it.notification.contentIntent).savedIntent.getStringExtra(PushNotifications.EVENT_ID)
+        })
+    }
 }
 
 private fun notificationMessage(body: String = "Review budget?", noisy: Boolean = true, senderName: String? = "Sam") = NotificationStatus.Event(NotificationItem(

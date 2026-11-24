@@ -231,6 +231,10 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         if (activeThreadFeed === feed) activeThreadFeed = null
                     }
                 }
+                // Cross-device reads clear stale message alerts from the shade and launcher dot.
+                LaunchedEffect(rooms) {
+                    rooms?.readRooms?.collect { PushNotifications(context).clearMessages(it) }
+                }
                 LaunchedEffect(rooms, activeThreadFeed) {
                     val feed = activeThreadFeed ?: return@LaunchedEffect
                     val source = rooms ?: return@LaunchedEffect
@@ -440,8 +444,8 @@ private fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: M
             { event ->
                 scope.launch {
                     if (conversation?.markRead(event) == true) {
-                        if (open.threadRoot == null) PushNotifications(context).clear(open.room.id)
-                        else onThreadRead(open.room.id, open.threadRoot, event)
+                        PushNotifications(context).clear(open.room.id)
+                        if (open.threadRoot != null) onThreadRead(open.room.id, open.threadRoot, event)
                     }
                 }
             },
