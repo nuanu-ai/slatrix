@@ -122,4 +122,26 @@ class MessageComposerTest {
         compose.onNodeWithContentDescription("rocket").performClick()
         compose.runOnIdle { assertEquals("Ship it🚀", text.value) }
     }
+
+    @Test fun theEmojiPickerShowsFrequentlyUsedEmojiAndRecordsPickedOnes() {
+        val used = mutableListOf<String>()
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(emptyList(), loading = false, hasMore = false),
+                    ComposerState(text.value, loading = false), { text.value = it }, {}, {}, {}, {}, {}, {}, {},
+                    composerActions = ComposerActions(recentEmoji = listOf("🔥"), onUseEmoji = { used += it }))
+            }
+        }
+        compose.onNodeWithContentDescription("Message #design").performTextInput("Hi ")
+        compose.onNodeWithContentDescription("Emoji").performClick()
+        compose.waitUntil { compose.onAllNodes(androidx.compose.ui.test.hasText("Frequently used")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Frequently used").assertExists()
+        compose.onNodeWithContentDescription("Search emoji").performTextInput("rocket")
+        compose.waitUntil { compose.onAllNodes(hasContentDescription("rocket")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithContentDescription("rocket").performClick()
+        compose.runOnIdle {
+            assertEquals("Hi 🚀", text.value)
+            assertEquals(listOf("🚀"), used)
+        }
+    }
 }

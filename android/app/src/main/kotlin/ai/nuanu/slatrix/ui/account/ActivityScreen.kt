@@ -2,6 +2,8 @@ package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.ActivityItem
 import ai.nuanu.slatrix.core.ActivityKind
+import ai.nuanu.slatrix.core.Invitation
+import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.ThreadFeedItem
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
@@ -26,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -54,7 +58,11 @@ private enum class ActivityFilter(val label: String) { All("All"), Dms("DMs"), M
 @Composable
 fun ActivityScreen(items: List<ActivityItem>, onOpenItem: (ActivityItem) -> Unit,
     onOpenThread: (ThreadFeedItem) -> Unit,
-    threads: @Composable (onOpenThread: (ThreadFeedItem) -> Unit) -> Unit = {}) {
+    invitations: List<Invitation> = emptyList(),
+    mentionRooms: List<RoomSummary> = emptyList(),
+    onOpenInvitation: (String) -> Unit = {},
+    onOpenRoom: (RoomSummary) -> Unit = {},
+    threads: @Composable (onOpenThread: (ThreadFeedItem) -> Unit, unreadOnly: Boolean) -> Unit = { _, _ -> }) {
     var filter by rememberSaveable { mutableStateOf(ActivityFilter.All) }
     var unreadOnly by rememberSaveable { mutableStateOf(false) }
     val shown = remember(items, filter, unreadOnly) {
@@ -65,6 +73,23 @@ fun ActivityScreen(items: List<ActivityItem>, onOpenItem: (ActivityItem) -> Unit
             ActivityFilter.Mentions -> items.filter { it.kind == ActivityKind.Mention }
         }.filter { !unreadOnly || it.unread }
     }
+    val shownInvitations = remember(invitations, filter) {
+        when (filter) {
+            ActivityFilter.All -> invitations
+            ActivityFilter.Dms -> invitations.filter { it.direct }
+            ActivityFilter.Mentions, ActivityFilter.Threads -> emptyList()
+        }
+    }
+    // Every room with persisted unread mentions counted by the Activity badge stays listed until its unread mentions are already shown below.
+    val shownMentions = remember(mentionRooms, shown, filter) {
+        when (filter) {
+            ActivityFilter.All, ActivityFilter.Mentions -> mentionRooms
+            ActivityFilter.Dms -> mentionRooms.filter { it.direct }
+            ActivityFilter.Threads -> emptyList()
+        }.filter { room ->
+            room.mentions > shown.count { it.roomId == room.id && it.kind == ActivityKind.Mention && it.unread }
+        }
+    }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
             .padding(start = UiMetrics.GapLarge, end = UiMetrics.GapLarge, bottom = UiMetrics.GapTiny),
@@ -74,15 +99,69 @@ fun ActivityScreen(items: List<ActivityItem>, onOpenItem: (ActivityItem) -> Unit
             ActivityFilter.entries.forEach { ChoiceChip(it.label, it == filter) { filter = it } }
         }
         // Threads lists the threads you're in, as Slack's Threads view does, rather than only the replies that notified you.
-        if (filter == ActivityFilter.Threads) threads(onOpenThread)
+        if (filter == ActivityFilter.Threads) threads(onOpenThread, unreadOnly)
         else LazyColumn(Modifier.fillMaxSize()) {
-            if (shown.isEmpty()) item(key = "empty") {
+            if (shownInvitations.isEmpty() && shownMentions.isEmpty() && shown.isEmpty()) item(key = "empty") {
                 Box(Modifier.fillParentMaxSize().padding(UiMetrics.GapLarge), contentAlignment = Alignment.Center) {
                     Text(if (filter == ActivityFilter.All && !unreadOnly) "You’re all caught up" else "Nothing here yet",
                         style = MaterialTheme.typography.bodyLarge, color = SlatrixTheme.colors.textSecondary, textAlign = TextAlign.Center)
                 }
             }
+            items(shownInvitations, key = { "invitation ${it.id}" }) { invite ->
+                val title = if (invite.direct || invite.space) invite.name else "#${invite.name}"
+                val subtitle = when {
+                    invite.direct -> "Invited you"
+                    invite.inviter != null -> "${invite.inviter} invited you"
+                    invite.space -> "Invited to workspace"
+                    else -> "Invited you"
+                }
+                ActivitySummaryRow(invite.initials, invite.colorIndex, null, Icons.Outlined.Email, title, subtitle) {
+                    onOpenInvitation(invite.id)
+                }
+            }
+            items(shownMentions, key = { "mention ${it.id}" }) { room ->
+                val title = if (room.direct) room.name else "#${room.name}"
+                val subtitle = if (room.mentions == 1L) "1 unread mention" else "${room.mentions} unread mentions"
+                ActivitySummaryRow(room.initials, room.colorIndex, room.avatarUrl, Icons.Outlined.AlternateEmail, title, subtitle) {
+                    onOpenRoom(room)
+                }
+            }
             items(shown, key = { it.id }) { item -> ActivityRow(item) { onOpenItem(item) } }
+        }
+    }
+}
+
+@Composable
+private fun ActivityAvatar(initials: String, colorIndex: Int, avatarUrl: String?, badge: @Composable () -> Unit) {
+    val colors = SlatrixTheme.colors
+    Box {
+        LiveAvatar(initials, colorIndex, UiMetrics.RowAvatar, avatarUrl)
+        // Slack marks each item's avatar with what happened: the reaction, a mention, a thread or a DM.
+        Box(Modifier.align(Alignment.BottomEnd).offset(x = UiMetrics.GapTiny, y = UiMetrics.GapTiny).size(UiMetrics.Icon)
+            .drawBehind { drawCircle(colors.canvas, size.minDimension / 2 + UiMetrics.FaceRing.toPx()) },
+            contentAlignment = Alignment.Center) { badge() }
+    }
+}
+
+@Composable
+private fun ActivitySummaryRow(initials: String, colorIndex: Int, avatarUrl: String?, icon: ImageVector, title: String,
+    subtitle: String, onClick: () -> Unit) {
+    val colors = SlatrixTheme.colors
+    Row(Modifier.fillMaxWidth().semantics { stateDescription = "Unread" }
+        .clickable(role = Role.Button, onClick = onClick)
+        .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapMedium),
+        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
+        ActivityAvatar(initials, colorIndex, avatarUrl) {
+            Icon(icon, null, Modifier.size(UiMetrics.Icon - UiMetrics.GapTiny), tint = colors.textPrimary)
+        }
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = colors.textPrimary,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+                Text(subtitle, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Box(Modifier.size(UiMetrics.GapSmall).background(colors.accent, CircleShape))
+            }
         }
     }
 }
@@ -107,20 +186,14 @@ private fun ActivityRow(item: ActivityItem, onClick: () -> Unit) {
         .clickable(role = Role.Button, onClick = onClick)
         .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapMedium),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
-        Box {
-            LiveAvatar(item.initials, item.colorIndex, UiMetrics.RowAvatar, item.avatarUrl)
-            // Slack marks each item's avatar with what happened: the reaction, a mention, a thread or a DM.
-            Box(Modifier.align(Alignment.BottomEnd).offset(x = UiMetrics.GapTiny, y = UiMetrics.GapTiny).size(UiMetrics.Icon)
-                .drawBehind { drawCircle(colors.canvas, size.minDimension / 2 + UiMetrics.FaceRing.toPx()) },
-                contentAlignment = Alignment.Center) {
-                when {
-                    item.kind == ActivityKind.Reaction -> Text(item.body, style = MaterialTheme.typography.labelSmall, maxLines = 1)
-                    else -> Icon(when {
-                        item.kind == ActivityKind.Mention -> Icons.Outlined.AlternateEmail
-                        item.threadRoot != null -> Icons.Outlined.Forum
-                        else -> Icons.Outlined.ChatBubbleOutline
-                    }, null, Modifier.size(UiMetrics.Icon - UiMetrics.GapTiny), tint = colors.textPrimary)
-                }
+        ActivityAvatar(item.initials, item.colorIndex, item.avatarUrl) {
+            when {
+                item.kind == ActivityKind.Reaction -> Text(item.body, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                else -> Icon(when {
+                    item.kind == ActivityKind.Mention -> Icons.Outlined.AlternateEmail
+                    item.threadRoot != null -> Icons.Outlined.Forum
+                    else -> Icons.Outlined.ChatBubbleOutline
+                }, null, Modifier.size(UiMetrics.Icon - UiMetrics.GapTiny), tint = colors.textPrimary)
             }
         }
         Column(Modifier.weight(1f)) {

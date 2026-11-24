@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix.ui.account
 
 import ai.nuanu.slatrix.core.ComposerState
+import ai.nuanu.slatrix.core.ConnectionState
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationRow
 import ai.nuanu.slatrix.core.caption
@@ -173,11 +174,19 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     val opensAt = state.highlight ?: newLine.start ?: newLine.back?.first
     fun opens(row: ConversationRow) = row.id == opensAt || (row as? ConversationMessage)?.eventId == opensAt
     var jumped by remember(opensAt, state.jump) { mutableStateOf(opensAt == null) }
-    val latest = state.rows.lastOrNull { it is ConversationMessage && it.eventId != null } as ConversationMessage?
+    val latest = (state.rows.lastOrNull { it is ConversationMessage && it.eventId != null } as ConversationMessage?)
+        ?.takeIf { it.kind != MessageKind.Encrypted }
+    val connected = LocalConnection.current == ConnectionState.Connected
+    var reconnects by remember { mutableIntStateOf(0) }
+    val hadConnection = remember { object { var value = connected } }
+    LaunchedEffect(connected) {
+        if (connected && !hadConnection.value) reconnects++
+        hadConnection.value = connected
+    }
     val read by rememberUpdatedState(onRead)
-    LaunchedEffect(latest?.id, latest?.eventId, resumed, jumped) {
+    LaunchedEffect(latest?.id, latest?.eventId, latest?.kind, state.ackToken, state.seekingTarget, resumed, jumped, reconnects) {
         val event = latest?.eventId ?: return@LaunchedEffect
-        if (!resumed || !jumped) return@LaunchedEffect
+        if (!resumed || !jumped || state.seekingTarget) return@LaunchedEffect
         snapshotFlow {
             list.layoutInfo.visibleItemsInfo.any { item ->
                 item.key == latest.id && ReadState.seen(item.offset.toFloat(), (item.offset + item.size).toFloat(),

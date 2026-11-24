@@ -131,4 +131,142 @@ class PushDeliveryTest {
         assertEquals("ai.nuanu.slatrix.push.PushMessagingService", service.name)
         assertFalse(service.exported)
     }
+
+    // capability: notifications.alert
+    @Test fun aBadgeClearPushClearsMessageNotificationsWithoutCancellingReminders() {
+        val application = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = application.getSystemService(NotificationManager::class.java)
+        manager.cancelAll()
+        val notifications = PushNotifications(application)
+        notifications.show("@alex:example.org", "!team:example.org", "\$msg", NotificationStatus.EventNotFound)
+        notifications.remind("@alex:example.org", "!team:example.org", "\$later", "Team", "Reminder: Ship it")
+        assertEquals(2, manager.activeNotifications.size)
+
+        val service = Robolectric.buildService(PushMessagingService::class.java).create()
+        service.get().onMessageReceived(RemoteMessage.Builder("fictional-sender")
+            .setData(mapOf("unread" to "0"))
+            .build())
+        service.destroy()
+
+        assertEquals(1, manager.activeNotifications.size)
+        assertEquals("reminders", manager.activeNotifications.single().notification.channelId)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @Test fun activeOpenTargetTracksThreadsAndChannels() = runTest {
+        val roomA = ai.nuanu.slatrix.core.RoomSummary("!a:example.org", "A", false, "", ai.nuanu.slatrix.core.UnreadBadge.None, "A", 0)
+        val roomB = ai.nuanu.slatrix.core.RoomSummary("!b:example.org", "B", false, "", ai.nuanu.slatrix.core.UnreadBadge.None, "B", 1)
+        val client = object : Client(NoHandle) {
+            override fun getRoom(roomId: String): Room = object : Room(NoHandle) {
+                override fun id(): String = roomId
+                override fun ownUserId(): String = "@me:example.org"
+                override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline =
+                    object : Timeline(NoHandle) {
+                        override suspend fun addListener(listener: TimelineListener): TaskHandle =
+                            object : TaskHandle(NoHandle) { override fun cancel() = Unit }
+                    }
+                override suspend fun loadComposerDraft(threadRoot: String?): ComposerDraft? = null
+            }
+        }
+        val workspace = ai.nuanu.slatrix.core.MatrixWorkspace(backgroundScope, client)
+        val threads = ai.nuanu.slatrix.core.MatrixWorkspace(backgroundScope, client)
+        val seen = mutableListOf<Pair<String, String?>?>()
+        val job = backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            activeOpenTarget(MutableStateFlow(workspace), MutableStateFlow(threads)).collect { seen += it }
+        }
+        try {
+            assertEquals(null, seen.last())
+            threads.open(roomB, threadRoot = "\$root")
+            assertEquals("!b:example.org" to "\$root", seen.last())
+            threads.back()
+            assertEquals(null, seen.last())
+            workspace.open(roomA)
+            assertEquals("!a:example.org" to null, seen.last())
+            threads.open(roomB, threadRoot = "\$root")
+            assertEquals("!b:example.org" to "\$root", seen.last())
+        } finally {
+            job.cancel()
+            threads.close()
+            workspace.close()
+        }
+    }
+
+    // capability: thread.from-notification
+    @Test fun tappingAReminderForAThreadReplyResolvesItsThreadBeforeJumping() = runTest {
+        val roomSummary = ai.nuanu.slatrix.core.RoomSummary("!team:example.org", "Team", false, "",
+            ai.nuanu.slatrix.core.UnreadBadge.None, "T", 0)
+        val client = object : Client(NoHandle) {
+            override fun getRoom(roomId: String): Room = object : Room(NoHandle) {
+                override fun id(): String = roomId
+                override fun ownUserId(): String = "@alex:example.org"
+                override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline =
+                    object : Timeline(NoHandle) {
+                        override suspend fun addListener(listener: TimelineListener): TaskHandle =
+                            object : TaskHandle(NoHandle) { override fun cancel() = Unit }
+                    }
+                override suspend fun loadComposerDraft(threadRoot: String?): ComposerDraft? = null
+                override suspend fun loadOrFetchEvent(eventId: String): TimelineEvent = object : TimelineEvent(NoHandle) {
+                    override fun threadRootEventId(): String? = if (eventId == "\$reply") "\$root" else null
+                }
+            }
+        }
+        val workspace = ai.nuanu.slatrix.core.MatrixWorkspace(backgroundScope, client)
+        val threads = ai.nuanu.slatrix.core.MatrixWorkspace(backgroundScope, client)
+        var cleared = false
+        try {
+            ai.nuanu.slatrix.ui.account.openNotification(
+                NotificationTarget("@alex:example.org", "!team:example.org", "\$reply", threadRoot = null),
+                roomSummary, workspace, threads,
+            ) { cleared = true }
+            assertTrue(cleared)
+            assertEquals("\$root", workspace.selected.value?.at)
+            assertEquals("\$root", threads.selected.value?.threadRoot)
+            assertEquals("\$reply", threads.selected.value?.at)
+        } finally {
+            threads.close()
+            workspace.close()
+        }
+    }
+
+    // capability: thread.from-notification
+    @Test fun tappingAReactionNotificationJumpsToTheReactedMessageAndItsThread() = runTest {
+        val roomSummary = ai.nuanu.slatrix.core.RoomSummary("!team:example.org", "Team", false, "",
+            ai.nuanu.slatrix.core.UnreadBadge.None, "T", 0)
+        val client = object : Client(NoHandle) {
+            override fun getRoom(roomId: String): Room = object : Room(NoHandle) {
+                override fun id(): String = roomId
+                override fun ownUserId(): String = "@alex:example.org"
+                override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline =
+                    object : Timeline(NoHandle) {
+                        override suspend fun addListener(listener: TimelineListener): TaskHandle =
+                            object : TaskHandle(NoHandle) { override fun cancel() = Unit }
+                    }
+                override suspend fun loadComposerDraft(threadRoot: String?): ComposerDraft? = null
+                override suspend fun loadOrFetchEvent(eventId: String): TimelineEvent = object : TimelineEvent(NoHandle) {
+                    override fun content(): TimelineEventContent = if (eventId == "\$reaction") {
+                        TimelineEventContent.MessageLike(MessageLikeEventContent.ReactionContent("\$reply"))
+                    } else {
+                        TimelineEventContent.MessageLike(MessageLikeEventContent.RoomMessage(
+                            MessageType.Text(TextMessageContent("In thread", null)), null))
+                    }
+                    override fun threadRootEventId(): String? = if (eventId == "\$reply") "\$root" else null
+                }
+            }
+        }
+        val workspace = ai.nuanu.slatrix.core.MatrixWorkspace(backgroundScope, client)
+        val threads = ai.nuanu.slatrix.core.MatrixWorkspace(backgroundScope, client)
+        try {
+            ai.nuanu.slatrix.ui.account.openNotification(
+                NotificationTarget("@alex:example.org", "!team:example.org", "\$reaction", threadRoot = null),
+                roomSummary, workspace, threads,
+            )
+            assertEquals("\$root", workspace.selected.value?.at)
+            assertEquals("\$root", threads.selected.value?.threadRoot)
+            assertEquals("\$reply", threads.selected.value?.at)
+        } finally {
+            threads.close()
+            workspace.close()
+        }
+    }
 }

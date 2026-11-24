@@ -175,6 +175,10 @@ data class ConversationState(
     val avatars: Map<String, String> = emptyMap(),
     /** A thread's "N replies" line under its root, as spec/thread-replies-line.json has it; null for none. */
     val replies: Int? = null,
+    /** Bumped when a non-own reaction or edit lands on an existing message, so the open screen sends a fresh read receipt. */
+    val ackToken: Int = 0,
+    /** True while paginating a long thread backwards to locate a jumped-to older reply, holding auto-read back. */
+    val seekingTarget: Boolean = false,
 )
 
 /** Whether [message] joins [previous] under one avatar and name; the rule's cases are in spec/message-grouping.json. */
@@ -182,6 +186,7 @@ fun groupsUnder(previous: ConversationMessage, message: ConversationMessage): Bo
     previous.senderId == message.senderId && abs(message.timestamp - previous.timestamp) < 5 * 60_000L
 
 private const val MAX_BLANK_PAGES = 5
+private const val MAX_TARGET_PAGES = 5
 private const val ROOT_KEY = "thread-root"
 
 // Its own key, as the Mac gives the root its event ID: the channel's row key could match one of the thread's rows.
@@ -251,9 +256,11 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private val pageLock = Mutex()
     private val sendLock = Mutex()
     private val readLock = Mutex()
-    private var lastRead: String? = null
+    private var lastRead: Pair<String, Int>? = null
     /** Marked unread on this visit, so reading stops; guarded by [readLock]. */
     private var heldUnread = false
+    /** True after [clearVisit] already reset per-visit read state, so a warm [revisit] doesn't double-send a receipt. */
+    @Volatile private var visitCleared = false
     /** The timeline on screen; it and [pending] change only on [operations], which runs on one thread. */
     private var shown: Source? = null
     /** A timeline that replaces [shown] once it holds [pendingAnchor], or with none at its first update. */
@@ -318,6 +325,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             // A thread shows its reply wherever it is; a channel first checks whether its live timeline holds it.
             var deciding = at != null && threadRoot == null
             var initialThreadPaged = false
+            var initialized = false
             var oldest: String? = null
             for (update in updates) {
                 if (update is Update.CaughtUp) { update.done.complete(Unit); continue }
@@ -365,14 +373,29 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 val first = rows.firstOrNull { it is ConversationMessage }?.id
                 if (reset || swapped || first != oldest) { oldest = first; blankPages = 0 }
                 holdsRoot = source.holds(threadRoot)
-                mutableState.update {
-                    it.copy(rows = withRoot(rows), loading = false, hasMore = it.hasMore || reset || swapped, focused = source.focused,
-                        highlight = it.highlight ?: target?.takeIf { id -> !resume && source.holds(id) }, firstUnread = unread).counted()
+                val nextRows = withRoot(rows)
+                val needsAck = initialized && !swapped && hasNewReactionOrEdit(mutableState.value.rows, nextRows)
+                initialized = true
+                val jumpTarget = target
+                val seekTarget = jumpTarget?.takeIf {
+                    threadRoot != null && view == ConversationView.Timeline && !initialThreadPaged &&
+                        (mutableState.value.hasMore || reset || swapped) && !resume && !source.holds(it)
                 }
-                if (threadRoot != null && view == ConversationView.Timeline && !initialThreadPaged &&
-                    mutableState.value.hasMore && rows.none { it is ConversationMessage && it.eventId != threadRoot }) {
-                    initialThreadPaged = true
-                    loadOlder()
+                mutableState.update {
+                    val foundHighlight = it.highlight ?: jumpTarget?.takeIf { id -> !resume && source.holds(id) }
+                    it.copy(rows = nextRows, loading = false, hasMore = it.hasMore || reset || swapped, focused = source.focused,
+                        highlight = foundHighlight, firstUnread = unread,
+                        ackToken = if (needsAck) it.ackToken + 1 else it.ackToken,
+                        seekingTarget = if (foundHighlight != null) false else it.seekingTarget || seekTarget != null).counted()
+                }
+                if (threadRoot != null && view == ConversationView.Timeline && !initialThreadPaged && mutableState.value.hasMore) {
+                    if (seekTarget != null) {
+                        initialThreadPaged = true
+                        loadOlderForTarget(seekTarget)
+                    } else if (rows.none { it is ConversationMessage && it.eventId != threadRoot }) {
+                        initialThreadPaged = true
+                        loadOlder()
+                    }
                 }
             }
         } catch (cancelled: CancellationException) {
@@ -466,6 +489,36 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             } finally {
                 if (lifetime.isActive) mutableState.update { it.copy(loadingHistory = false) }
                 pageLock.unlock()
+            }
+        }
+    }
+
+    /** Paginates a long thread backwards (bounded) until a jumped-to older reply lands or history ends. */
+    private fun loadOlderForTarget(targetId: String) {
+        operations.launch {
+            pageLock.withLock {
+                try {
+                    caughtUp()
+                    if (!mutableState.value.hasMore || target != targetId || shown?.holds(targetId) == true) return@withLock
+                    retryPage = { loadOlderForTarget(targetId) }
+                    mutableState.update { it.copy(loadingHistory = true, error = null) }
+                    var pages = 0
+                    while (pages < MAX_TARGET_PAGES && target == targetId && shown?.holds(targetId) != true) {
+                        val endReached = timeline().paginateBackwards(50u)
+                        currentCoroutineContext().ensureActive()
+                        pages++
+                        mutableState.update { it.copy(hasMore = !endReached).counted() }
+                        caughtUp()
+                        if (endReached) break
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    currentCoroutineContext().ensureActive()
+                    mutableState.update { it.copy(error = "Couldn’t load older messages.") }
+                } finally {
+                    if (lifetime.isActive) mutableState.update { it.copy(loadingHistory = false, seekingTarget = false) }
+                }
             }
         }
     }
@@ -862,22 +915,25 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             readLock.withLock {
                 try {
                     val timeline = timeline()
+                    // Drain already-queued SDK diffs so a newly arrived undecrypted message isn't marked read prematurely.
+                    caughtUp()
+                    val token = mutableState.value.ackToken
                     if (heldUnread || !isLatestRemote(eventId)) return@withLock false
-                    if (lastRead == eventId) return@withLock true
+                    if (lastRead == eventId to token) return@withLock true
                     // On the timeline's latest event, not the message: the SDK never points a receipt at your own
                     // message, so after one the server would still count what others added to it, a reaction say, as
                     // unread. A thread's timeline sends this for the thread; the channel's marker and unread flag stay.
                     timeline.markAsRead(ReceiptType.READ)
                     currentCoroutineContext().ensureActive()
                     if (!isLatestRemote(eventId)) return@withLock false
-                    if (threadRoot != null) { lastRead = eventId; return@withLock true }
+                    if (threadRoot != null) { lastRead = eventId to token; return@withLock true }
                     timeline.sendReadReceipt(ReceiptType.FULLY_READ, eventId)
                     currentCoroutineContext().ensureActive()
                     if (!isLatestRemote(eventId)) return@withLock false
                     room.setUnreadFlag(false)
                     currentCoroutineContext().ensureActive()
                     if (!isLatestRemote(eventId)) return@withLock false
-                    lastRead = eventId
+                    lastRead = eventId to token
                     true
                 } catch (cancelled: CancellationException) {
                     throw cancelled
@@ -897,8 +953,9 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     /** Clears per-visit jump/unread state when parking a conversation in cache so Frame 1 of reuse never flashes it. */
     internal fun clearVisit() {
         target = null
-        mutableState.update { it.copy(highlight = null, startsAtUnread = false) }
-        operations.launch { readLock.withLock { heldUnread = false } }
+        visitCleared = true
+        mutableState.update { it.copy(highlight = null, startsAtUnread = false, seekingTarget = false) }
+        operations.launch { readLock.withLock { heldUnread = false; lastRead = null } }
     }
 
     /**
@@ -907,6 +964,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
      */
     fun revisit(root: ConversationMessage? = null, openedWith: Int? = null, listedRoot: Boolean = false) {
         target = null
+        val needsReset = !visitCleared
+        visitCleared = false
         val nextRoot = root?.asThreadRoot()
         if (threadRoot != null) {
             if (nextRoot != null) {
@@ -927,9 +986,9 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 if (current != null && merged != current) state.rows.toMutableList().apply { this[rootIndex] = merged!! }
                 else state.rows
             } else state.rows
-            state.copy(rows = updatedRows, highlight = null, startsAtUnread = false).counted()
+            state.copy(rows = updatedRows, highlight = null, startsAtUnread = false, seekingTarget = false).counted()
         }
-        operations.launch { readLock.withLock { heldUnread = false } }
+        if (needsReset) operations.launch { readLock.withLock { heldUnread = false; lastRead = null } }
     }
 
     /** Highlights [eventId] where it is when the rows on screen hold it, so a jump within the conversation doesn't reload it. */
@@ -950,9 +1009,39 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         return try { task.await() } finally { task.cancel() }
     }
 
-    /** A timeline opened at an older message isn't the newest, so reading it waits until it turns live. */
-    private fun isLatestRemote(eventId: String): Boolean =
-        lifetime.isActive && shown?.focused != true && newestEvent() == eventId
+    /** A timeline opened at an older message isn't the newest, and an undecrypted message isn't readable yet. */
+    private fun isLatestRemote(eventId: String): Boolean {
+        if (!lifetime.isActive || shown?.focused == true) return false
+        val newest = mutableState.value.rows.asReversed().firstOrNull { (it as? ConversationMessage)?.eventId != null } as? ConversationMessage
+        return newest?.eventId == eventId && newest.kind != MessageKind.Encrypted
+    }
+
+    /** True only when an existing message gained a reaction from someone else or a non-own edit. */
+    private fun hasNewReactionOrEdit(previous: List<ConversationRow>, next: List<ConversationRow>): Boolean {
+        val before = previous.mapNotNull { (it as? ConversationMessage)?.takeIf { m -> m.eventId != null } }
+            .associateBy { it.eventId!! }
+        if (before.isEmpty()) return false
+        for (row in next) {
+            val after = row as? ConversationMessage ?: continue
+            val prev = before[after.eventId ?: continue] ?: continue
+            if (hasAddedOtherReaction(prev.reactions, after.reactions)) return true
+            if (!after.own && prev.kind != MessageKind.Encrypted && after.kind != MessageKind.Encrypted &&
+                after.kind != MessageKind.Deleted &&
+                (after.edited != prev.edited || after.body != prev.body || after.formattedBody != prev.formattedBody ||
+                    after.attachment != prev.attachment)) return true
+        }
+        return false
+    }
+
+    private fun hasAddedOtherReaction(previous: List<MessageReaction>, next: List<MessageReaction>): Boolean {
+        val beforeByKey = previous.associateBy { it.key }
+        for (reaction in next) {
+            val prev = beforeByKey[reaction.key]
+            val prevOthers = prev?.senders?.filterTo(HashSet()) { it != ownUserId }.orEmpty()
+            if (reaction.senders.any { it != ownUserId && it !in prevOthers }) return true
+        }
+        return false
+    }
 
     suspend fun close() { lifetime.cancelAndJoin() }
 

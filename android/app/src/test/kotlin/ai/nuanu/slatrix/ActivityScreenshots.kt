@@ -60,7 +60,7 @@ class ActivityScreenshots(private val dark: Boolean) {
         compose.setContent {
             SlatrixTheme(dark = dark) {
                 LiveHomeScreen("@alex:example.org", RoomListState(loading = false), {}, {}, {}, activity = {
-                    ActivityScreen(items, {}, {}) { ThreadsFeed(ThreadFeedState(threads, loading = false), it) }
+                    ActivityScreen(items, {}, {}) { onOpenThread, unreadOnly -> ThreadsFeed(ThreadFeedState(threads, loading = false), unreadOnly, onOpenThread) }
                 })
             }
         }

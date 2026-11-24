@@ -42,18 +42,20 @@ import kotlinx.coroutines.delay
 
 /** The threads you're in, newest activity first; one with replies you haven't read is bold and dotted. */
 @Composable
-fun ThreadsFeed(state: ThreadFeedState, onOpenThread: (ThreadFeedItem) -> Unit) {
+fun ThreadsFeed(state: ThreadFeedState, unreadOnly: Boolean = false, onOpenThread: (ThreadFeedItem) -> Unit) {
     val colors = SlatrixTheme.colors
     var waited by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { delay(UiMetrics.ProgressDelayMillis); waited = true }
+    val shown = remember(state.items, unreadOnly) { if (unreadOnly) state.items.filter { it.unread } else state.items }
     LazyColumn(Modifier.fillMaxSize()) {
-        if (state.items.isEmpty()) item(key = "empty") {
+        if (shown.isEmpty()) item(key = "empty") {
             Box(Modifier.fillMaxWidth().height(UiMetrics.Touch), contentAlignment = Alignment.Center) {
-                if (!state.loading) Text("No threads yet", style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
+                if (!state.loading) Text(if (unreadOnly) "No unread threads" else "No threads yet",
+                    style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
                 else if (waited) CircularProgressIndicator(Modifier.size(UiMetrics.Icon))
             }
         }
-        items(state.items, key = { it.roomId + " " + it.rootId }) { thread ->
+        items(shown, key = { it.roomId + " " + it.rootId }) { thread ->
             HorizontalDivider(color = colors.border)
             ThreadRow(thread) { onOpenThread(thread) }
         }

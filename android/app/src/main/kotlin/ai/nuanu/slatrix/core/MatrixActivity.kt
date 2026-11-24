@@ -63,6 +63,9 @@ fun List<ActivityItem>.readWith(rooms: List<RoomSummary>): List<ActivityItem> {
     return map { if (it.unread && it.kind != ActivityKind.ThreadReply && it.roomId in read) it.copy(unread = false) else it }
 }
 
+/** What a reaction reacted to: its text when readable, and its thread root when it's a thread reply. */
+data class ReactedEvent(val text: String?, val threadRoot: String? = null)
+
 /**
  * What the SDK says notified you, newest first, as on the Mac: the events sync and pushes deliver while the app runs.
  * Reactions show when a push rule lets them notify.
@@ -70,8 +73,8 @@ fun List<ActivityItem>.readWith(rooms: List<RoomSummary>): List<ActivityItem> {
 class MatrixActivity(private val userId: String, scope: CoroutineScope,
     /** The names a room knows the given members by, for the people a message mentions by ID. */
     private val memberNames: suspend (roomId: String, ids: Set<String>) -> Map<String, String> = { _, _ -> emptyMap() },
-    /** The text of a room's message, for the one a reaction reacted to; null when it can't be read. */
-    private val messageText: suspend (roomId: String, eventId: String) -> String?) {
+    /** The message a reaction reacted to (its text and thread root); null when it can't be read. */
+    private val reactedEvent: suspend (roomId: String, eventId: String) -> ReactedEvent?) {
     /** Its lookups end with the account it belongs to. */
     private val lookups = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
     private val mutableItems = MutableStateFlow<List<ActivityItem>>(emptyList())
@@ -104,7 +107,7 @@ class MatrixActivity(private val userId: String, scope: CoroutineScope,
             }
             val senderName = DisplayNames.name(sender, notification.senderInfo.displayName, ambiguous = notification.senderInfo.isNameAmbiguous)
             ActivityItem(
-                id = "$roomId ${event.eventId()}", roomId = roomId, eventId = event.eventId(),
+                id = "$roomId ${event.eventId()}", roomId = roomId, eventId = reactedTo ?: event.eventId(),
                 roomName = notification.roomInfo.displayName, direct = notification.roomInfo.isDirect,
                 senderName = senderName, initials = AvatarPlaceholder.initials(senderName),
                 colorIndex = AvatarPlaceholder.colorIndex(senderName), body = body.take(4096),
@@ -125,8 +128,12 @@ class MatrixActivity(private val userId: String, scope: CoroutineScope,
         // A reaction lands with the message it reacted to, and a mention with the names of who it mentions, so its row
         // doesn't change later; what the server is slow to give lands without it.
         lookups.launch {
-            add(if (message != null) item.copy(reactedTo = withTimeoutOrNull(LOOKUP_MILLIS) { messageText(roomId, message) })
-                else item.copy(body = DisplayNames.mentions(item.body, withTimeoutOrNull(LOOKUP_MILLIS) { memberNames(roomId, mentioned) }.orEmpty())))
+            add(if (message != null) {
+                val target = withTimeoutOrNull(LOOKUP_MILLIS) { reactedEvent(roomId, message) }
+                item.copy(reactedTo = target?.text, threadRoot = target?.threadRoot ?: item.threadRoot)
+            } else {
+                item.copy(body = DisplayNames.mentions(item.body, withTimeoutOrNull(LOOKUP_MILLIS) { memberNames(roomId, mentioned) }.orEmpty()))
+            })
         }
     }
 
@@ -138,13 +145,23 @@ class MatrixActivity(private val userId: String, scope: CoroutineScope,
         current.map { if (it.roomId == roomId && it.threadRoot == threadRoot) it.copy(unread = false) else it }
     }
 
+    fun markRoomRead(roomId: String) = mutableItems.update { current ->
+        current.map { if (it.roomId == roomId) it.copy(unread = false) else it }
+    }
+
+    /** Permanently marks non-thread items in [roomId] read so old mentions don't resurrect on a later mention. */
+    fun markRoomMessagesRead(roomId: String) = mutableItems.update { current ->
+        current.map { if (it.roomId == roomId && it.kind != ActivityKind.ThreadReply) it.copy(unread = false) else it }
+    }
+
     private fun add(item: ActivityItem) {
         mutableItems.update { current ->
             // A later decryption of the same event replaces it in place, read if it was.
             val previous = current.firstOrNull { it.id == item.id }
-            // A second delivery whose lookup failed keeps the text the first found.
+            // A second delivery whose lookup failed keeps the text and thread root the first found.
             (current.filterNot { it.id == item.id } +
-                item.copy(unread = previous?.unread ?: item.unread, reactedTo = item.reactedTo ?: previous?.reactedTo))
+                item.copy(unread = previous?.unread ?: item.unread, reactedTo = item.reactedTo ?: previous?.reactedTo,
+                    threadRoot = item.threadRoot ?: previous?.threadRoot))
                 .sortedWith(compareByDescending<ActivityItem> { it.timestamp }.thenBy { it.id }).take(MAX_ITEMS)
         }
     }
@@ -158,12 +175,13 @@ private fun text(content: MessageLikeEventContent.RoomMessage): String? = when (
     else -> null
 }?.let { if (content.inReplyToEventId != null) NotificationText.withoutReplyFallback(it) else it }
 
-/** The text of a message, from the SDK's cache or else the server; null when it isn't text or can't be read. */
-internal suspend fun messageText(client: Client, roomId: String, eventId: String): String? = withContext(Dispatchers.Default) {
+/** The text and thread root of a reacted message, from the SDK's cache or else the server; null when it can't be read. */
+internal suspend fun reactedEvent(client: Client, roomId: String, eventId: String): ReactedEvent? = withContext(Dispatchers.Default) {
     try {
         client.getRoom(roomId)?.use { room ->
             room.loadOrFetchEvent(eventId).use { event ->
-                ((event.content() as? TimelineEventContent.MessageLike)?.content as? MessageLikeEventContent.RoomMessage)?.let(::text)
+                val body = ((event.content() as? TimelineEventContent.MessageLike)?.content as? MessageLikeEventContent.RoomMessage)?.let(::text)
+                ReactedEvent(body, event.threadRootEventId())
             }
         }
     } catch (cancelled: CancellationException) {

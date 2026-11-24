@@ -10,6 +10,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Bundle
 import ai.nuanu.slatrix.MainActivity
 import ai.nuanu.slatrix.R
 import ai.nuanu.slatrix.core.IdentityState
@@ -53,15 +54,28 @@ class PushNotifications(private val context: Context) {
 
     fun clear(roomId: String) = manager.activeNotifications.filter { it.tag == roomId }.forEach { manager.cancel(it.tag, it.id) }
 
+    /** Clears message alerts matching [roomId], [threadRoot], and [throughTimestamp], leaving reminders and newer alerts alone. */
+    fun clearMessages(roomId: String? = null, threadRoot: String? = null, throughTimestamp: Long? = null) =
+        manager.activeNotifications.filter { active ->
+            val extras = active.notification.extras
+            val alertThread = extras?.getString(THREAD_ID)
+            val alertTime = extras?.getLong(EVENT_TIMESTAMP, 0L) ?: 0L
+            active.notification.channelId == CHANNEL &&
+                (roomId == null || active.tag == roomId) &&
+                (threadRoot == null || alertThread == threadRoot) &&
+                (throughTimestamp == null || alertTime <= 0L || alertTime <= throughTimestamp)
+        }.forEach { manager.cancel(it.tag, it.id) }
+
     fun show(userId: String, roomId: String, eventId: String, status: NotificationStatus?, identity: IdentityState? = null,
         mentioned: Map<String, String> = emptyMap()) = synchronized(deliveryLock) {
         val settings = NotificationPreferences(context, userId)
-        if (!enabled || settings.paused || status is NotificationStatus.EventFilteredOut || status is NotificationStatus.EventRedacted || roomId == openRoom) return@synchronized
+        val resolved = (status as? NotificationStatus.Event)?.item
+        val suppressed = roomId == openRoom && (openThread == null || resolved?.threadId == openThread)
+        if (!enabled || settings.paused || status is NotificationStatus.EventFilteredOut || status is NotificationStatus.EventRedacted || suppressed) return@synchronized
         val key = pushKey(userId, roomId, eventId)
         val delivered = preferences.getString("delivered", "").orEmpty().split('\n').filter { it.isNotEmpty() }
         if (key in delivered) return@synchronized
 
-        val resolved = (status as? NotificationStatus.Event)?.item
         val item = resolved?.takeIf { identity != null && identity.status != IdentityStatus.Unknown && !identity.requiresVerification }
         val event = (item?.event as? NotificationEvent.Timeline)?.event
         val content = (event?.content() as? TimelineEventContent.MessageLike)?.content
@@ -74,8 +88,12 @@ class PushNotifications(private val context: Context) {
             sender == null -> room to NotificationText.plain(body)
             else -> NotificationText.message(room, sender, item?.roomInfo?.isDirect == true, body)
         }
+        val eventTimestamp = runCatching {
+            (resolved?.event as? NotificationEvent.Timeline)?.event?.timestamp()?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong()
+        }.getOrNull()
         manager.createNotificationChannel(NotificationChannel(CHANNEL, "Messages", NotificationManager.IMPORTANCE_DEFAULT))
-        post(CHANNEL, userId, roomId, eventId, resolved?.threadId, key, delivered, "New message", title, text, silent = resolved?.isNoisy != true)
+        post(CHANNEL, userId, roomId, eventId, resolved?.threadId, key, delivered, "New message", title, text,
+            silent = resolved?.isNoisy != true, eventTimestamp = eventTimestamp)
     }
 
     /** A reminder about something in Later, due now; a tap opens the message, as a message's alert does. */
@@ -91,7 +109,7 @@ class PushNotifications(private val context: Context) {
 
     @SuppressLint("UseKtx") // KTX edit discards the commit result.
     private fun post(channel: String, userId: String, roomId: String, eventId: String, threadId: String?, key: String,
-        delivered: List<String>, publicText: String, title: String, text: String, silent: Boolean) {
+        delivered: List<String>, publicText: String, title: String, text: String, silent: Boolean, eventTimestamp: Long? = null) {
         val intent = Intent(context, MainActivity::class.java)
             .setAction("${context.packageName}.OPEN_NOTIFICATION")
             .setData("slatrix://notification/$key".toUri())
@@ -100,10 +118,15 @@ class PushNotifications(private val context: Context) {
         val tap = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         fun builder() = NotificationCompat.Builder(context, channel).setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(tap).setAutoCancel(true)
+        val extras = Bundle().apply {
+            threadId?.let { putString(THREAD_ID, it) }
+            eventTimestamp?.let { putLong(EVENT_TIMESTAMP, it) }
+        }
         val publicNotification = builder().setContentTitle("Slatrix").setContentText(publicText).build()
         val notification = builder().setContentTitle(title).setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE).setPublicVersion(publicNotification)
+            .addExtras(extras)
             .setOnlyAlertOnce(true).setSilent(silent).build()
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         manager.notify(roomId, key.hashCode(), notification)
@@ -115,9 +138,11 @@ class PushNotifications(private val context: Context) {
         const val ROOM_ID = "push_room_id"
         const val EVENT_ID = "push_event_id"
         const val THREAD_ID = "push_thread_id"
+        private const val EVENT_TIMESTAMP = "push_event_timestamp"
 
-        /** The conversation on screen while the app is resumed; it needs no alert. */
+        /** The conversation (and optional thread) on screen while the app is resumed; it needs no alert. */
         @Volatile var openRoom: String? = null
+        @Volatile var openThread: String? = null
 
         /** On a cold start the identity is still loading; waiting a moment lets a verified device show the message. */
         suspend fun knownIdentity(identity: StateFlow<IdentityState>?): IdentityState? = identity?.let {

@@ -177,6 +177,150 @@ class LiveWorkspaceTest {
         compose.waitUntil { read == "\$Next" }
     }
 
+    // capability: conversation.read
+    @Test fun anUpdatedAckTokenMarksTheLatestVisibleMessageReadAgain() {
+        val room = RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)
+        fun message(id: String) = ConversationMessage(id, "\$$id", "@sam:example.org", "Sam", id, null,
+            0, MessageKind.Text, MessageSendState.Sent, false, "S", 0)
+        val timeline = mutableStateOf(ConversationState(listOf(message("First")), loading = false, hasMore = false))
+        val reads = mutableListOf<String>()
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, timeline.value, ComposerState(loading = false), {}, {}, {}, {}, { reads += it }, {}, {}, {})
+            }
+        }
+        compose.waitUntil { reads.size == 1 }
+        compose.runOnIdle { timeline.value = timeline.value.copy(ackToken = timeline.value.ackToken + 1) }
+        compose.waitForIdle()
+        assertEquals(listOf("\$First", "\$First"), reads)
+    }
+
+    // capability: conversation.read
+    @Test fun anUndecryptedLatestMessageIsNotMarkedReadUntilItDecrypts() {
+        val room = RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)
+        fun message(id: String, kind: MessageKind) = ConversationMessage(id, "\$$id", "@sam:example.org", "Sam", id, null,
+            0, kind, MessageSendState.Sent, false, "S", 0)
+        val timeline = mutableStateOf(ConversationState(listOf(message("First", MessageKind.Encrypted)), loading = false, hasMore = false))
+        val reads = mutableListOf<String>()
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, timeline.value, ComposerState(loading = false), {}, {}, {}, {}, { reads += it }, {}, {}, {})
+            }
+        }
+        compose.waitForIdle()
+        assertEquals(emptyList<String>(), reads)
+
+        compose.runOnIdle { timeline.value = timeline.value.copy(rows = listOf(message("First", MessageKind.Text))) }
+        compose.waitForIdle()
+        assertEquals(listOf("\$First"), reads)
+    }
+
+    // capability: conversation.jump-to-message
+    @Test fun whileSeekingAThreadJumpTargetLiveChannelScreenHoldsBackAutoRead() {
+        val room = RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)
+        val latest = ConversationMessage("Latest", "\$Latest", "@sam:example.org", "Sam", "Latest", null,
+            0, MessageKind.Text, MessageSendState.Sent, false, "S", 0)
+        val timeline = mutableStateOf(ConversationState(listOf(latest), loading = false, hasMore = false, seekingTarget = true))
+        val reads = mutableListOf<String>()
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, timeline.value, ComposerState(loading = false), {}, {}, {}, {}, { reads += it }, {}, {}, {})
+            }
+        }
+        compose.waitForIdle()
+        assertEquals("Must not mark newest reply read while paginating backwards for an older jump target",
+            emptyList<String>(), reads)
+
+        compose.runOnIdle { timeline.value = timeline.value.copy(seekingTarget = false) }
+        compose.waitForIdle()
+        assertEquals(listOf("\$Latest"), reads)
+    }
+
+    // capability: conversation.read
+    @Test fun reconnectingRetriesMarkingTheLatestVisibleMessageRead() {
+        val room = RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)
+        val msg = ConversationMessage("First", "\$First", "@sam:example.org", "Sam", "Hello", null,
+            0, MessageKind.Text, MessageSendState.Sent, false, "S", 0)
+        val connection = kotlinx.coroutines.flow.MutableStateFlow(ai.nuanu.slatrix.core.ConnectionState.Offline)
+        val reads = mutableListOf<String>()
+        compose.setContent {
+            SlatrixTheme {
+                ai.nuanu.slatrix.ui.account.ProvideConnection(connection) {
+                    LiveChannelScreen(room, ConversationState(listOf(msg), loading = false, hasMore = false),
+                        ComposerState(loading = false), {}, {}, {}, {}, { reads += it }, {}, {}, {})
+                }
+            }
+        }
+        compose.waitForIdle()
+        assertEquals(1, reads.size)
+
+        connection.value = ai.nuanu.slatrix.core.ConnectionState.Connected
+        compose.waitForIdle()
+        assertEquals(2, reads.size)
+
+        connection.value = ai.nuanu.slatrix.core.ConnectionState.Offline
+        compose.waitForIdle()
+        assertEquals("Going offline must not fire a wasted read", 2, reads.size)
+
+        connection.value = ai.nuanu.slatrix.core.ConnectionState.Connected
+        compose.waitForIdle()
+        assertEquals(3, reads.size)
+    }
+
+    // capability: activity.badge
+    @Test fun aThreadMarksActivityRepliesReadOnlyWhileResumed() {
+        val room = RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main.immediate)
+        val activity = ai.nuanu.slatrix.core.MatrixActivity("@alex:example.org", scope) { _, _ -> null }
+        fun reply(id: String, at: ULong) = org.matrix.rustcomponents.sdk.NotificationItem(
+            event = org.matrix.rustcomponents.sdk.NotificationEvent.Timeline(object : org.matrix.rustcomponents.sdk.TimelineEvent(org.matrix.rustcomponents.sdk.NoHandle) {
+                override fun content() = org.matrix.rustcomponents.sdk.TimelineEventContent.MessageLike(
+                    org.matrix.rustcomponents.sdk.MessageLikeEventContent.RoomMessage(
+                        org.matrix.rustcomponents.sdk.MessageType.Text(org.matrix.rustcomponents.sdk.TextMessageContent(id, null)), null))
+                override fun eventId() = id
+                override fun senderId() = "@sam:example.org"
+                override fun timestamp() = at
+                override fun threadRootEventId() = "\$root"
+            }),
+            rawEvent = "{}", senderInfo = org.matrix.rustcomponents.sdk.NotificationSenderInfo("Sam", null, false),
+            roomInfo = org.matrix.rustcomponents.sdk.NotificationRoomInfo("Team", null, null, null, null, 2u, 0u, emptyList(), true, false, false, false),
+            isNoisy = true, hasMention = false, threadId = "\$root", actions = null,
+        )
+        activity.listener.onNotification(reply("\$r1", 1_000u), "!team:example.org")
+        val owner = object : LifecycleOwner { override val lifecycle = LifecycleRegistry(this) }
+        compose.runOnUiThread { owner.lifecycle.currentState = Lifecycle.State.RESUMED }
+        val media = ai.nuanu.slatrix.core.MatrixMedia(object : org.matrix.rustcomponents.sdk.Client(org.matrix.rustcomponents.sdk.NoHandle) {},
+            "@alex:example.org", compose.activity.cacheDir)
+        try {
+            compose.setContent {
+                SlatrixTheme {
+                    CompositionLocalProvider(LocalLifecycleOwner provides owner) {
+                        ai.nuanu.slatrix.ui.account.LiveConversation(
+                            ai.nuanu.slatrix.core.OpenChannel(room, threadRoot = "\$root"),
+                            null, null, { _, _, _ -> }, null, media, emptyList(), { _, _, _ -> }, null, { _, _ -> },
+                            activity = activity,
+                        )
+                    }
+                }
+            }
+            compose.waitUntil { activity.items.value.singleOrNull()?.unread == false }
+
+            // Locking the phone drops lifecycle below RESUMED: incoming thread replies must stay unread!
+            compose.runOnIdle { owner.lifecycle.currentState = Lifecycle.State.STARTED }
+            compose.waitForIdle()
+            activity.listener.onNotification(reply("\$r2", 2_000u), "!team:example.org")
+            compose.waitForIdle()
+            assertEquals(listOf("\$r2"), activity.items.value.filter { it.unread }.map { it.eventId })
+
+            // Resuming the screen clears them.
+            compose.runOnIdle { owner.lifecycle.currentState = Lifecycle.State.RESUMED }
+            compose.waitUntil { activity.items.value.none { it.unread } }
+        } finally {
+            activity.close()
+            scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+        }
+    }
+
     @Test fun leavingAPageDiscardsItsSavedStateSoReopeningStartsFresh() {
         val open = mutableStateOf(true)
         var mutate: (() -> Unit)? = null

@@ -25,8 +25,9 @@ class MatrixActivityTest {
         activity.listener.onNotification(notification("\$mention", "Can you review?", at = 1_000u, mention = true), "!team:example.org")
         activity.listener.onNotification(reaction("\$liked", "👍", at = 5_000u), "!team:example.org")
 
-        assertEquals(listOf("\$liked", "\$reply", "\$dm", "\$mention"), activity.items.first { it.size == 4 }.map { it.eventId })
+        assertEquals(listOf("\$mine", "\$reply", "\$dm", "\$mention"), activity.items.first { it.size == 4 }.map { it.eventId })
         val (liked, reply, dm, mention) = activity.items.value
+        assertEquals("!team:example.org \$liked", liked.id)
         assertEquals(ActivityKind.Reaction, liked.kind)
         assertEquals("👍", liked.body)
         assertEquals(ActivityKind.ThreadReply, reply.kind)
@@ -43,15 +44,45 @@ class MatrixActivityTest {
     // capability: activity.feed
     @Test fun aReactionShowsTheMessageItReactedToAndAnItemStaysUnreadUntilOpened() = runTest {
         val activity = MatrixActivity("@alex:example.org", backgroundScope) { room, event ->
-            if (room == "!team:example.org" && event == "\$mine") "Ship it on Friday?" else null
+            if (room == "!team:example.org" && event == "\$mine") ReactedEvent("Ship it on Friday?") else null
         }
         activity.listener.onNotification(reaction("\$liked", "👍", at = 5_000u), "!team:example.org")
 
         val liked = activity.items.first { it.isNotEmpty() }.single()
+        assertEquals("\$mine", liked.eventId)
+        assertEquals("!team:example.org \$liked", liked.id)
         assertEquals("Ship it on Friday?", liked.reactedTo)
         assertTrue(liked.unread)
         activity.markRead(liked.id)
         assertFalse(activity.items.value.single().unread)
+    }
+
+    // capability: activity.open-item
+    @Test fun reactionsOnAThreadReplyTargetThatReplyInItsThreadWithoutColliding() = runTest {
+        val activity = MatrixActivity("@alex:example.org", backgroundScope) { room, event ->
+            if (room == "!team:example.org" && event == "\$reply") ReactedEvent("Ship it on Friday?", threadRoot = "\$root") else null
+        }
+        activity.listener.onNotification(reaction("\$r1", "👍", at = 5_000u, related = "\$reply"), "!team:example.org")
+        activity.listener.onNotification(reaction("\$r2", "🔥", at = 6_000u, related = "\$reply"), "!team:example.org")
+
+        val items = activity.items.first { it.size == 2 }
+        assertEquals(listOf("!team:example.org \$r2", "!team:example.org \$r1"), items.map { it.id })
+        assertEquals(listOf("\$reply", "\$reply"), items.map { it.eventId })
+        assertEquals(listOf("\$root", "\$root"), items.map { it.threadRoot })
+        assertEquals(listOf("Ship it on Friday?", "Ship it on Friday?"), items.map { it.reactedTo })
+    }
+
+    @Test fun reactedEventReadsBothMessageTextAndThreadRootFromTheRoom() = runTest {
+        val client = object : Client(NoHandle) {
+            override fun getRoom(roomId: String): Room? = if (roomId != "!team:example.org") null else object : Room(NoHandle) {
+                override suspend fun loadOrFetchEvent(eventId: String): TimelineEvent = object : TimelineEvent(NoHandle) {
+                    override fun content(): TimelineEventContent = TimelineEventContent.MessageLike(
+                        MessageLikeEventContent.RoomMessage(MessageType.Text(TextMessageContent("In thread", null)), null))
+                    override fun threadRootEventId(): String = "\$root"
+                }
+            }
+        }
+        assertEquals(ReactedEvent("In thread", "\$root"), reactedEvent(client, "!team:example.org", "\$reply"))
     }
 
     // capability: activity.feed
@@ -74,6 +105,35 @@ class MatrixActivityTest {
 
         activity.markThreadRead("!team:example.org", "\$root")
         assertEquals(listOf("\$same", "\$other"), activity.items.value.filter { it.unread }.map { it.eventId })
+    }
+
+    // capability: activity.badge
+    @Test fun markingARoomReadClearsItsThreadRepliesAndNoOtherRooms() = runTest {
+        val activity = MatrixActivity("@alex:example.org", backgroundScope) { _, _ -> null }
+        activity.listener.onNotification(notification("\$one", "Agreed", at = 1_000u, thread = "\$root"), "!team:example.org")
+        activity.listener.onNotification(notification("\$two", "Later", at = 2_000u, thread = "\$elsewhere"), "!team:example.org")
+        activity.listener.onNotification(notification("\$otherRoom", "Hi", at = 3_000u, thread = "\$root"), "!design:example.org")
+        activity.items.first { it.size == 3 }
+
+        activity.markRoomRead("!team:example.org")
+        assertEquals(listOf("\$otherRoom"), activity.items.value.filter { it.unread }.map { it.eventId })
+    }
+
+    // capability: activity.badge
+    @Test fun markingRoomMessagesReadPermanentlyClearsNonThreadItemsWithoutClearingThreadReplies() = runTest {
+        val activity = MatrixActivity("@alex:example.org", backgroundScope) { _, _ -> null }
+        activity.listener.onNotification(notification("\$mention", "Ping", at = 1_000u, mention = true), "!team:example.org")
+        activity.listener.onNotification(reaction("\$liked", "👍", at = 2_000u), "!team:example.org")
+        activity.listener.onNotification(notification("\$reply", "In thread", at = 3_000u, thread = "\$root"), "!team:example.org")
+        activity.listener.onNotification(notification("\$other", "Elsewhere", at = 4_000u, mention = true), "!design:example.org")
+        activity.items.first { it.size == 4 }
+
+        activity.markRoomMessagesRead("!team:example.org")
+        assertEquals(listOf("\$other", "\$reply"), activity.items.value.filter { it.unread }.map { it.eventId })
+
+        // A later unread mention in the same room must not resurrect the earlier read mention.
+        val unreadTeam = listOf(RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.Count("1"), "T", 0))
+        assertEquals(listOf("\$other", "\$reply"), activity.items.value.readWith(unreadTeam).filter { it.unread }.map { it.eventId })
     }
 
     // capability: people.names
@@ -119,9 +179,9 @@ private fun notification(eventId: String, body: String, at: ULong, mention: Bool
     item(eventId, at, sender, TimelineEventContent.MessageLike(MessageLikeEventContent.RoomMessage(
         MessageType.Text(TextMessageContent(body, null)), replyTo)), "{}", mention, thread, direct, senderName)
 
-private fun reaction(eventId: String, key: String, at: ULong) = item(eventId, at, "@sam:example.org",
-    TimelineEventContent.MessageLike(MessageLikeEventContent.ReactionContent("\$mine")),
-    """{"type":"m.reaction","content":{"m.relates_to":{"rel_type":"m.annotation","event_id":"${'$'}mine","key":"$key"}}}""",
+private fun reaction(eventId: String, key: String, at: ULong, related: String = "\$mine") = item(eventId, at, "@sam:example.org",
+    TimelineEventContent.MessageLike(MessageLikeEventContent.ReactionContent(related)),
+    """{"type":"m.reaction","content":{"m.relates_to":{"rel_type":"m.annotation","event_id":"$related","key":"$key"}}}""",
     mention = false, thread = null, direct = false)
 
 private fun item(eventId: String, at: ULong, sender: String, content: TimelineEventContent, raw: String, mention: Boolean,

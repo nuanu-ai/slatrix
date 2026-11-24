@@ -32,8 +32,8 @@ class ThreadsFeedScreenTest {
         var opened: ThreadFeedItem? = null
         compose.setContent {
             SlatrixTheme {
-                ActivityScreen(emptyList(), {}, { opened = it }) { onOpenThread ->
-                    ThreadsFeed(ThreadFeedState(listOf(thread), loading = false), onOpenThread)
+                ActivityScreen(emptyList(), {}, { opened = it }) { onOpenThread, unreadOnly ->
+                    ThreadsFeed(ThreadFeedState(listOf(thread), loading = false), unreadOnly, onOpenThread)
                 }
             }
         }
@@ -44,5 +44,32 @@ class ThreadsFeedScreenTest {
         compose.onNodeWithText("3 replies").assertExists()
         compose.onNodeWithText("Shall we ship?").performClick()
         compose.runOnIdle { assertEquals(thread, opened) }
+    }
+
+    // capability: threads.feed
+    @Test fun theUnreadsChipFiltersThreadsFeedToUnreadThreadsOnly() {
+        val unread = ThreadFeedItem("!design:example.org", "design", false, "\$a",
+            ThreadFeedMessage("Sam", "S", 0, "Unread thread", 2_000), ThreadFeedMessage("Mira", "M", 1, "New reply", 3_000),
+            replies = 1, unread = true)
+        val read = ThreadFeedItem("!general:example.org", "general", false, "\$b",
+            ThreadFeedMessage("Sam", "S", 0, "Read thread", 1_000), ThreadFeedMessage("Alex", "A", 2, "Done", 1_500),
+            replies = 1, unread = false)
+        compose.setContent {
+            SlatrixTheme {
+                ActivityScreen(emptyList(), {}, {}) { onOpenThread, unreadOnly ->
+                    ThreadsFeed(ThreadFeedState(listOf(unread, read), loading = false), unreadOnly, onOpenThread)
+                }
+            }
+        }
+        compose.onNodeWithText("Threads").performClick()
+        compose.onNodeWithText("Unread thread").assertExists()
+        compose.onNodeWithText("Read thread").assertExists()
+
+        compose.onNodeWithText("Unreads").performClick()
+        compose.onNodeWithText("Unread thread").assertExists()
+        compose.onNodeWithText("Read thread").assertDoesNotExist()
+
+        compose.onNodeWithText("Unreads").performClick()
+        compose.onNodeWithText("Read thread").assertExists()
     }
 }

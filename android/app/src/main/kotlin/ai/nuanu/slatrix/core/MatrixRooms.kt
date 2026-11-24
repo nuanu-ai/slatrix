@@ -16,8 +16,11 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.emptyFlow
@@ -117,6 +120,9 @@ data class RoomListState(
     val invitations: List<Invitation> = emptyList(),
 )
 
+/** A room that just transitioned to read (or left) via sync, with its latest known event timestamp. */
+data class ReadRoom(val roomId: String, val throughTimestamp: Long?)
+
 class MatrixRooms(scope: CoroutineScope, internal val client: Client, private val foreground: StateFlow<Boolean> = MutableStateFlow(true),
     private val network: Flow<NetworkStatus> = emptyFlow(),
     private val presenceOf: suspend (String) -> String? = { serverPresence(client, it) }) {
@@ -126,6 +132,9 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     val state: StateFlow<RoomListState> = mutableState.asStateFlow()
     private val mutableConnection = MutableStateFlow(ConnectionState.Connecting)
     val connection: StateFlow<ConnectionState> = mutableConnection.asStateFlow()
+    private val mutableReadRooms = MutableSharedFlow<ReadRoom>(extraBufferCapacity = 64)
+    /** Rooms that just transitioned from unread to read (or were left) via sync, e.g. read on another device. */
+    val readRooms: SharedFlow<ReadRoom> = mutableReadRooms.asSharedFlow()
     private val events = Channel<Event>(Channel.UNLIMITED)
     private val retries = Channel<Unit>(Channel.CONFLATED)
     private val summaries = mutableMapOf<String, RoomSummary>()
@@ -357,7 +366,7 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
     private suspend fun accept(info: RoomInfo) {
         val placement = RoomPlacement.of(info.isSpace, info.membership)
         if (placement == RoomPlacement.Ignored) {
-            summaries.remove(info.id)
+            if (summaries.remove(info.id) != null) mutableReadRooms.tryEmit(ReadRoom(info.id, null))
             spaces.remove(info.id)
             invitations.remove(info.id)
             followed.remove(info.id)?.release()
@@ -414,7 +423,11 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
             pinned = info.pinnedEventIds,
         )
         // An unchanged room keeps its instance, so its row skips recomposition.
-        if (summaries[info.id] != summary) summaries[info.id] = summary
+        val previous = summaries[info.id]
+        if (previous != null && previous.unread != UnreadBadge.None && summary.unread == UnreadBadge.None) {
+            mutableReadRooms.tryEmit(ReadRoom(info.id, summary.latest?.timestamp))
+        }
+        if (previous != summary) summaries[info.id] = summary
     }
 
     private suspend fun latest(room: Room): LatestMessage? = try {
