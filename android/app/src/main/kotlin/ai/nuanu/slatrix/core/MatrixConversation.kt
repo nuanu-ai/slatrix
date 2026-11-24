@@ -184,6 +184,7 @@ fun groupsUnder(previous: ConversationMessage, message: ConversationMessage): Bo
     previous.senderId == message.senderId && abs(message.timestamp - previous.timestamp) < 5 * 60_000L
 
 private const val MAX_BLANK_PAGES = 5
+private const val MAX_TARGET_PAGES = 5
 private const val ROOT_KEY = "thread-root"
 
 // Its own key, as the Mac gives the root its event ID: the channel's row key could match one of the thread's rows.
@@ -376,10 +377,15 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                         highlight = it.highlight ?: target?.takeIf { id -> !resume && source.holds(id) }, firstUnread = unread,
                         ackToken = if (needsAck) it.ackToken + 1 else it.ackToken).counted()
                 }
-                if (threadRoot != null && view == ConversationView.Timeline && !initialThreadPaged &&
-                    mutableState.value.hasMore && rows.none { it is ConversationMessage && it.eventId != threadRoot }) {
-                    initialThreadPaged = true
-                    loadOlder()
+                val jumpTarget = target
+                if (threadRoot != null && view == ConversationView.Timeline && !initialThreadPaged && mutableState.value.hasMore) {
+                    if (jumpTarget != null && !resume && !source.holds(jumpTarget)) {
+                        initialThreadPaged = true
+                        loadOlderForTarget(jumpTarget)
+                    } else if (rows.none { it is ConversationMessage && it.eventId != threadRoot }) {
+                        initialThreadPaged = true
+                        loadOlder()
+                    }
                 }
             }
         } catch (cancelled: CancellationException) {
@@ -473,6 +479,36 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             } finally {
                 if (lifetime.isActive) mutableState.update { it.copy(loadingHistory = false) }
                 pageLock.unlock()
+            }
+        }
+    }
+
+    /** Paginates a long thread backwards (bounded) until a jumped-to older reply lands or history ends. */
+    private fun loadOlderForTarget(targetId: String) {
+        operations.launch {
+            pageLock.withLock {
+                try {
+                    caughtUp()
+                    if (!mutableState.value.hasMore || target != targetId || shown?.holds(targetId) == true) return@withLock
+                    retryPage = { loadOlderForTarget(targetId) }
+                    mutableState.update { it.copy(loadingHistory = true, error = null) }
+                    var pages = 0
+                    while (pages < MAX_TARGET_PAGES && target == targetId && shown?.holds(targetId) != true) {
+                        val endReached = timeline().paginateBackwards(50u)
+                        currentCoroutineContext().ensureActive()
+                        pages++
+                        mutableState.update { it.copy(hasMore = !endReached).counted() }
+                        caughtUp()
+                        if (endReached) break
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    currentCoroutineContext().ensureActive()
+                    mutableState.update { it.copy(error = "Couldn’t load older messages.") }
+                } finally {
+                    if (lifetime.isActive) mutableState.update { it.copy(loadingHistory = false) }
+                }
             }
         }
     }

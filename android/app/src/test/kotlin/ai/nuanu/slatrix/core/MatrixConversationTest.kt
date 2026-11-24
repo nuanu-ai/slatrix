@@ -199,6 +199,44 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: conversation.jump-to-message
+    @Test fun jumpingToAnOlderReplyInALongThreadPaginatesBackwardsUntilItLands() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("r5", "\$r5", "Reply 5"), conversationItem("r6", "\$r6", "Reply 6")))
+        timeline.page.complete(false)
+        timeline.onPage = { page ->
+            val item = when (page) {
+                1 -> conversationItem("r4", "\$r4", "Reply 4")
+                2 -> conversationItem("r3", "\$r3", "Reply 3")
+                3 -> conversationItem("old", "\$oldReply", "Found me")
+                else -> conversationItem("x$page", "\$x$page", "Extra $page")
+            }
+            timeline.emit(listOf(TimelineDiff.PushFront(item)))
+        }
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root", at = "\$oldReply")
+        val found = withContext(Dispatchers.Default) {
+            withTimeout(2_000) { conversation.state.first { it.highlight == "\$oldReply" && !it.loadingHistory } }
+        }
+        assertEquals("\$oldReply", found.highlight)
+        assertEquals("Stops immediately once the target reply lands", 3, timeline.pages)
+        conversation.close()
+    }
+
+    // capability: conversation.jump-to-message
+    @Test fun jumpingToAMissingReplyInALongThreadStopsAfterBoundedPages() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("r10", "\$r10", "Reply 10")))
+        timeline.page.complete(false)
+        timeline.onPage = { page ->
+            timeline.emit(listOf(TimelineDiff.PushFront(conversationItem("p$page", "\$p$page", "Page $page"))))
+        }
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root", at = "\$missing")
+        val settled = withContext(Dispatchers.Default) {
+            withTimeout(2_000) { conversation.state.first { it.rows.messages.size >= 6 && !it.loadingHistory } }
+        }
+        assertNull(settled.highlight)
+        assertEquals("Bounded backward pagination stops after 5 pages", 5, timeline.pages)
+        conversation.close()
+    }
+
     @Test fun retryLoadsFailedHistoryAgainWithoutLosingMessages() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         timeline.pageFailure = IllegalStateException("Offline")
@@ -1052,8 +1090,11 @@ class MatrixConversationTest {
         assertEquals("Waiting for this message", conversation.state.value.rows.messages.last().body)
 
         assertFalse(conversation.markRead("\$old"))
+        assertFalse("Undecrypted newest message is not marked read", conversation.markRead("\$new"))
         assertTrue(timeline.receipts.tryReceive().isFailure)
         assertTrue(room.markedUnread)
+        timeline.emit(listOf(TimelineDiff.Set(2u, conversationItem("stable-new", "\$new", "Delivered"))))
+        conversation.state.first { it.rows.messages.last().kind == MessageKind.Text }
         assertTrue(conversation.markRead("\$new"))
         assertEquals(ReceiptType.READ to "\$new", timeline.receipts.receive())
         assertEquals(ReceiptType.FULLY_READ to "\$new", timeline.receipts.receive())
