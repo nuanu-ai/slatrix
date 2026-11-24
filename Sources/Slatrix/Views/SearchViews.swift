@@ -141,6 +141,7 @@ struct SearchMenu: View {
                         .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
                         .elevation(.e2, cornerRadius: m.radiusLarge)
                         .offset(x: x, y: bar.frame.maxY + m.sp4)
+                        .transition(.opacity)
                     }
                 }
             }
@@ -589,7 +590,7 @@ private struct MessageResultRow: View {
                 }
             }
             .padding(.horizontal, m.sp20).padding(.vertical, m.sp12).frame(maxWidth: .infinity, alignment: .leading)
-            .background(hovering ? colors.hover : .clear)
+            .background(hovering ? colors.rowHover : .clear)
         }
         .buttonStyle(.row).onHover { hovering = $0 }
     }
@@ -637,7 +638,7 @@ private struct ChannelResultRow: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, m.sp20).frame(height: m.personRow + m.sp8)
-            .background(hovering ? colors.hover : .clear)
+            .background(hovering ? colors.rowHover : .clear)
         }
         .buttonStyle(.row).onHover { hovering = $0 }
     }

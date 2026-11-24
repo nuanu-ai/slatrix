@@ -1311,6 +1311,7 @@ struct RootView: View {
                             .padding(.top, m.sp4).padding(.bottom, m.sp12)
                         }
                     }
+                    .animation(Motion.content, value: editTarget?.id)
                     .conversationColumn(m, isThread: false).scrollEdge(.bottom, colors.canvas)
                     .covered(coverage.pane)
                 }
@@ -1503,6 +1504,7 @@ struct RootView: View {
                         .disabled(threadReadyID != root.eventID || withFiles)
                 }
             }
+            .animation(Motion.content, value: editTarget?.id)
             .conversationColumn(m, isThread: true).scrollEdge(.bottom, colors.canvas)
         }
         // Its notice floats under its header, as the conversation's banners do, so showing it moves no row.
@@ -3449,7 +3451,7 @@ private struct ComposerCard: ViewModifier {
     @Environment(\.metrics) private var m
     let colors: AppColors
     func body(content: Content) -> some View {
-        content.background(colors.raised).clipShape(RoundedRectangle(cornerRadius: m.radiusLarge))
+        content.background(colors.overlay).clipShape(RoundedRectangle(cornerRadius: m.radiusLarge))
             .elevation(.e2, cornerRadius: m.radiusLarge)
     }
 }

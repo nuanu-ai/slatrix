@@ -209,7 +209,7 @@ private struct SavedMessageRow: View {
         // Until the message arrives, its outline holds the row's place.
         .redacted(reason: message == nil && error == nil ? .placeholder : [])
         .padding(m.sp12)
-        .background(hovered ? colors.hover : .clear, in: RoundedRectangle(cornerRadius: m.radius))
+        .background(hovered ? colors.rowHover : .clear, in: RoundedRectangle(cornerRadius: m.radius))
         .contentShape(Rectangle())
     }
 

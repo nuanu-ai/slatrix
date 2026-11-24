@@ -103,6 +103,7 @@ struct MessageComposer: View {
                     Spacer()
                     CloseButton(label: "Cancel editing") { onCancelEdit?() }.help("Cancel editing (Escape)")
                 }.padding(.horizontal, m.sp12).padding(.top, m.sp8).padding(.bottom, m.sp4)
+                    .transition(.opacity)
             }
             if showFormattingBar {
                 ScrollView(.horizontal) {
@@ -114,9 +115,10 @@ struct MessageComposer: View {
                 .scrollIndicators(.hidden)
                 .disabled(sending)
                 .accessibilityElement(children: .contain).accessibilityLabel("Message formatting")
+                .transition(.opacity)
                 Divider().overlay(colors.border)
             }
-            if !attachments.isEmpty && !isEditing { attachmentStrip.padding(.top, m.sp8) }
+            if !attachments.isEmpty && !isEditing { attachmentStrip.padding(.top, m.sp8).transition(.opacity) }
             // One line at rest, 40 pt, growing upward; the buttons keep to its bottom edge, so Send never moves. The
             // composer keeps to the messages' column, so "+" sits under their avatars and the text starts where theirs
             // does, past the editor's own inset. Compact messages have no avatars, so "+" joins the buttons at the end.
@@ -186,6 +188,7 @@ struct MessageComposer: View {
             }.padding(.leading, compact ? m.sp8 : m(6)).padding(.trailing, m(6))
         }
         .background(colors.control, in: shape)
+        .animation(Motion.content, value: [isEditing, showFormattingBar, !attachments.isEmpty])
         .overlay(
             shape.strokeBorder(
                 editor.isFocused ? colors.accentFill : colors.borderStrong, lineWidth: editor.isFocused ? 1 : 0.5)
@@ -287,7 +290,7 @@ struct MessageComposer: View {
             .padding(.horizontal, m.sp12).padding(.vertical, m.sp8)
             .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
             .elevation(.e2, cornerRadius: m.radiusLarge)
-            if let accessories { accessories }
+            if let accessories { accessories.transition(.opacity) }
         }
         .animation(
             Motion.overlay,
@@ -339,7 +342,7 @@ struct MessageComposer: View {
     }
 
     private var toolbarDivider: some View {
-        Rectangle().fill(muted.opacity(0.25)).frame(width: 1, height: m.sp16).padding(.horizontal, m.sp4)
+        Rectangle().fill(colors.border).frame(width: 1, height: m.sp16).padding(.horizontal, m.sp4)
     }
 
     private func formatButton(
@@ -1025,7 +1028,7 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
             .font: font, .foregroundColor: themeText,
             .paragraphStyle: MessageBlocks.paragraph(
                 quote: block == .quote, list: block == .bullet || block == .ordered ? 1 : 0, code: code,
-                fontSize: fontSize, lineSpacing: fontSize / 5),
+                fontSize: fontSize, lineSpacing: MessageBlocks.readingLineSpacing(fontSize)),
         ]
         if !style.isEmpty { attributes[.composerStyle] = Int(style.rawValue) }
         if let block { attributes[.composerBlock] = block.rawValue }
@@ -1577,16 +1580,16 @@ private struct StagedAttachmentTile: View {
                     .frame(width: m(Self.side), height: m(Self.side)).clipShape(shape)
             } else {
                 HStack(spacing: m.sp8) {
-                    FileTypeIcon(kind: attachment.fileKind)
+                    FileTypeIcon(kind: attachment.fileKind, side: FileCard.iconSide, glyph: .body)
                     VStack(alignment: .leading, spacing: m.sp2) {
-                        Text(attachment.name).font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
+                        Text(attachment.name).font(m.font(.body, .medium)).foregroundStyle(colors.textPrimary)
                             .lineLimit(1).truncationMode(.middle)
-                        Text(attachment.typeLabel).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                        Text(attachment.typeLabel).font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                     }
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, m.sp12).frame(width: m(Self.fileWidth), height: m(Self.side))
-                .background(colors.raised, in: shape)
+                .background(colors.surfaceCard, in: shape)
             }
         }
         .overlay(shape.strokeBorder(colors.border))

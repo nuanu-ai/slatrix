@@ -74,7 +74,8 @@ struct ComponentGallery: View {
             (
                 "Surface",
                 [
-                    ("canvas", c.canvas), ("raised", c.raised), ("sunken", c.sunken), ("overlay", c.overlay),
+                    ("canvas", c.canvas), ("row hover", c.rowHover), ("raised", c.raised),
+                    ("surface card", c.surfaceCard), ("sunken", c.sunken), ("overlay", c.overlay),
                     ("sidebar", c.sidebar), ("control", c.control), ("scrim", c.scrim),
                 ]
             ),
@@ -90,6 +91,7 @@ struct ComponentGallery: View {
                 "Accent and status",
                 [
                     ("accent", c.accent), ("accent fill", c.accentFill), ("accent tint", c.accentTint),
+                    ("mention", c.mentionFill), ("mention you", c.mentionYouFill),
                     ("destructive", c.destructive), ("warning", c.warning), ("success", c.success),
                     ("active", c.presenceActive),
                     ("away", c.presenceAway),
@@ -260,7 +262,8 @@ struct ComponentGallery: View {
                         }
                     }
                 }
-                AttachmentView(matrix: matrix, message: message, attachment: attachment).frame(width: m(420))
+                AttachmentView(matrix: matrix, message: message, attachment: attachment).frame(
+                    width: m(FileCard.maxWidth), alignment: .leading)
             }
             VStack(alignment: .leading, spacing: 0) {
                 caption("Rows in Files: resting, hovered, an image and a link")

@@ -213,6 +213,6 @@ struct FeedRowHover: ViewModifier {
     @ThemeColors private var colors
 
     func body(content: Content) -> some View {
-        content.background(hovering ? colors.hover : .clear).onHover { hovering = $0 }
+        content.background(hovering ? colors.rowHover : .clear).onHover { hovering = $0 }
     }
 }

@@ -45,6 +45,7 @@ struct PinnedMessagesView: View {
                 }
             }
             if let coverage = service.coverageMessage {
+                Divider().overlay(colors.border)
                 HStack(spacing: m.sp8) {
                     Image(systemName: "info.circle")
                     Text(coverage)
@@ -114,7 +115,8 @@ struct PinnedMessagesView: View {
                 }.buttonStyle(.row)
             }
         }.padding(m.sp16).frame(maxWidth: .infinity, alignment: .leading).background(
-            colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+            colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge)
+        ).overlay(RoundedRectangle(cornerRadius: m.radiusLarge).strokeBorder(colors.border))
     }
     private func profile(_ message: ChatMessage) {
         onOpenProfile(

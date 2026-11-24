@@ -204,6 +204,7 @@ struct PreferencesView: View {
             }
         }.padding(m.sp16).frame(maxWidth: .infinity, alignment: .leading)
             .background(colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+            .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).strokeBorder(colors.border))
     }
 
     private func notificationStatusTitle(_ status: DesktopNotificationStatus) -> String {
@@ -267,7 +268,8 @@ struct PreferencesView: View {
                     service: matrix.verification, disabled: matrix.isPreview || matrix.user == nil,
                     onRecovery: onRecovery)
             }.padding(m.sp16).frame(maxWidth: .infinity, alignment: .leading).background(
-                colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+                colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge)
+            ).overlay(RoundedRectangle(cornerRadius: m.radiusLarge).strokeBorder(colors.border))
             Button(role: .destructive, action: onLogout) {
                 Label(
                     matrix.isPreview ? "Leave preview" : "Sign out",
@@ -307,7 +309,8 @@ struct PreferencesView: View {
                         .buttonStyle(.textLink)
                 }.font(m.font(.body))
             }.padding(m.sp16).frame(maxWidth: .infinity, alignment: .leading).background(
-                colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+                colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge)
+            ).overlay(RoundedRectangle(cornerRadius: m.radiusLarge).strokeBorder(colors.border))
         }
     }
 
@@ -422,9 +425,8 @@ private struct AppMiniature: View {
                     Capsule().fill(colors.textBody.opacity(0.5)).frame(width: m(29), height: m(4))
                     ForEach(0..<2) { index in
                         HStack(alignment: .top, spacing: m.sp4) {
-                            RoundedRectangle(cornerRadius: m(2)).fill(
-                                avatarColor(index == 0 ? "Alex" : "Julia")
-                            ).frame(width: m(9), height: m(9))
+                            Circle().fill(avatarColor(index == 0 ? "Alex" : "Julia"))
+                                .frame(width: m(9), height: m(9))
                             VStack(alignment: .leading, spacing: m.sp4) {
                                 Capsule().fill(colors.textBody.opacity(0.3)).frame(width: m(23), height: m(3))
                                 Capsule().fill(colors.textSecondary.opacity(0.17)).frame(height: m(3))
