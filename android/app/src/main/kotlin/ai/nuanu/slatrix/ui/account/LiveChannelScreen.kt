@@ -57,6 +57,7 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
@@ -187,14 +188,14 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     LaunchedEffect(list, jumped) {
         if (!jumped) return@LaunchedEffect
         snapshotFlow { list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset }.collect { (index, offset) ->
-            place = if (index == 0 && offset == 0) null else rows.asReversed().getOrNull(index)?.let { it.id to offset }
+            place = if (list.atBottom()) null else rows.asReversed().getOrNull(index - 1)?.let { it.id to offset }
         }
     }
     val newest = state.rows.lastOrNull() as? ConversationMessage
     var following by remember { mutableStateOf(true) }
     LaunchedEffect(list) {
         snapshotFlow { list.isScrollInProgress }.collect { scrolling ->
-            following = !scrolling && list.firstVisibleItemIndex == 0 && list.firstVisibleItemScrollOffset == 0
+            following = !scrolling && list.atBottom()
         }
     }
     LaunchedEffect(newest?.id) {
@@ -216,15 +217,16 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         val index = snapshotFlow { rows.indexOfLast { it.id == target || (it as? ConversationMessage)?.eventId == target } }.first { it >= 0 }
         following = false
         try {
+            val listIndex = rows.size - index
             newLine.back?.takeIf { it.first == target }?.let { (_, offset) ->
-                list.scrollToItem(rows.size - 1 - index, offset)
+                list.scrollToItem(listIndex, offset)
                 return@LaunchedEffect
             }
-            list.scrollToItem(rows.size - 1 - index)
+            list.scrollToItem(listIndex)
             if (target == newLine.start) {
                 // The line tops the screen with the unread messages under it; fewer than a screenful sit at the bottom, and
                 // one message taller than the screen shows from its start.
-                val item = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == rows.size - 1 - index }
+                val item = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == listIndex }
                 val info = list.layoutInfo
                 val visible = info.viewportSize.height - info.beforeContentPadding - info.afterContentPadding
                 list.scrollBy(-(visible - (item?.size ?: 0)).toFloat())
@@ -248,11 +250,10 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 before[row.id]?.let { it != row } == true
             }.mapTo(mutableSetOf()) { it.id }
             // Reverse layout anchors the bottom row. While reading history, keep an unchanged reading row instead.
-            if (changed.isNotEmpty() && jumped && !list.isScrollInProgress &&
-                (list.firstVisibleItemIndex != 0 || list.firstVisibleItemScrollOffset != 0)) {
+            if (changed.isNotEmpty() && jumped && !list.isScrollInProgress && !list.atBottom()) {
                 val anchor = list.layoutInfo.visibleItemsInfo.lastOrNull { it.key in before && it.key !in changed }
                 val index = anchor?.let { item -> state.rows.indexOfLast { it.id == item.key } } ?: -1
-                if (index >= 0) list.requestScrollToItem(state.rows.lastIndex - index, -checkNotNull(anchor).offset)
+                if (index >= 0) list.requestScrollToItem(state.rows.size - index, -checkNotNull(anchor).offset)
             }
             previous.rows = state.rows
         }
@@ -261,18 +262,18 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     // Asks each time the newest row comes into view, and again after a page while it stays there.
     LaunchedEffect(list, state.focused && jumped, newest?.id) {
         if (!state.focused || !jumped) return@LaunchedEffect
-        snapshotFlow { list.layoutInfo.visibleItemsInfo.any { it.index == 0 } }.distinctUntilChanged().collect { visible ->
+        snapshotFlow { list.layoutInfo.visibleItemsInfo.any { it.index <= 1 } }.distinctUntilChanged().collect { visible ->
             if (!visible) return@collect
             // The oldest message on screen; the list is reversed, so it has the highest index.
             val top = list.layoutInfo.visibleItemsInfo.maxOf { it.index }
-            loadNewer((top downTo 0).firstNotNullOfOrNull { (rows.asReversed().getOrNull(it) as? ConversationMessage)?.eventId })
+            loadNewer((top downTo 1).firstNotNullOfOrNull { (rows.asReversed().getOrNull(it - 1) as? ConversationMessage)?.eventId })
         }
     }
     val loadOlder by rememberUpdatedState(onLoadOlder)
     // Asks again after every page while the top stays near, so pages of hidden events don't stall it.
     val canPage = !state.loading && state.hasMore && !state.loadingHistory && state.error == null
-    // Keyed on the oldest row too, since a page from the local cache can land before the screen ever sees it loading.
-    LaunchedEffect(list, canPage, state.rows.firstOrNull()?.id) {
+    // Keyed on row count too, so a fast cached page whose loadingHistory flips between frames still rearms paging.
+    LaunchedEffect(list, canPage, state.rows.firstOrNull()?.id, state.rows.size) {
         // Waits for the cached messages, so a conversation that has plenty doesn't page on open, and after a
         // failure waits for Retry.
         if (!canPage) return@LaunchedEffect
@@ -319,10 +320,13 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     // With one other person, the header already says who wrote what isn't yours.
     val named = !room.direct || room.memberCount > 2
     @Composable
-    fun messageRow(row: ConversationMessage, last: Boolean, lifted: Boolean = false) = LiveMessageRow(row, last, named,
-        state.ownUserId, state.names, actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null },
-        onOpenReplies.takeIf { threadRoot == null }, onOpenMessage, loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
-        loadThreadOrigin, actions.onQuote, lifted) { y -> menu = Pressed(row, last, y) }
+    fun messageRow(row: ConversationMessage, last: Boolean, lifted: Boolean = false) {
+        val rowNames = if (row.reactions.isNotEmpty() || row.runs.any { it.mention != null }) state.names else emptyMap()
+        LiveMessageRow(row, last, named,
+            state.ownUserId, rowNames, actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null },
+            onOpenReplies.takeIf { threadRoot == null }, onOpenMessage, loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
+            loadThreadOrigin, actions.onQuote, lifted) { y -> menu = Pressed(row, last, y) }
+    }
     var origin by remember { mutableFloatStateOf(0f) }
     Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInWindow().y }) {
     // The header and the composer float over the messages, which pass under both; the scaffold measures them first, so
@@ -353,6 +357,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     Box(Modifier.fillMaxSize().glassSource(glass).wallpaper()) {
         Box(Modifier.fillMaxSize()) {
             val rows = state.rows
+            val reversed = remember(rows) { rows.asReversed() }
             val firstReply = remember(rows, threadRoot) {
                 rows.getOrNull(rows.indexOfFirst { (it as? ConversationMessage)?.eventId == threadRoot } + 1)?.id.takeIf { threadRoot != null }
             }
@@ -360,7 +365,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             fun restarts(row: ConversationMessage) = row.id == firstReply || line != null && row.eventId == line
             // Slack's way back to the newest message, once the reader scrolls up or opened an older one.
             // Away as soon as new messages would no longer follow, even within a newest message taller than the screen.
-            val away by remember { derivedStateOf { list.firstVisibleItemIndex > 0 || list.firstVisibleItemScrollOffset > 0 } }
+            val away by remember { derivedStateOf { !list.atBottom() } }
             val jumpShows = jumped && (state.focused || away)
             // Opened at an older message, the button stays over the newest loaded one, so the list keeps room for it from its
             // first rows. Scrolled away, the newest is off screen and the room would only move what the reader is looking at.
@@ -370,9 +375,11 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 state = list, reverseLayout = true,
                 verticalArrangement = if (threadRoot != null) Arrangement.Top else Arrangement.Bottom,
                 contentPadding = PaddingValues(top = header + UiMetrics.GapSmall, bottom = footer + jumpRoom)) {
+                // Zero-height bottom anchor keeps index 0 pinned at the newest end when cold-opened replies arrive above it.
+                item(key = "bottom") { Box(Modifier) }
                 // The pressed message hides while its copy stands forward over the sheet.
                 val forward = menu?.message?.id.takeIf { sheetTop != null }
-                itemsIndexed(rows.asReversed(), key = { _, row -> row.id }) { index, row -> Box(Modifier.alpha(if (row.id != forward) 1f else 0f)) {
+                itemsIndexed(reversed, key = { _, row -> row.id }) { index, row -> Box(Modifier.alpha(if (row.id != forward) 1f else 0f)) {
                     when (row) {
                         is DayDivider -> DayDividerRow(row.timestamp)
                         is ConversationMessage -> Column(if (lit != null && row.eventId == lit) Modifier.background(colors.highlight) else Modifier) {
@@ -431,6 +438,10 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     }
     }
 }
+
+/** Whether the reversed timeline sits at its newest end (the zero-height bottom anchor or the newest row's start). */
+private fun LazyListState.atBottom() =
+    firstVisibleItemScrollOffset == 0 && (firstVisibleItemIndex == 0 || firstVisibleItemIndex == 1)
 
 /** A long-pressed message, as its row showed it, and where its top was in the window. */
 private data class Pressed(val message: ConversationMessage, val last: Boolean, val y: Float)

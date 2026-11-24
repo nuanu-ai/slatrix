@@ -215,11 +215,14 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
 
     suspend fun close() { withContext(NonCancellable) { lifetime.cancelAndJoin() } }
 
-    suspend fun flush(): Boolean = draftLock.withLock {
-        do {
-            if (!persist()) return@withLock false
-        } while (revision != savedRevision)
-        true
+    suspend fun flush(): Boolean {
+        if (revision == savedRevision) return true
+        return draftLock.withLock {
+            do {
+                if (!persist()) return@withLock false
+            } while (revision != savedRevision)
+            true
+        }
     }
 
     private suspend fun restore() = draftLock.withLock {
@@ -241,8 +244,8 @@ class MatrixComposer(scope: CoroutineScope, private val room: Room, private val 
     }
 
     private suspend fun persist(): Boolean {
-        if (!loaded) return false
         if (revision == savedRevision) return true
+        if (!loaded) return false
         val savingRevision = revision
         val draft = setAside ?: mutableState.value
         val text = draft.text

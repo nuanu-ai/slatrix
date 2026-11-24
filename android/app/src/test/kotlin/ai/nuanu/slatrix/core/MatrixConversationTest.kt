@@ -1398,6 +1398,41 @@ class MatrixConversationTest {
         thread.close()
     }
 
+    // capability: thread.open
+    @Test fun coldThreadWithNoCachedRepliesFetchesItsFirstPageImmediately() = runTest {
+        val root = ConversationMessage("channel-row", "\$root", "@mira:example.org", "Mira Chen", "Plan?", null,
+            1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "MC", 0)
+        val timeline = ConversationTimeline(emptyList())
+        timeline.onPage = {
+            timeline.emit(listOf(
+                TimelineDiff.PushFront(conversationItem("reply-1", "\$reply1", "First reply")),
+                TimelineDiff.PushFront(conversationItem("thread-root", "\$root", "Plan?")),
+            ))
+        }
+        timeline.page.complete(true)
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root", root = root)
+        val loaded = conversation.state.first { it.rows.messages.size == 2 && !it.hasMore }
+        assertEquals(listOf("Plan?", "First reply"), loaded.rows.messages.map { it.body })
+        conversation.close()
+    }
+
+    @Test fun resetAfterBlankPagesAllowsPagingOlderHistoryAgain() = runTest {
+        val timeline = ConversationTimeline(emptyList())
+        timeline.page.complete(false)
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root")
+        conversation.state.first { !it.loading && !it.loadingHistory && timeline.pages == 5 }
+        // A timeline Reset starts over from the live end, so blankPages must reset and allow loadOlder again.
+        timeline.emit(listOf(TimelineDiff.Reset(emptyList())))
+        conversation.state.first { it.hasMore }
+        timeline.onPage = {
+            timeline.emit(listOf(TimelineDiff.PushFront(conversationItem("r1", "\$r1", "After reset"))))
+        }
+        conversation.loadOlder()
+        val after = conversation.state.first { it.rows.messages.any { m -> m.body == "After reset" } }
+        assertEquals(listOf("After reset"), after.rows.messages.map { it.body })
+        conversation.close()
+    }
+
     private fun counted(body: String, replies: ULong) = TimelineItemContent.MsgLike(MsgLikeContent(
         MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent(body, null)), body, false, null)), null, null,
         object : ThreadSummary(NoHandle) {

@@ -188,8 +188,8 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
         // Its launchers stay registered whichever "+" opened it, so a pick always comes back.
         attach?.let { AttachSheet(attaching, it) { attaching = false } }
         // Slack's composer rests as one row, "+" and the field, a draft too; the toolbar shows once you tap in, so
-        // nothing grows while you read.
-        val expanded = focused || composer.target != null || formatting || picking || linking != null
+        // nothing grows while you read. A thread opened to reply starts expanded so the bar never jumps when focus lands.
+        val expanded = focused || (takesFocus && !tookFocus) || composer.target != null || formatting || picking || linking != null
         // Hiding the keyboard puts the composer back to rest, as in Slack.
         val keyboard = WindowInsets.isImeVisible
         var keyboardShown by remember { mutableStateOf(false) }

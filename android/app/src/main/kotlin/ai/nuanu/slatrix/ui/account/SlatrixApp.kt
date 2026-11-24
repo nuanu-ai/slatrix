@@ -261,7 +261,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                     onBack = { you = false }, avatarUrl = userAvatarUrl)
                             }.takeIf { you },
                             channels?.let { page -> WorkspaceCover("channels") {
-                                val openChannel: (RoomSummary) -> Unit = { room -> channels = null; workspace?.open(room) }
+                                val openChannel: (RoomSummary) -> Unit = { room -> channels = null; threads?.back(); workspace?.open(room) }
                                 if (page == ChannelPage.Browse) LiveBrowseChannels(rooms, selectedSpaceId, openChannel) { channels = null }
                                 else LiveCreateChannel(rooms, selectedSpaceId, roomList?.value?.spaces?.firstOrNull { it.id == selectedSpaceId }?.name,
                                     openChannel, { notice = it }) { channels = null }
@@ -276,13 +276,13 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 }, onEdit = { editingProfile = true }, knownAvatarUrl = userAvatarUrl.takeIf { id == userId }) { person = null }
                             } },
                             WorkspaceCover("new message") {
-                                LiveNewMessage(userId, people, rooms, { room -> newMessage = false; workspace?.open(room) }) { newMessage = false }
+                                LiveNewMessage(userId, people, rooms, { room -> newMessage = false; threads?.back(); workspace?.open(room) }) { newMessage = false }
                             }.takeIf { newMessage },
                             WorkspaceCover("edit profile") {
                                 LiveEditProfile((state as? AccountState.Connected)?.client, userId, people?.known(userId)?.takeIf { it.name != it.id }) { editingProfile = false }
                             }.takeIf { editingProfile },
                             invitation?.let { id -> WorkspaceCover("invitation") {
-                                LiveInvitation(id, rooms, { room -> invitation = null; workspace?.open(room) },
+                                LiveInvitation(id, rooms, { room -> invitation = null; threads?.back(); workspace?.open(room) },
                                     { space -> invitation = null; chooseSpace(space) }, { notice = it }) { invitation = null }
                             } },
                             WorkspaceCover("preferences") {
@@ -477,8 +477,12 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
     val state = rooms?.state?.collectAsState()?.value ?: RoomListState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    var pendingJump by remember(workspace) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     val open: (String) -> Unit = remember(rooms, workspace) {
-        { id -> rooms?.state?.value?.rooms?.firstOrNull { it.id == id }?.let { workspace?.open(it) } }
+        { id ->
+            pendingJump?.cancel()
+            rooms?.state?.value?.rooms?.firstOrNull { it.id == id }?.let { workspace?.open(it) }
+        }
     }
     val preferences = remember(userId, context) { WorkspacePreferences(context, userId) }
     var collapsed by remember(preferences) { mutableStateOf(preferences.collapsedSections) }
@@ -509,14 +513,16 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
             val context = LocalContext.current
             val recentStore = remember(context, userId) { RecentSearchStore(context, userId) }
             var recents by remember(recentStore) { mutableStateOf(recentStore.recents) }
+            DisposableEffect(Unit) { onDispose { pendingJump?.cancel() } }
             SearchScreen(inScope, userId, messages, { query -> if (query == null) search?.clear() else search?.search(query) },
                 { search?.loadMore() }, { hit ->
                     // A hit doesn't know its thread, so it is looked up first: a reply opens in its thread.
                     state.rooms.firstOrNull { it.id == hit.roomId }?.let { room ->
-                        scope.launch { jump(room, hit.eventId, workspace?.threadRootOf(room.id, hit.eventId)) }
+                        pendingJump?.cancel()
+                        pendingJump = scope.launch { jump(room, hit.eventId, workspace?.threadRootOf(room.id, hit.eventId)) }
                     }
                 }, recents, { recents = recentStore.add(it) }, people?.results?.collectAsState()?.value ?: PeopleSearchState(),
-                { people?.search(it) }, { onPerson(it.id, it.name) }, onClose, open)
+                { people?.search(it) }, { onPerson(it.id, it.name) }, { pendingJump?.cancel(); onClose() }, open)
         }, userAvatarUrl = userAvatarUrl, activityCount = {
             // As the Activity list is scoped; invitations show on Home whatever the workspace, so they all count.
             val inScope = state.rooms.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) }
