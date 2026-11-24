@@ -191,4 +191,41 @@ class PushDeliveryTest {
             workspace.close()
         }
     }
+
+    // capability: thread.from-notification
+    @Test fun tappingAReminderForAThreadReplyResolvesItsThreadBeforeJumping() = runTest {
+        val roomSummary = ai.nuanu.slatrix.core.RoomSummary("!team:example.org", "Team", false, "",
+            ai.nuanu.slatrix.core.UnreadBadge.None, "T", 0)
+        val client = object : Client(NoHandle) {
+            override fun getRoom(roomId: String): Room = object : Room(NoHandle) {
+                override fun id(): String = roomId
+                override fun ownUserId(): String = "@alex:example.org"
+                override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline =
+                    object : Timeline(NoHandle) {
+                        override suspend fun addListener(listener: TimelineListener): TaskHandle =
+                            object : TaskHandle(NoHandle) { override fun cancel() = Unit }
+                    }
+                override suspend fun loadComposerDraft(threadRoot: String?): ComposerDraft? = null
+                override suspend fun loadOrFetchEvent(eventId: String): TimelineEvent = object : TimelineEvent(NoHandle) {
+                    override fun threadRootEventId(): String? = if (eventId == "\$reply") "\$root" else null
+                }
+            }
+        }
+        val workspace = ai.nuanu.slatrix.core.MatrixWorkspace(backgroundScope, client)
+        val threads = ai.nuanu.slatrix.core.MatrixWorkspace(backgroundScope, client)
+        var cleared = false
+        try {
+            ai.nuanu.slatrix.ui.account.openNotification(
+                NotificationTarget("@alex:example.org", "!team:example.org", "\$reply", threadRoot = null),
+                roomSummary, workspace, threads,
+            ) { cleared = true }
+            assertTrue(cleared)
+            assertEquals("\$root", workspace.selected.value?.at)
+            assertEquals("\$root", threads.selected.value?.threadRoot)
+            assertEquals("\$reply", threads.selected.value?.at)
+        } finally {
+            threads.close()
+            workspace.close()
+        }
+    }
 }

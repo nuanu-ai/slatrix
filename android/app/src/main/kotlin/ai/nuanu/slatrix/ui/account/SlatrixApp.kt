@@ -249,20 +249,21 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         previous = current
                     }
                 }
-                LaunchedEffect(notification, userId, rooms, workspace) {
+                LaunchedEffect(notification, userId, rooms, workspace, threads) {
                     val target = notification ?: return@LaunchedEffect
                     if (target.userId != userId) {
                         onNotificationHandled(target)
                     } else if (workspace != null && rooms != null) {
                         val room = rooms.state.mapNotNull { target.roomFor(userId, it.rooms) }.first()
-                        you = false
-                        preferences = false
-                        invitation = null
-                        channels = null
-                        person = null
-                        editingProfile = false
-                        newMessage = false
-                        jump(room, target.eventId, target.threadRoot)
+                        openNotification(target, room, workspace, threads) {
+                            you = false
+                            preferences = false
+                            invitation = null
+                            channels = null
+                            person = null
+                            editingProfile = false
+                            newMessage = false
+                        }
                         onNotificationHandled(target)
                     }
                 }
@@ -601,3 +602,12 @@ private fun LiveActivity(activity: MatrixActivity?, rooms: MatrixRooms?, threads
 }
 
 private enum class ChannelPage { Browse, Create }
+
+/** Resolves a tapped notification's thread root when absent (e.g. a Later reminder) before jumping to it. */
+internal suspend fun openNotification(target: NotificationTarget, room: RoomSummary, workspace: MatrixWorkspace,
+    threads: MatrixWorkspace?, clearOverlays: () -> Unit = {}) {
+    val threadRoot = target.threadRoot ?: workspace.threadRootOf(room.id, target.eventId)
+    clearOverlays()
+    workspace.jumpTo(room, target.eventId, threadRoot)
+    if (threadRoot != null) threads?.open(room, threadRoot, at = target.eventId) else threads?.back()
+}
