@@ -10,6 +10,7 @@ import ai.nuanu.slatrix.core.SearchHit
 import ai.nuanu.slatrix.core.SpaceSummary
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
+import ai.nuanu.slatrix.core.AndroidTheme
 import ai.nuanu.slatrix.ui.account.LivePreferencesScreen
 import ai.nuanu.slatrix.ui.account.LiveYouScreen
 import ai.nuanu.slatrix.ui.account.NotificationRows
@@ -85,7 +86,7 @@ class LiveScreenshots(private val tab: String, private val dark: Boolean) {
                     Box(Modifier.fillMaxWidth().height(StatusBar).background(colors.canvas))
                     Box(Modifier.weight(1f)) {
                         if (tab == "You") LiveYouScreen("@alex:example.org", "Alex Doe", {}, {}, onBack = {})
-                        else if (tab == "Preferences") LivePreferencesScreen(dark, null, false, {}, {}, {}) {
+                        else if (tab == "Preferences") LivePreferencesScreen(dark, null, AndroidTheme.Neutral, {}, {}, {}) {
                             NotificationRows(NotifyAbout.DirectAndMentions, true, null, {}, {})
                         }
                         else LiveHomeScreen("@alex:example.org", RoomListState(rooms, loading = false, spaces = spaces, spacesKnown = true),

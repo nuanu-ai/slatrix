@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix.ui.designsystem
 
+import ai.nuanu.slatrix.core.AndroidTheme
 import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -35,8 +36,8 @@ class AvatarContrastTest {
         lateinit var view: View
         compose.setContent {
             view = LocalView.current
-            for (dark in listOf(false, true)) for (wallpaper in listOf(false, true)) {
-                SlatrixTheme(dark = dark, wallpaperColors = wallpaper) { themes += SlatrixTheme.colors }
+            for (theme in AndroidTheme.entries) for (dark in listOf(false, true)) for (highContrast in listOf(false, true)) {
+                SlatrixTheme(dark = dark, theme = theme, increaseContrast = highContrast) { themes += SlatrixTheme.colors }
             }
             Column {
                 for ((index, color) in DesignTokens.avatarColors.withIndex()) {

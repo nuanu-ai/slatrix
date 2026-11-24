@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix
 
 import android.app.Application
+import ai.nuanu.slatrix.core.AndroidTheme
 import ai.nuanu.slatrix.core.NotificationPreferences
 import ai.nuanu.slatrix.core.NotifyAbout
 import ai.nuanu.slatrix.ui.account.LivePreferencesScreen
@@ -41,7 +42,7 @@ class NotificationSettingsScreenTest {
         val previews = mutableStateOf(true)
         compose.setContent {
             SlatrixTheme {
-                LivePreferencesScreen(false, null, false, {}, {}, {}) {
+                LivePreferencesScreen(false, null, AndroidTheme.Neutral, {}, {}, {}) {
                     NotificationRows(notifyAbout.value, previews.value, null, { notifyAbout.value = it }, { previews.value = it })
                 }
             }
@@ -61,9 +62,10 @@ class NotificationSettingsScreenTest {
 
     @Test fun everyPreferenceTitleAndHeadingStartsAtOneInset() {
         compose.setContent {
-            SlatrixTheme { LivePreferencesScreen(false, null, false, {}, {}, {}) { NotificationRows(NotifyAbout.All, true, null, {}, {}) } }
+            SlatrixTheme { LivePreferencesScreen(false, null, AndroidTheme.Neutral, {}, {}, {}) { NotificationRows(NotifyAbout.All, true, null, {}, {}) } }
         }
-        val starts = listOf("Notifications", "Notify me about", "Show message previews", "Appearance", "Color mode", "Colors", "From your wallpaper")
+        val starts = listOf("Notifications", "Notify me about", "Show message previews", "Appearance", "Color mode",
+            "Colored", "Chat wallpaper", "Increase contrast", "Message text size")
             .associateWith { compose.onNodeWithText(it, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.left }
         assertEquals(starts.toString(), 1, starts.values.distinct().size)
     }
