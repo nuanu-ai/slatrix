@@ -175,7 +175,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     var jumped by remember(opensAt, state.jump) { mutableStateOf(opensAt == null) }
     val latest = state.rows.lastOrNull { it is ConversationMessage && it.eventId != null } as ConversationMessage?
     val read by rememberUpdatedState(onRead)
-    LaunchedEffect(latest?.id, latest?.eventId, resumed, jumped) {
+    LaunchedEffect(latest?.id, latest?.eventId, state.ackToken, resumed, jumped) {
         val event = latest?.eventId ?: return@LaunchedEffect
         if (!resumed || !jumped) return@LaunchedEffect
         snapshotFlow {

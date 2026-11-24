@@ -107,6 +107,80 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: conversation.read
+    @Test fun incomingOtherReactionOrEditBumpsAckTokenAndSendsFreshReadReceipt() = runTest {
+        fun sent(id: String) = ReactionSenderData(id, 1_700_000_000_000u, null)
+        val timeline = ConversationTimeline(listOf(
+            conversationItem("a", "\$a", "First"),
+            conversationItem("b", "\$b", "Second", sender = "@me:example.org", editable = true),
+        ))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        conversation.state.first { it.rows.messages.size == 2 }
+        assertTrue(conversation.markRead("\$b"))
+        assertEquals(ReceiptType.READ to "\$b", timeline.receipts.receive())
+        assertEquals(ReceiptType.FULLY_READ to "\$b", timeline.receipts.receive())
+        val initialAck = conversation.state.value.ackToken
+        assertTrue(conversation.markRead("\$b"))
+        assertTrue("Already read at this ackToken sends no duplicate receipt", timeline.receipts.tryReceive().isFailure)
+
+        // Older history paging, own reaction, and read-receipt echoes must not bump ackToken.
+        timeline.emit(listOf(TimelineDiff.PushFront(
+            conversationItem("old", "\$old", "Earlier", reactions = listOf(Reaction("🔥", listOf(sent("@sam:example.org"))))))))
+        conversation.state.first { it.rows.messages.first().eventId == "\$old" }
+        assertEquals(initialAck, conversation.state.value.ackToken)
+
+        timeline.emit(listOf(TimelineDiff.Set(2u,
+            conversationItem("b", "\$b", "Second", sender = "@me:example.org", editable = true,
+                reactions = listOf(Reaction("👍", listOf(sent("@me:example.org")))),
+                readBy = listOf("@sam:example.org")))))
+        conversation.state.first { it.rows.messages.last().seen }
+        assertEquals(initialAck, conversation.state.value.ackToken)
+
+        // Someone else reacting to an earlier message bumps ackToken and allows markRead to send a fresh receipt.
+        timeline.unshownLatest = "\$react1"
+        timeline.emit(listOf(TimelineDiff.Set(1u,
+            conversationItem("a", "\$a", "First", reactions = listOf(Reaction("👍", listOf(sent("@sam:example.org"))))))))
+        val afterReaction = conversation.state.first { it.ackToken > initialAck }.ackToken
+        assertTrue(conversation.markRead("\$b"))
+        assertEquals(ReceiptType.READ to "\$react1", timeline.receipts.receive())
+        assertEquals(ReceiptType.FULLY_READ to "\$b", timeline.receipts.receive())
+
+        // Removing that reaction must not trigger another ack.
+        timeline.emit(listOf(TimelineDiff.Set(1u, conversationItem("a", "\$a", "First"))))
+        conversation.state.first { it.rows.messages[1].reactions.isEmpty() }
+        assertEquals(afterReaction, conversation.state.value.ackToken)
+
+        // Someone else editing an existing message bumps ackToken and sends a fresh receipt.
+        timeline.unshownLatest = "\$edit1"
+        val edited = TimelineItemContent.MsgLike(MsgLikeContent(
+            MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent("First edited", null)), "First edited", true, null)),
+            null, null, null))
+        timeline.emit(listOf(TimelineDiff.Set(1u, conversationItem("a", "\$a", "First edited", content = edited))))
+        conversation.state.first { it.ackToken > afterReaction }
+        assertTrue(conversation.markRead("\$b"))
+        assertEquals(ReceiptType.READ to "\$edit1", timeline.receipts.receive())
+        assertEquals(ReceiptType.FULLY_READ to "\$b", timeline.receipts.receive())
+        conversation.close()
+    }
+
+    // capability: conversation.read
+    @Test fun revisitingAWarmConversationClearsLastReadSoMarkReadSendsAgain() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$a", "First")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        conversation.state.first { it.rows.messages.size == 1 }
+        assertTrue(conversation.markRead("\$a"))
+        assertEquals(ReceiptType.READ to "\$a", timeline.receipts.receive())
+        assertEquals(ReceiptType.FULLY_READ to "\$a", timeline.receipts.receive())
+
+        conversation.clearVisit()
+        conversation.revisit()
+        timeline.unshownLatest = "\$reactWhileAway"
+        assertTrue(conversation.markRead("\$a"))
+        assertEquals(ReceiptType.READ to "\$reactWhileAway", timeline.receipts.receive())
+        assertEquals(ReceiptType.FULLY_READ to "\$a", timeline.receipts.receive())
+        conversation.close()
+    }
+
     @Test fun retryLoadsFailedHistoryAgainWithoutLosingMessages() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         timeline.pageFailure = IllegalStateException("Offline")

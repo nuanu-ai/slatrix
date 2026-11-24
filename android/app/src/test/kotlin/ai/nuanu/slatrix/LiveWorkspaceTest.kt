@@ -177,6 +177,24 @@ class LiveWorkspaceTest {
         compose.waitUntil { read == "\$Next" }
     }
 
+    // capability: conversation.read
+    @Test fun anUpdatedAckTokenMarksTheLatestVisibleMessageReadAgain() {
+        val room = RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)
+        fun message(id: String) = ConversationMessage(id, "\$$id", "@sam:example.org", "Sam", id, null,
+            0, MessageKind.Text, MessageSendState.Sent, false, "S", 0)
+        val timeline = mutableStateOf(ConversationState(listOf(message("First")), loading = false, hasMore = false))
+        val reads = mutableListOf<String>()
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, timeline.value, ComposerState(loading = false), {}, {}, {}, {}, { reads += it }, {}, {}, {})
+            }
+        }
+        compose.waitUntil { reads.size == 1 }
+        compose.runOnIdle { timeline.value = timeline.value.copy(ackToken = timeline.value.ackToken + 1) }
+        compose.waitForIdle()
+        assertEquals(listOf("\$First", "\$First"), reads)
+    }
+
     @Test fun leavingAPageDiscardsItsSavedStateSoReopeningStartsFresh() {
         val open = mutableStateOf(true)
         var mutate: (() -> Unit)? = null
