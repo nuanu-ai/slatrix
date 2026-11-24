@@ -305,7 +305,9 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                             { item, at -> laterSync.remind(item.roomId, item.eventId, at) },
                                             { item -> setSaved(item.roomId, item.eventId, false) }), laterPreviews, laterList)
                                 }) {
-                                LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump) { list ->
+                                LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump,
+                                    onInvitation = { invitation = it },
+                                    onOpenRoom = { room -> threads?.back(); workspace?.open(room) }) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list
                                 }
                             }
@@ -535,14 +537,19 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
 @Composable
 private fun LiveActivity(activity: MatrixActivity?, rooms: MatrixRooms?, threads: MatrixWorkspace?,
     selectedSpaceId: String?, threadFeed: ThreadFeedState, jump: (RoomSummary, String, String?) -> Unit,
+    onInvitation: (String) -> Unit, onOpenRoom: (RoomSummary) -> Unit,
     onThreadRooms: (List<RoomSummary>) -> Unit) {
     val all = activity?.items?.collectAsState()?.value.orEmpty()
-    val known = rooms?.state?.collectAsState()?.value?.rooms.orEmpty()
+    val roomState = rooms?.state?.collectAsState()?.value
+    val known = roomState?.rooms.orEmpty()
+    val invitations = roomState?.invitations.orEmpty()
     fun room(id: String) = known.firstOrNull { it.id == id }
+    val inScope = remember(known, selectedSpaceId) { known.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) } }
+    val mentionRooms = remember(inScope) { inScope.filter { it.mentions > 0 } }
     val items = remember(all, known, selectedSpaceId) { all.inWorkspace(known, selectedSpaceId).readWith(known) }
     ActivityScreen(items, { item -> activity?.markRead(item.id); room(item.roomId)?.let { jump(it, item.eventId, item.threadRoot) } },
-        { thread -> room(thread.roomId)?.let { threads?.open(it, thread) } }) {
-        val inScope = remember(known, selectedSpaceId) { known.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) } }
+        { thread -> room(thread.roomId)?.let { threads?.open(it, thread) } },
+        invitations = invitations, mentionRooms = mentionRooms, onOpenInvitation = onInvitation, onOpenRoom = onOpenRoom) {
         // Asks for the feed only while the Threads filter shows, and again only when the set of conversations changes.
         LaunchedEffect(inScope) { onThreadRooms(inScope) }
         ThreadsFeed(threadFeed, it)
