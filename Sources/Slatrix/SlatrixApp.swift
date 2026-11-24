@@ -108,8 +108,7 @@ struct SlatrixApp: App {
         }
         #if DEBUG
         Window("Component Gallery", id: "gallery") {
-            ScrollView([.vertical, .horizontal]) { ComponentGallery() }.environmentObject(appearance)
-                .environment(\.metrics, Metrics()).preferredColorScheme(appearance.preferredColorScheme)
+            ComponentGalleryHost(source: appearance)
         }
         #endif
     }

@@ -19,8 +19,10 @@ struct WindowHostedTests {
 
         init(zoom: Double = 1) {
             _ = NSApplication.shared
-            // A pane dragged or a sidebar hidden in an earlier test stays so; every window here opens as it first would.
-            for key in ["layout.paneWidth", "layout.sidebarHidden"] { UserDefaults.standard.removeObject(forKey: key) }
+            // A pane dragged or a sidebar/workspace left in an earlier test stays so; every window here opens clean.
+            for key in ["layout.paneWidth", "layout.sidebarHidden", "workspace.preview", "room.preview"] {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
             // Start from a clean, deterministic appearance whatever another test or run left behind.
             appearance.theme = .neutral
             appearance.increaseContrast = false
@@ -603,7 +605,7 @@ struct WindowHostedTests {
     func zeroLayoutShiftAcrossThemes(dark: Bool) async throws {
         let saved = [
             "appearance.mode", "appearance.theme", "appearance.chatWallpaper", "appearance.increaseContrast",
-            "appearance.workspaceThemes",
+            "appearance.workspaceThemes", "workspace.preview", "room.preview",
         ].map { ($0, UserDefaults.standard.object(forKey: $0)) }
         defer { for (key, value) in saved { UserDefaults.standard.set(value, forKey: key) } }
         let harness = Harness()
@@ -652,20 +654,41 @@ struct WindowHostedTests {
             #expect(abs(close.minY - baseClose.minY) < 0.5, "\(theme) window buttons shifted")
             #expect(abs(hideSidebar.minY - baseHideSidebar.minY) < 0.5, "\(theme) sidebar header shifted")
 
+            if theme == .glass {
+                let effects = harness.shown().compactMap { $0 as? NSVisualEffectView }.filter {
+                    $0.material == .sidebar
+                }
+                #expect(
+                    !effects.isEmpty
+                        && effects.allSatisfy { $0.blendingMode == .behindWindow && $0.maskImage != nil },
+                    "Docked Glass sidebar should use masked behind-window vibrancy")
+            }
+
             // Variant B: the margin and resize gap around the floating sidebar match the window canvas,
-            // while colored themes paint their distinct color inside the floating sidebar panel.
+            // while colored themes paint their distinct hue and built-in vertical gradient inside the panel.
             if theme.isColored {
-                let handle = Metrics()(SidebarLayout.handleWidth)
+                let m = Metrics()
+                let handle = m(SidebarLayout.handleWidth)
                 let marginPoint = CGPoint(x: 2, y: 180)
                 let gapPoint = CGPoint(x: conversationLeft - handle / 2, y: 180)
                 // Pure open canvas in the trailing area of the conversation pane (same display profile as margin/gap).
                 let canvasPoint = CGPoint(x: timeline.maxX - 40, y: 180)
-                // Top center of the floating sidebar header: between the window buttons and Hide sidebar, pure fill.
-                let sidebarPoint = CGPoint(x: 150, y: harness.hosting.bounds.height - 26)
+                // Unobstructed top header fill and bottom footer padding fill inside the floating sidebar panel.
+                let sidebarTopPoint = CGPoint(x: 150, y: harness.hosting.bounds.height - 26)
+                let sidebarBottomPoint = CGPoint(x: 150, y: m.sidebarInset + 4)
                 func colorDistance(_ first: NSColor, _ second: NSColor) -> CGFloat {
                     abs(first.redComponent - second.redComponent)
                         + abs(first.greenComponent - second.greenComponent)
                         + abs(first.blueComponent - second.blueComponent)
+                }
+                func matchesHue(_ color: NSColor) -> Bool {
+                    switch theme {
+                    case .aubergine:
+                        color.redComponent > color.greenComponent && color.blueComponent > color.greenComponent
+                    case .jade: color.greenComponent > color.redComponent && color.greenComponent > color.blueComponent
+                    case .ocean: color.blueComponent > color.redComponent && color.blueComponent > color.greenComponent
+                    default: true
+                    }
                 }
                 var lastDiag = ""
                 #expect(
@@ -674,17 +697,34 @@ struct WindowHostedTests {
                             let canvasColor = harness.compositedColor(in: bitmap, at: canvasPoint),
                             let marginColor = harness.compositedColor(in: bitmap, at: marginPoint),
                             let gapColor = harness.compositedColor(in: bitmap, at: gapPoint),
-                            let sidebarColor = harness.compositedColor(in: bitmap, at: sidebarPoint)
+                            let topColor = harness.compositedColor(in: bitmap, at: sidebarTopPoint),
+                            let bottomColor = harness.compositedColor(in: bitmap, at: sidebarBottomPoint)
                         else { return false }
                         let marginDist = colorDistance(marginColor, canvasColor)
                         let gapDist = colorDistance(gapColor, canvasColor)
-                        let sidebarDist = colorDistance(sidebarColor, canvasColor)
+                        let sidebarDist = colorDistance(topColor, canvasColor)
+                        let gradientDist = colorDistance(topColor, bottomColor)
+                        let hueOK = matchesHue(topColor)
                         lastDiag = String(
-                            format: "marginDist=%.3f gapDist=%.3f sidebarDist=%.3f", marginDist, gapDist, sidebarDist)
-                        return marginDist < 0.03 && gapDist < 0.03 && sidebarDist > 0.12
-                    }, "\(theme) dark=\(dark): floating colored sidebar should sit on window canvas (\(lastDiag))")
+                            format: "marginDist=%.3f gapDist=%.3f sidebarDist=%.3f grad=%.3f hue=%@",
+                            marginDist, gapDist, sidebarDist, gradientDist, hueOK ? "ok" : "bad")
+                        return marginDist < 0.03 && gapDist < 0.03 && sidebarDist > 0.12 && gradientDist > 0.08
+                            && hueOK
+                    }, "\(theme) dark=\(dark): floating colored sidebar should render gradient on canvas (\(lastDiag))")
             }
         }
+
+        // In the narrow-window drawer over a dimmed conversation, Glass blurs within the window rather than behind it.
+        harness.appearance.theme = .glass
+        harness.resize(700)
+        #expect(await eventually { !harness.sidebarShown })
+        harness.menu("toggle-sidebar")
+        #expect(await eventually { harness.sidebarShown })
+        let drawerEffects = harness.shown().compactMap { $0 as? NSVisualEffectView }.filter { $0.material == .sidebar }
+        #expect(
+            !drawerEffects.isEmpty
+                && drawerEffects.allSatisfy { $0.blendingMode == .withinWindow && $0.maskImage != nil },
+            "Drawer Glass sidebar should use masked within-window vibrancy")
     }
 
     // capability: app.themes
@@ -753,7 +793,7 @@ struct WindowHostedTests {
     func perWorkspaceThemeSwitch() async throws {
         let saved = [
             "appearance.mode", "appearance.theme", "appearance.chatWallpaper", "appearance.increaseContrast",
-            "appearance.workspaceThemes",
+            "appearance.workspaceThemes", "workspace.preview", "room.preview",
         ].map { ($0, UserDefaults.standard.object(forKey: $0)) }
         defer { for (key, value) in saved { UserDefaults.standard.set(value, forKey: key) } }
         let harness = Harness()
@@ -804,7 +844,7 @@ struct WindowHostedTests {
     func preferencesThemeControlsAndScope() async throws {
         let saved = [
             "appearance.mode", "appearance.theme", "appearance.chatWallpaper", "appearance.increaseContrast",
-            "appearance.workspaceThemes",
+            "appearance.workspaceThemes", "workspace.preview", "room.preview",
         ].map { ($0, UserDefaults.standard.object(forKey: $0)) }
         defer { for (key, value) in saved { UserDefaults.standard.set(value, forKey: key) } }
         let harness = Harness()
@@ -856,6 +896,62 @@ struct WindowHostedTests {
         #expect(reset.accessibilityPerformPress?() == true)
         #expect(await eventually { harness.appearance.workspaceThemes[activeWorkspace.id] == nil })
         #expect(harness.appearance.effectiveTheme(for: activeWorkspace.id) == .glass)
+    }
+
+    // capability: app.themes
+    @Test("Narrow Preferences fits long workspace names without clipping and resets scope if the workspace disappears")
+    func preferencesNarrowScopeAndStaleWorkspace() async throws {
+        let saved = [
+            "appearance.mode", "appearance.theme", "appearance.chatWallpaper", "appearance.increaseContrast",
+            "appearance.workspaceThemes", "workspace.preview", "room.preview",
+        ].map { ($0, UserDefaults.standard.object(forKey: $0)) }
+        defer { for (key, value) in saved { UserDefaults.standard.set(value, forKey: key) } }
+        let harness = Harness()
+        defer { harness.close() }
+        let longName = "Enterprise Design Systems Architecture & Platform Operations"
+        let firstSpaceID = try #require(harness.matrix.workspaces.first?.id)
+        harness.matrix.workspaces[0] = Workspace(id: firstSpaceID, name: longName)
+        let secondSpaceID = "!second.space:example.org"
+        harness.matrix.workspaces.append(Workspace(id: secondSpaceID, name: "Engineering"))
+        harness.appearance.theme = .neutral
+        harness.appearance.setTheme(.ocean, for: firstSpaceID)
+        harness.resize(SidebarLayout.readableWidth)
+        #expect(await harness.settle())
+
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+
+        harness.menu("preferences")
+        #expect(
+            await eventually { !harness.accessible(longName).isEmpty && !harness.accessible("Use default").isEmpty })
+
+        // Glass miniature previews never mount live behind-window NSVisualEffectViews when main theme is Neutral.
+        let sidebarVibrancy = harness.shown().compactMap { $0 as? NSVisualEffectView }.filter {
+            $0.material == .sidebar
+        }
+        #expect(sidebarVibrancy.isEmpty)
+
+        // Every scope control and theme tile stays horizontally inside the 480 pt window without clipping, with full
+        // accessible names preserved.
+        let bounds = harness.window.frame
+        for label in ["All workspaces", longName, "Use default"] + ColorTheme.allCases.map(\.name) {
+            let element = try #require(harness.accessible(label).first, "Missing \(label) at narrow width")
+            let frame = try #require(element.accessibilityFrame?())
+            #expect(frame.width > 0, "\(label) has zero width")
+            #expect(
+                frame.minX >= bounds.minX - 1 && frame.maxX <= bounds.maxX + 1,
+                "\(label) frame \(frame) overflows window \(bounds)")
+        }
+
+        // Removing the open workspace while Preferences is scoped to it resets scope to All workspaces without writing
+        // into another workspace or mutating the removed workspace's override.
+        harness.matrix.workspaces.removeAll { $0.id == firstSpaceID }
+        #expect(await eventually { harness.accessible(longName).isEmpty && harness.accessible("Use default").isEmpty })
+        let jadeTile = try #require(harness.accessible("Jade").first)
+        #expect(jadeTile.accessibilityPerformPress?() == true)
+        #expect(await eventually { harness.appearance.theme == .jade })
+        #expect(harness.appearance.workspaceThemes[secondSpaceID] == nil)
+        #expect(harness.appearance.workspaceThemes[firstSpaceID] == .ocean)
     }
 
     @Test("Each divider takes the pointer a few points to either side of its line")

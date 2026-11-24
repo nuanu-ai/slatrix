@@ -50,10 +50,14 @@ extension View {
 struct SidebarBackground: View {
     let colors: AppColors
     var cornerRadius: CGFloat = 0
+    /// In the narrow-window drawer over a dimmed conversation, blur within the window instead of punching through to
+    /// the desktop behind it.
+    var inDrawer = false
 
     var body: some View {
         if colors.translucentSidebar {
-            SidebarMaterial(cornerRadius: cornerRadius).overlay(colors.sidebar)
+            SidebarMaterial(cornerRadius: cornerRadius, blendingMode: inDrawer ? .withinWindow : .behindWindow)
+                .overlay(colors.sidebar)
         } else if colors.coloredSidebar {
             // Mostly downward, so the floating sidebar island carries a subtle vertical drift.
             LinearGradient(
@@ -68,10 +72,11 @@ struct SidebarBackground: View {
     }
 }
 
-/// Apple's sidebar material, letting the desktop show through and dimming while the window is inactive, masked to
-/// `cornerRadius` so behind-window vibrancy never bleeds outside the floating panel's rounded corners.
+/// Apple's sidebar material, letting the desktop (or in-window backdrop in the drawer) show through and dimming while
+/// the window is inactive, masked to `cornerRadius` so vibrancy never bleeds outside the floating panel's corners.
 private struct SidebarMaterial: NSViewRepresentable {
     var cornerRadius: CGFloat = 0
+    var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
 
     final class MaskedVisualEffectView: NSVisualEffectView {
         var appliedCornerRadius: CGFloat = -1
@@ -79,12 +84,13 @@ private struct SidebarMaterial: NSViewRepresentable {
 
     func makeNSView(context: Context) -> MaskedVisualEffectView {
         let view = MaskedVisualEffectView()
-        (view.material, view.blendingMode, view.state) = (.sidebar, .behindWindow, .followsWindowActiveState)
+        (view.material, view.blendingMode, view.state) = (.sidebar, blendingMode, .followsWindowActiveState)
         applyMask(to: view)
         return view
     }
 
     func updateNSView(_ view: MaskedVisualEffectView, context: Context) {
+        if view.blendingMode != blendingMode { view.blendingMode = blendingMode }
         applyMask(to: view)
     }
 

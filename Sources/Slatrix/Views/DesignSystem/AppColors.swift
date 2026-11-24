@@ -20,6 +20,7 @@ struct AppColors {
     let theme: ColorTheme
     let highContrast: Bool
     private var neutrals: Neutrals
+    private var isSidebarContext = false
 
     init(dark: Bool, accent: NSColor? = nil, theme: ColorTheme = .glass, highContrast: Bool = false) {
         self.dark = dark
@@ -168,8 +169,9 @@ struct AppColors {
     /// The colors of what sits inside the floating sidebar: deeper text over translucent glass, and crisp light text
     /// with a white accent over colored sidebar islands.
     var onSidebar: AppColors {
-        guard let surface = neutrals.sidebarSurface else { return self }
         var colors = self
+        colors.isSidebarContext = true
+        guard let surface = neutrals.sidebarSurface else { return colors }
         (colors.neutrals.secondary, colors.neutrals.tertiary) = (surface.secondary, surface.tertiary)
         guard surface.colored else {
             if surface.translucent && !dark {
@@ -197,6 +199,56 @@ struct AppColors {
             let (a, b) = (Double(top >> shift & 255), Double(bottom >> shift & 255))
             return mixed | UInt32((a * amount + b * (1 - amount)).rounded()) << shift
         }
+    }
+
+    private static func nsColor(hex: UInt32, alpha: CGFloat = 1) -> NSColor {
+        NSColor(
+            srgbRed: CGFloat((hex >> 16) & 255) / 255, green: CGFloat((hex >> 8) & 255) / 255,
+            blue: CGFloat(hex & 255) / 255, alpha: alpha)
+    }
+
+    private static func composite(_ top: NSColor, over bottom: NSColor) -> NSColor {
+        let top = top.usingColorSpace(.sRGB) ?? top
+        let bottom = bottom.usingColorSpace(.sRGB) ?? bottom
+        let a = top.alphaComponent
+        return NSColor(
+            srgbRed: top.redComponent * a + bottom.redComponent * (1 - a),
+            green: top.greenComponent * a + bottom.greenComponent * (1 - a),
+            blue: top.blueComponent * a + bottom.blueComponent * (1 - a), alpha: 1)
+    }
+
+    private static func relativeLuminance(_ color: NSColor) -> Double {
+        let rgb = color.usingColorSpace(.sRGB) ?? color
+        func linear(_ value: CGFloat) -> Double {
+            let v = Double(value)
+            return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(rgb.redComponent) + 0.7152 * linear(rgb.greenComponent) + 0.0722
+            * linear(rgb.blueComponent)
+    }
+
+    private static func contrastRatio(_ first: NSColor, _ second: NSColor) -> Double {
+        let l1 = relativeLuminance(first)
+        let l2 = relativeLuminance(second)
+        return (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
+    }
+
+    /// Leaves `candidate` untouched when it already clears `minimum` contrast against `background`, and otherwise
+    /// steps minimally toward `target` so bright macOS accents (such as Yellow) remain WCAG AA legible.
+    private static func ensuringContrast(
+        _ candidate: NSColor, against background: NSColor, toward target: NSColor, minimum: Double = 4.5
+    ) -> NSColor {
+        let base = candidate.usingColorSpace(.sRGB) ?? candidate
+        let bg = background.usingColorSpace(.sRGB) ?? background
+        if contrastRatio(base, bg) >= minimum { return base }
+        var low: CGFloat = 0
+        var high: CGFloat = 1
+        for _ in 0..<14 {
+            let mid = (low + high) / 2
+            let stepped = base.blended(withFraction: mid, of: target) ?? target
+            if contrastRatio(stepped, bg) >= minimum { high = mid } else { low = mid }
+        }
+        return base.blended(withFraction: high, of: target) ?? target
     }
 
     // MARK: Text
@@ -247,23 +299,54 @@ struct AppColors {
     var selection: Color { ink.opacity((dark ? 0.1 : 0.07) * neutrals.lines) }
     /// Words a search matched, in a result.
     var highlight: Color { Color(hex: 0xffcc00).opacity(dark ? 0.3 : 0.4) }
-    /// The keyboard focus ring around buttons, rows and fields: the system's, in the accent.
+    /// The keyboard focus ring around buttons, rows and fields: the system's in normal mode, or a contrast-checked
+    /// ring on colored sidebars and under Increase contrast so keyboard focus never fades into the surface.
     static var focusRing: Color { Color(nsColor: .keyboardFocusIndicatorColor) }
-    var focusRing: Color { Self.focusRing }
+    var focusRing: Color {
+        if isSidebarContext && coloredSidebar { return .white }
+        if highContrast { return accent }
+        let surface = Self.nsColor(hex: isSidebarContext ? neutrals.sidebar : neutrals.canvas)
+        let resolved = Self.resolve(.keyboardFocusIndicatorColor, dark: dark)
+        if Self.contrastRatio(Self.composite(resolved, over: surface), surface) >= 3.0 {
+            return Self.focusRing
+        }
+        return accent
+    }
 
     // MARK: Accent and status
 
     /// The system accent as a fill: the one main button, the send button, badges, the highlighted menu row. Deepened
-    /// slightly under white text so filled buttons meet WCAG AA contrast.
-    var accentFill: Color {
-        guard neutrals.onAccent == 0xffffff else { return Color(nsColor: accentBase) }
-        return Color(nsColor: accentBase.blended(withFraction: dark ? 0.24 : 0.16, of: .black) ?? accentBase)
+    /// under white text so filled buttons meet WCAG AA contrast for every macOS accent color, including Yellow.
+    var accentFill: Color { Color(nsColor: resolvedAccentFill) }
+    private var resolvedAccentFill: NSColor {
+        guard neutrals.onAccent == 0xffffff else { return accentBase }
+        let stepped = accentBase.blended(withFraction: dark ? 0.24 : 0.16, of: .black) ?? accentBase
+        return Self.ensuringContrast(stepped, against: Self.nsColor(hex: neutrals.onAccent), toward: .black)
     }
     /// The accent as text and icons: links, the open conversation's icon, a mention. Deepened in light mode so links
     /// stay readable over chat wallpaper doodles, and lifted in dark mode so it reads as text on the canvas.
     var accent: Color {
+        if isSidebarContext && coloredSidebar { return .white }
         let depth: CGFloat = dark ? (highContrast ? 0.3 : 0.2) : (highContrast ? 0.4 : 0.3)
-        return Color(nsColor: accentBase.blended(withFraction: depth, of: dark ? .white : .black) ?? accentBase)
+        let stepped = accentBase.blended(withFraction: depth, of: dark ? .white : .black) ?? accentBase
+        let background: NSColor
+        if isSidebarContext, let surface = neutrals.sidebarSurface, surface.translucent {
+            let tint = Self.nsColor(hex: surface.start, alpha: surface.opacity)
+            background = Self.composite(tint, over: dark ? .white : .black)
+        } else if isSidebarContext {
+            background = Self.nsColor(hex: neutrals.sidebar)
+        } else {
+            let canvasColor = Self.nsColor(hex: neutrals.canvas)
+            let doodleColor =
+                dark
+                ? NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.025)
+                : Self.nsColor(
+                    hex: neutrals.sidebarSurface?.colored == true ? neutrals.sidebarSurface!.start : neutrals.ink,
+                    alpha: 0.025)
+            background = Self.composite(doodleColor, over: canvasColor)
+        }
+        return Color(
+            nsColor: Self.ensuringContrast(stepped, against: background, toward: dark ? .white : .black))
     }
     /// The fill behind something of yours, such as your reaction or a mention of you.
     var accentTint: Color { accentFill.opacity(dark ? 0.18 : 0.1) }
@@ -275,9 +358,21 @@ struct AppColors {
     var success: Color {
         Color(hex: dark ? (highContrast ? 0x4ae06d : 0x30d158) : (highContrast ? 0x146326 : 0x1e7a34))
     }
-    /// Destructive text, icons and inline errors, bright enough to read on dark canvas and overlay surfaces.
+    /// Destructive text, icons and inline errors, bright enough to read on dark canvas, overlay, and selected colored
+    /// sidebar rows.
     var destructive: Color {
-        Color(hex: dark ? (highContrast ? 0xff8078 : 0xff6961) : (highContrast ? 0xb50012 : 0xd70015))
+        let baseHex: UInt32 = dark ? (highContrast ? 0xff8078 : 0xff6961) : (highContrast ? 0xb50012 : 0xd70015)
+        guard isSidebarContext, let surface = neutrals.sidebarSurface, surface.colored else {
+            return Color(hex: baseHex)
+        }
+        let selectionAlpha = 0.1 * neutrals.lines
+        let selStart = Self.composite(
+            NSColor(srgbRed: 1, green: 1, blue: 1, alpha: selectionAlpha), over: Self.nsColor(hex: surface.start))
+        let selEnd = Self.composite(
+            NSColor(srgbRed: 1, green: 1, blue: 1, alpha: selectionAlpha), over: Self.nsColor(hex: surface.end))
+        let adjustedStart = Self.ensuringContrast(Self.nsColor(hex: baseHex), against: selStart, toward: .white)
+        let adjusted = Self.ensuringContrast(adjustedStart, against: selEnd, toward: .white)
+        return Color(nsColor: adjusted)
     }
     /// Destructive button fill under white `onAccent` text.
     var destructiveFill: Color {
@@ -288,13 +383,18 @@ struct AppColors {
         Color(hex: dark ? (highContrast ? 0xffb340 : 0xff9f0a) : (highContrast ? 0x7d3f00 : 0x9a4f00))
     }
     /// An @Name pill in a message or the composer. Deeper than the accent in light mode, so it reads on its tint.
-    var mentionText: Color { dark ? accent : deepAccent }
+    var mentionText: Color {
+        if dark { return accent }
+        let pill = Self.composite(
+            resolvedAccentFill.withAlphaComponent(0.1), over: Self.nsColor(hex: neutrals.canvas))
+        let stepped = accentBase.blended(withFraction: 0.5, of: .black) ?? accentBase
+        return Color(nsColor: Self.ensuringContrast(stepped, against: pill, toward: .black))
+    }
     var mentionFill: Color { accentTint }
     /// The pill of a mention that notifies you, or everyone: warm amber so it stands apart from links and other
     /// mentions, matching Slack desktop and Slatrix Android.
     var mentionYouText: Color { Color(hex: dark ? 0xffe58f : (highContrast ? 0x5c3900 : 0x7a4d00)) }
     var mentionYouFill: Color { Color(hex: dark ? 0xcc8e14 : 0xf2c744).opacity(dark ? 0.22 : 0.3) }
-    private var deepAccent: Color { Color(nsColor: accentBase.blended(withFraction: 0.5, of: .black) ?? accentBase) }
     /// Inline code in a message.
     var code: Color { sunken }
     var presenceActive: Color { Color(hex: dark ? 0x30d158 : 0x34c759) }

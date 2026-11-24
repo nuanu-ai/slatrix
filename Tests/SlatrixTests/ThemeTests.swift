@@ -189,10 +189,62 @@ struct ThemeTests {
             #expect(
                 contrast(sidebar.accent, base) >= 4.5,
                 "\(theme) dark=\(dark) hc=\(highContrast) onSidebar accent")
+            if colors.coloredSidebar {
+                for surface in [base, over(sidebar.hover, base), over(sidebar.selection, base)] {
+                    #expect(
+                        contrast(sidebar.destructive, surface) >= 4.5,
+                        "\(theme) dark=\(dark) hc=\(highContrast) onSidebar destructive")
+                }
+            }
+            if highContrast || colors.coloredSidebar {
+                #expect(
+                    contrast(over(sidebar.focusRing, base), base) >= 3.0,
+                    "\(theme) dark=\(dark) hc=\(highContrast) onSidebar focusRing")
+            }
         }
         #expect(
             contrast(sidebar.onAccent, sidebar.accentFill) >= 4.5,
             "\(theme) dark=\(dark) hc=\(highContrast) onSidebar badge")
+    }
+
+    // capability: app.themes
+    @Test(
+        "Every macOS system accent color — including bright Yellow — keeps AA text, fill, mention, and focus contrast",
+        arguments: ColorTheme.allCases, Variant.all)
+    private func readableAcrossSystemAccents(theme: ColorTheme, variant: Variant) {
+        let (dark, highContrast) = (variant.dark, variant.highContrast)
+        let accents: [(String, NSColor)] = [
+            ("blue", .systemBlue), ("yellow", .systemYellow), ("orange", .systemOrange), ("green", .systemGreen),
+            ("pink", .systemPink), ("purple", .systemPurple), ("red", .systemRed), ("gray", .systemGray),
+        ]
+        for (name, systemAccent) in accents {
+            let colors = AppColors(
+                dark: dark, accent: AppColors.resolve(systemAccent, dark: dark), theme: theme,
+                highContrast: highContrast)
+            let doodled = over(colors.wallpaperDoodle, colors.canvas)
+            #expect(
+                contrast(colors.onAccent, colors.accentFill) >= 4.5,
+                "\(theme) \(variant) accent=\(name) onAccent/accentFill")
+            #expect(
+                contrast(colors.accent, doodled) >= 4.5,
+                "\(theme) \(variant) accent=\(name) accent/doodled")
+            #expect(
+                contrast(colors.mentionText, over(colors.mentionFill, colors.canvas)) >= 4.5,
+                "\(theme) \(variant) accent=\(name) mentionText")
+            #expect(
+                contrast(over(colors.focusRing, colors.canvas), colors.canvas) >= 3.0,
+                "\(theme) \(variant) accent=\(name) focusRing")
+            let sidebar = colors.onSidebar
+            let bases = [colors.sidebar, colors.sidebarEnd].flatMap { [over($0, .black), over($0, .white)] }
+            for base in bases {
+                #expect(
+                    contrast(sidebar.accent, base) >= 4.5,
+                    "\(theme) \(variant) accent=\(name) onSidebar accent")
+            }
+            #expect(
+                contrast(sidebar.onAccent, sidebar.accentFill) >= 4.5,
+                "\(theme) \(variant) accent=\(name) onSidebar badge")
+        }
     }
 
     // capability: app.themes
@@ -287,6 +339,21 @@ struct ThemeTests {
         #expect(wsStore.workspaceThemes["!e:example.org"] == .neutral)
         #expect(wsStore.workspaceThemes["!f:example.org"] == nil)
         #expect(wsStore.increaseContrast == true)
+
+        // A single malformed non-string entry in workspaceThemes is dropped without wiping valid overrides.
+        let (mixedDefaults, mixedCleanup) = try scratchDefaults()
+        defer { mixedCleanup() }
+        mixedDefaults.set(
+            ["!good:example.org": "jade", "!legacy:example.org": "contrast", "!bad:example.org": 42] as [String: Any],
+            forKey: "appearance.workspaceThemes")
+        let mixedStore = AppearanceStore(defaults: mixedDefaults)
+        #expect(mixedStore.workspaceThemes["!good:example.org"] == .jade)
+        #expect(mixedStore.workspaceThemes["!legacy:example.org"] == .neutral)
+        #expect(mixedStore.workspaceThemes["!bad:example.org"] == nil)
+        #expect(mixedStore.increaseContrast == true)
+        #expect(mixedDefaults.object(forKey: "appearance.increaseContrast") as? Bool == true)
+        let persisted = mixedDefaults.dictionary(forKey: "appearance.workspaceThemes") as? [String: String]
+        #expect(persisted == ["!good:example.org": "jade", "!legacy:example.org": "neutral"])
     }
 
     // capability: app.themes

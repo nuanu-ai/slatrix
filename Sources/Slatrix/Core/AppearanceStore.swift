@@ -133,23 +133,22 @@ enum MessageDensity: String, CaseIterable, Identifiable {
         mode = AppTheme(rawValue: defaults.string(forKey: "appearance.mode") ?? "system") ?? .system
 
         var migratedContrast = false
+        var migratedGlobalTheme: ColorTheme?
         if let rawTheme = defaults.string(forKey: "appearance.theme"),
             let decoded = ColorTheme.migrated(rawTheme)
         {
             theme = decoded.theme
             if decoded.migratedContrast { migratedContrast = true }
-            if decoded.theme.rawValue != rawTheme {
-                defaults.set(decoded.theme.rawValue, forKey: "appearance.theme")
-            }
+            if decoded.theme.rawValue != rawTheme { migratedGlobalTheme = decoded.theme }
         } else {
             theme = .glass
         }
 
         var decodedWorkspaceThemes: [String: ColorTheme] = [:]
         var migratedWorkspaceThemes = false
-        if let rawMap = defaults.dictionary(forKey: "appearance.workspaceThemes") as? [String: String] {
-            for (workspaceID, rawValue) in rawMap {
-                if let decoded = ColorTheme.migrated(rawValue) {
+        if let rawMap = defaults.dictionary(forKey: "appearance.workspaceThemes") {
+            for (workspaceID, rawAny) in rawMap {
+                if let rawValue = rawAny as? String, let decoded = ColorTheme.migrated(rawValue) {
                     decodedWorkspaceThemes[workspaceID] = decoded.theme
                     if decoded.migratedContrast { migratedContrast = true }
                     if decoded.theme.rawValue != rawValue { migratedWorkspaceThemes = true }
@@ -161,6 +160,7 @@ enum MessageDensity: String, CaseIterable, Identifiable {
         workspaceThemes = decodedWorkspaceThemes
 
         chatWallpaper = defaults.object(forKey: "appearance.chatWallpaper") as? Bool ?? true
+        // Persist migrated Increase contrast before rewriting legacy "contrast" keys so an interrupted launch can retry.
         if let explicitContrast = defaults.object(forKey: "appearance.increaseContrast") as? Bool {
             increaseContrast = explicitContrast
         } else if migratedContrast {
@@ -168,6 +168,10 @@ enum MessageDensity: String, CaseIterable, Identifiable {
             defaults.set(true, forKey: "appearance.increaseContrast")
         } else {
             increaseContrast = false
+        }
+
+        if let migratedGlobalTheme {
+            defaults.set(migratedGlobalTheme.rawValue, forKey: "appearance.theme")
         }
 
         density =

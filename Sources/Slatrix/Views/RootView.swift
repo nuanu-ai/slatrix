@@ -358,7 +358,6 @@ struct RootView: View {
     @ViewBuilder private func modal(_ kind: InWindowModal.Kind) -> some View {
         switch kind {
         case .preferences(let tab):
-            let activeWorkspace = matrix.workspaces.first { $0.id == workspaceID }
             PreferencesView(
                 matrix: matrix, onClose: closeModal,
                 onLogout: {
@@ -373,7 +372,7 @@ struct RootView: View {
                 onEditProfile: {
                     closeModal()
                     editingProfile = true
-                }, tab: tab, workspaceID: activeWorkspace?.id, workspaceName: activeWorkspace?.name
+                }, tab: tab, workspaceID: workspaceID
             ).onAppear { Performance.finishOnScreen(.preferencesOpen) }
         case .switcher:
             QuickSwitcherView(
@@ -507,6 +506,9 @@ struct RootView: View {
             )
             .onChange(of: workspaceID, initial: true) { _, id in
                 appearance.activeWorkspaceID = id
+            }
+            .onDisappear {
+                appearance.activeWorkspaceID = nil
             }
             .onChange(of: workspaceID) { _, id in
                 Performance.finishOnScreen(.workspaceSwitch)
@@ -1106,12 +1108,12 @@ struct RootView: View {
 
     /// The conversation list, as a floating inset panel beside the conversation or in the drawer.
     /// Draws in `onSidebar`, with AppKit controls forced dark on colored sidebar islands.
-    private func sidebar() -> some View {
-        Sized(widths, width: sidebarWidth) { sidebarContent }
+    private func sidebar(inDrawer: Bool = false) -> some View {
+        Sized(widths, width: sidebarWidth) { sidebarContent(inDrawer: inDrawer) }
             .environment(\.onSidebar, true)
             .transformEnvironment(\.colorScheme) { if colors.coloredSidebar { $0 = .dark } }
     }
-    private var sidebarContent: some View {
+    private func sidebarContent(inDrawer: Bool) -> some View {
         SidebarView(
             matrix: matrix,
             route: Binding(
@@ -1146,7 +1148,7 @@ struct RootView: View {
             }, onEditWorkspace: { roomDetails = DetailsSelection(id: $0) },
             onNotifications: { roomNotifications = DetailsSelection(id: $0) },
             onHide: { handleMenu("toggle-sidebar") }, accessory: sidebarAccessory,
-            onBrowseChannels: presentPublicDirectory, collapsed: $collapsedSections
+            onBrowseChannels: presentPublicDirectory, collapsed: $collapsedSections, inDrawer: inDrawer
         ).layoutIsolated()
     }
 
@@ -1161,7 +1163,7 @@ struct RootView: View {
                     colors.scrim.contentShape(Rectangle())
                 }.buttonStyle(.row)
                     .focusable(false).accessibilityLabel("Close sidebar").transition(.opacity)
-                sidebar().padding([.leading, .vertical], m.sidebarInset)
+                sidebar(inDrawer: true).padding([.leading, .vertical], m.sidebarInset)
                     .transition(.move(edge: .leading))
             }
         }

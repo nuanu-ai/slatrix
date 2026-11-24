@@ -30,6 +30,8 @@ struct SidebarView: View {
     var onBrowseChannels: () -> Void
     /// Section titles folded shut; held by the window, so they survive the sidebar moving into the drawer and back.
     @Binding var collapsed: Set<String>
+    /// True when presented in the narrow-window drawer over the conversation, so Glass blurs within the window.
+    var inDrawer = false
     @State private var connectingTooLong = false
     @Environment(\.metrics) private var m
     @ThemeColors private var colors
@@ -71,7 +73,7 @@ struct SidebarView: View {
             Divider().overlay(colors.border)
             footer
         }
-        .background { SidebarBackground(colors: colors, cornerRadius: m.radiusPanel) }
+        .background { SidebarBackground(colors: colors, cornerRadius: m.radiusPanel, inDrawer: inDrawer) }
         .clipShape(RoundedRectangle(cornerRadius: m.radiusPanel))
         .overlay {
             if colors.highContrast {

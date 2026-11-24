@@ -8,7 +8,7 @@ Every macOS theme uses the same window geometry. The sidebar floats as an inset 
 
 Six curated themes split into two groups in Preferences:
 
-- Neutral: Glass (default, translucent macOS sidebar vibrancy tinted by `colors.sidebar`), Neutral (opaque graphite sidebar), and Sand (warm paper canvas and sidebar).
+- Neutral: Glass (default, translucent macOS sidebar vibrancy tinted by `colors.sidebar`, blending behind the window when docked and within the window in the narrow drawer), Neutral (opaque graphite sidebar), and Sand (warm paper canvas and sidebar).
 - Colored: Aubergine, Jade, and Ocean. Each renders a rich colored floating sidebar with a built-in vertical gradient (`colors.sidebar` to `colors.sidebarEnd`) and light sidebar ink (`colors.onSidebar`).
 
 Two independent toggles work on all six themes:
@@ -53,7 +53,7 @@ Mentions that notify you (`@you` and `@room`) use warm amber so they separate im
 - Light mode: `#7a4d00` text on `#f2c744/0.30` fill (`#5c3900` under Increase contrast)
 - Dark mode: `#ffe58f` text on `#cc8e14/0.22` fill
 
-Every text, status, sidebar, and mention pairing meets WCAG AA (`>= 4.5:1`) across all six themes in light and dark mode, with Increase contrast both off and on, on steady-state surfaces (`canvas`, `rowHover`, `raised`, `surfaceCard`, `overlay`, `control`) and floating sidebar surfaces with the reference blue accent. Warm amber own mentions also meet `>= 4.5:1` over the transient jump highlight.
+Every text, status, sidebar, and mention pairing meets WCAG AA (`>= 4.5:1`) across all six themes in light and dark mode, with Increase contrast both off and on, across steady-state surfaces (`canvas`, `rowHover`, `raised`, `surfaceCard`, `overlay`, `control`), floating sidebar surfaces, and all macOS system accent colors. Warm amber own mentions also meet `>= 4.5:1` over the transient jump highlight.
 
 File-type icons use the shared `fileColors` palette as a soft tinted tile (`0.12` opacity fill in light mode, `0.16` in dark mode) with a subtle tinted hairline (`0.18` / `0.24`) and a deepened light or lifted dark vector symbol (`colors.fileGlyph(_:)`). All ten file kinds maintain at least `3.0:1` graphical contrast against their tile without turning into saturated solid blocks that compete with links.
 
