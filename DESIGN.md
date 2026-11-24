@@ -2,6 +2,22 @@
 
 Slatrix follows Slack for layout, wording, and keyboard flow while drawing in the host platform's native style: Apple's Human Interface Guidelines on macOS and Material 3 on Android. Shared color tokens and corner radii live in `design/tokens.json` and are checked by `DesignTokenTests` and `ThemeTests`.
 
+## Themes and floating sidebar geometry
+
+Every macOS theme uses the same window geometry. The sidebar floats as an inset rounded panel (`m.sidebarInset`, `m.radiusPanel`, `.elevation(.e1, cornerRadius: m.radiusPanel)`), while the conversation and right inspector fill the window edge to edge on `colors.canvas`. Switching themes never shifts the sidebar header (`m.paneHeader - 2 * m.sidebarInset`), window buttons, search bar, or conversation frame.
+
+Six curated themes split into two groups in Preferences:
+
+- Neutral: Glass (default, translucent macOS sidebar vibrancy tinted by `colors.sidebar`), Neutral (opaque graphite sidebar), and Sand (warm paper canvas and sidebar).
+- Colored: Aubergine, Jade, and Ocean. Each renders a rich colored floating sidebar with a built-in vertical gradient (`colors.sidebar` to `colors.sidebarEnd`) and light sidebar ink (`colors.onSidebar`).
+
+Two independent toggles work on all six themes:
+
+- Chat wallpaper (default on): draws repeating doodle tiles from `design/wallpaper.json` at `2.5%` opacity (`0.025`) behind messages, using subtle theme-tinted ink in light mode and white in dark mode. Opaque `rowHover`, `surfaceCard`, and `overlay` surfaces block the texture cleanly.
+- Increase contrast (default off, also combined with macOS Increase Contrast): doubles border and selection line strength (`lines = 2.0`), deepens dark canvases to pure or near black (`#000000`, `#050403` for Sand), raises text and status contrast, and adds a `1pt` border to the floating sidebar.
+
+Workspaces can override the global theme individually. When a space is open, Preferences lets the user pick a theme for all workspaces or for the active space alone, with a "Use default" reset back to the global choice.
+
 ## Surface luminance ladder
 
 Surfaces step cleanly in luminance so floating chrome and cards never sink into a hovered row, and wallpaper doodles never bleed through interactive surfaces. Every surface in the ladder is opaque (`alpha == 1.0`).
@@ -10,23 +26,23 @@ In dark mode, elevation rises strictly from canvas to overlay:
 
 `canvas < rowHover < control < raised <= surfaceCard < overlay`
 
-| Theme | `canvas` | `rowHover` | `raised` | `surfaceCard` | `overlay` |
+| Palette | `canvas` | `rowHover` | `raised` | `surfaceCard` | `overlay` |
 | --- | --- | --- | --- | --- | --- |
-| Default (and framed themes) | `#141416` | `#1b1b1f` | `#222227` | `#222227` | `#27272d` |
-| Slate | `#0d1017` | `#131823` | `#1b2231` | `#1b2231` | `#222a3c` |
+| Neutral base (Glass, Neutral, Aubergine, Jade, Ocean) | `#141416` | `#1b1b1f` | `#222227` | `#222227` | `#27272d` |
 | Sand | `#171512` | `#1f1c18` | `#27231e` | `#27231e` | `#2e2a24` |
-| High Contrast | `#000000` | `#101012` | `#19191d` | `#19191d` | `#222226` |
+| Neutral base (Increase contrast) | `#000000` | `#101012` | `#19191d` | `#19191d` | `#222226` |
+| Sand (Increase contrast) | `#050403` | `#13110e` | `#1e1a16` | `#1e1a16` | `#27231d` |
 
 In light mode, background bands step down from the canvas (`canvas > rowHover > raised`) while interactive cards (`surfaceCard`) and floating bars (`overlay`) lift above `rowHover` with a `1px` `colors.border` hairline:
 
-| Theme | `canvas` | `rowHover` | `raised` | `surfaceCard` | `overlay` |
+| Palette | `canvas` | `rowHover` | `raised` | `surfaceCard` | `overlay` |
 | --- | --- | --- | --- | --- | --- |
-| Default (and framed themes) | `#ffffff` | `#f6f6f8` | `#f2f2f5` | `#ffffff` | `#fbfbfd` |
-| Slate | `#ffffff` | `#f4f6fa` | `#eef1f7` | `#ffffff` | `#fafbfd` |
+| Neutral base (Glass, Neutral, Aubergine, Jade, Ocean) | `#ffffff` | `#f6f6f8` | `#f2f2f5` | `#ffffff` | `#fbfbfd` |
 | Sand | `#fdfbf7` | `#f7f3eb` | `#f2ece2` | `#fffdfa` | `#fffdfa` |
-| High Contrast | `#ffffff` | `#f5f5f7` | `#f0f0f2` | `#ffffff` | `#ffffff` |
+| Neutral base (Increase contrast) | `#ffffff` | `#f5f5f7` | `#f0f0f2` | `#ffffff` | `#ffffff` |
+| Sand (Increase contrast) | `#fdfbf7` | `#f7f3eb` | `#f2ece2` | `#fffdfa` | `#fffdfa` |
 
-Translucent fills (`colors.hover`, `colors.pressed`, `colors.selection`) are for controls inside a surface, sidebar rows on framed gradients, and secondary states on top of an already opaque background. Full-bleed list and timeline rows use opaque `colors.rowHover`.
+Translucent fills (`colors.hover`, `colors.pressed`, `colors.selection`) are for controls inside a surface, sidebar rows on floating sidebar gradients, and secondary states on top of an already opaque background. Full-bleed list and timeline rows use opaque `colors.rowHover`.
 
 ## Accent discipline and semantic color
 
@@ -34,18 +50,16 @@ The system accent is reserved for primary buttons, links, active selections, unr
 
 Mentions that notify you (`@you` and `@room`) use warm amber so they separate immediately from links and ordinary mentions:
 
-- Light mode: `#7a4d00` text on `#f2c744/0.30` fill
+- Light mode: `#7a4d00` text on `#f2c744/0.30` fill (`#5c3900` under Increase contrast)
 - Dark mode: `#ffe58f` text on `#cc8e14/0.22` fill
 
-Every text, status, and mention pairing meets WCAG AA (`>= 4.5:1`) across all nine themes in light and dark mode on steady-state surfaces (`canvas`, `rowHover`, `raised`, `surfaceCard`, `overlay`, `control`) with the reference blue accent. Warm amber own mentions also meet `>= 4.5:1` over the transient jump highlight.
+Every text, status, sidebar, and mention pairing meets WCAG AA (`>= 4.5:1`) across all six themes in light and dark mode, with Increase contrast both off and on, on steady-state surfaces (`canvas`, `rowHover`, `raised`, `surfaceCard`, `overlay`, `control`) and floating sidebar surfaces with the reference blue accent. Warm amber own mentions also meet `>= 4.5:1` over the transient jump highlight.
 
 File-type icons use the shared `fileColors` palette as a soft tinted tile (`0.12` opacity fill in light mode, `0.16` in dark mode) with a subtle tinted hairline (`0.18` / `0.24`) and a deepened light or lifted dark vector symbol (`colors.fileGlyph(_:)`). All ten file kinds maintain at least `3.0:1` graphical contrast against their tile without turning into saturated solid blocks that compete with links.
 
-## Avatars and wallpaper
+## Avatars
 
 People avatars are always circles (`AvatarView` with `cornerRadius: nil`), including in message rows, profile views, search results, and Preferences miniatures. Spaces and channels are rounded squares (`m.radiusSpace` or `m.radius`).
-
-Framed themes (`aubergine`, `jade`, `lagoon`, `midnight`, `glass`) draw repeating doodle tiles behind the conversation canvas at `2.5%` opacity (`0.025`). The texture remains clearly visible on open canvas and is blocked completely by opaque `rowHover` bands, `surfaceCard` attachments, and `overlay` bars.
 
 ## Typography and reading rhythm
 
