@@ -40,7 +40,7 @@ private struct MissingContinuation: Error {}
             guard delivered[request.identifier] != nil else { return nil }
             return DeliveredNotification(
                 identifier: request.identifier, target: request.message.target,
-                date: Date(timeIntervalSince1970: Double(order)))
+                date: Date(timeIntervalSince1970: Double(order)), threadRootID: request.message.threadRootID)
         }
     }
     /// The reader closes a banner in Notification Center.
@@ -518,5 +518,107 @@ extension NotificationDeliveryTests {
         await matrix.recheckCopies().value
         #expect(room.asked.all == ["$new", "$old"])
         #expect(await eventually { Array(transport.delivered.keys) == [old] })
+    }
+
+    private func show(roomID: String, eventID: String, threadRootID: String? = nil) async throws -> String {
+        let target = try #require(MatrixNotificationTarget(accountID: accountA, roomID: roomID, eventID: eventID))
+        let index = transport.authorizationCalls
+        let task = deliver(
+            DesktopMessageNotification(
+                target: target, title: "Conversation", body: "Notification", playSound: true, threadRootID: threadRootID
+            ))
+        await awaitAuthorization(index)
+        try transport.authorize(index, .success(true))
+        #expect(try await task.value)
+        return try #require(transport.attempts.last).identifier
+    }
+
+    // capability: notifications.alert
+    @Test("Withdrawing a room or thread clears only its matching delivered and in-flight banners")
+    func withdrawsReadRoomsAndThreads() async throws {
+        transport.holdsAdds = false
+        let mainA = try await show(roomID: "!a:example.org", eventID: "$m1")
+        let threadA = try await show(roomID: "!a:example.org", eventID: "$t1", threadRootID: "$root")
+        let otherThreadA = try await show(roomID: "!a:example.org", eventID: "$t2", threadRootID: "$other")
+        let roomB = try await show(roomID: "!b:example.org", eventID: "$b1")
+
+        // Reading only the main timeline clears mainA but preserves unread thread banners and roomB.
+        await delivery.withdrawRooms(["!a:example.org"], includeThreads: false)
+        #expect(Set(transport.delivered.keys) == [threadA, otherThreadA, roomB])
+        #expect(transport.delivered[mainA] == nil)
+
+        // Reading thread $root clears only threadA.
+        await delivery.withdrawThread(roomID: "!a:example.org", rootID: "$root")
+        #expect(Set(transport.delivered.keys) == [otherThreadA, roomB])
+
+        // Marking the whole room read clears remaining thread banners in !a, leaving !b untouched.
+        await delivery.withdrawRooms(["!a:example.org"])
+        #expect(Set(transport.delivered.keys) == [roomB])
+    }
+
+    // capability: notifications.alert
+    @Test("Reading a room, reading a thread, marking a room read, or syncing a cross-device read withdraws banners")
+    func serviceWithdrawsBannersWhenRead() async throws {
+        let center = FakeNotificationCenter()
+        let serviceDelivery = DesktopNotificationDelivery(transport: center)
+        serviceDelivery.useAccount("@owner:example.org")
+
+        func showBanner(roomID: String, eventID: String, threadRootID: String? = nil) async throws {
+            let target = try #require(
+                MatrixNotificationTarget(accountID: "@owner:example.org", roomID: roomID, eventID: eventID))
+            #expect(
+                try await serviceDelivery.deliver(
+                    DesktopMessageNotification(
+                        target: target, title: "Room", body: "Hello", playSound: false, threadRootID: threadRootID)))
+        }
+
+        let f = ActionFixture()
+        f.service.notifications = serviceDelivery
+        f.service.messages = [f.message(f.rootID)]
+        f.service.threadMessages = [f.message(f.rootID), f.message("$reply", inThread: true)]
+        f.service.configureThreadReadForChecks(
+            client: f.client, main: f.main, thread: f.thread, rootID: f.rootID, sessionID: f.session,
+            selectionID: f.selection, threadID: f.threadLoad, ready: true)
+
+        try await showBanner(roomID: f.roomID, eventID: f.rootID)
+        try await showBanner(roomID: f.roomID, eventID: "$reply", threadRootID: f.rootID)
+        try await showBanner(roomID: "!other:example.org", eventID: "$other")
+
+        // markVisibleRead withdraws the main-timeline banner while keeping the unread thread and other room banners.
+        let mainTarget = ReadReceiptTarget(
+            accountID: f.userID, sessionGeneration: f.session, timelineGeneration: f.selection, roomID: f.roomID,
+            eventID: f.rootID)
+        try await f.service.markVisibleRead(mainTarget, retries: []) { true }
+        #expect(Set(center.shown.compactMap(\.target.eventID)) == ["$reply", "$other"])
+
+        // markVisibleThreadRead withdraws the thread banner while keeping the other room's banner.
+        let threadTarget = ThreadReadReceiptTarget(
+            identity: try #require(f.service.threadReadIdentity), eventID: "$reply")
+        try await f.service.markVisibleThreadRead(threadTarget, retries: []) { true }
+        #expect(center.shown.compactMap(\.target.eventID) == ["$other"])
+
+        // Cross-device sync transitioning !other from unread to read withdraws !other's banner.
+        f.service.rooms = [
+            ChatRoom(id: f.roomID, name: "Actions"),
+            ChatRoom(id: "!other:example.org", name: "Other", unread: 1),
+        ]
+        f.service.rooms = [
+            ChatRoom(id: f.roomID, name: "Actions"),
+            ChatRoom(id: "!other:example.org", name: "Other", unread: 0),
+        ]
+        #expect(await eventually { center.shown.isEmpty })
+
+        // Explicit Mark as read (setMarkedUnread(..., value: false)) withdraws both main and thread banners for a room.
+        let openRoom = FakeOpenRoom("!marked:example.org", cached: [])
+        let markService = MatrixService.scratch()
+        markService.configureRoomOpenForChecks(
+            client: FakeClient(rooms: [openRoom]), roomList: FakeRoomListService(),
+            user: ChatUser(id: "@owner:example.org", name: "Owner"))
+        markService.notifications = serviceDelivery
+        try await showBanner(roomID: "!marked:example.org", eventID: "$m1")
+        try await showBanner(roomID: "!marked:example.org", eventID: "$t1", threadRootID: "$r1")
+        try await showBanner(roomID: "!keep:example.org", eventID: "$k1")
+        try await markService.setMarkedUnread("!marked:example.org", value: false)
+        #expect(center.shown.compactMap(\.target.eventID) == ["$k1"])
     }
 }

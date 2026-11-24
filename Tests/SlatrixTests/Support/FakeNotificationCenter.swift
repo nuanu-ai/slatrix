@@ -20,7 +20,8 @@ import Foundation
         shown.append(
             DeliveredNotification(
                 identifier: request.identifier, target: request.message.target,
-                date: Date(timeIntervalSinceReferenceDate: Double(added.count))))
+                date: Date(timeIntervalSinceReferenceDate: Double(added.count)),
+                threadRootID: request.message.threadRootID))
     }
     func remove(_ identifier: String) { shown.removeAll { $0.identifier == identifier } }
     func clear() { shown = [] }

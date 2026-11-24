@@ -171,7 +171,9 @@ final class PlatformIntegration: NSObject, ObservableObject, UNUserNotificationC
         content.title = String(message.title.prefix(256))
         content.body = String(message.body.prefix(4096))
         content.sound = message.playSound ? .default : nil
-        content.userInfo = message.target.userInfo
+        var userInfo = message.target.userInfo
+        if let threadRootID = message.threadRootID { userInfo["threadRootID"] = threadRootID }
+        content.userInfo = userInfo
         content.threadIdentifier =
             "\(message.target.accountID.utf8.count):\(message.target.accountID)\(message.target.roomID)"
         try await center.add(UNNotificationRequest(identifier: request.identifier, content: content, trigger: nil))
@@ -187,7 +189,9 @@ final class PlatformIntegration: NSObject, ObservableObject, UNUserNotificationC
             guard !request.identifier.hasPrefix(LaterReminderSchedule.prefix),
                 let target = MatrixNotificationTarget(userInfo: request.content.userInfo)
             else { return nil }
-            return DeliveredNotification(identifier: request.identifier, target: target, date: shown.date)
+            return DeliveredNotification(
+                identifier: request.identifier, target: target, date: shown.date,
+                threadRootID: request.content.userInfo["threadRootID"] as? String)
         } ?? []
     }
     /// Later's reminders stay queued: `LaterReminderSchedule` keeps them to the account and its choices.

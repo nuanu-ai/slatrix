@@ -376,4 +376,27 @@ struct ThreadReadTests {
         try await f.service.markVisibleThreadRead(target, retries: []) { true }
         #expect(f.thread.writes.all == ["mark-read", "mark-read"])
     }
+
+    // capability: activity.badge
+    @Test("Reading a thread to the bottom marks older paginated-out Activity replies in that thread opened")
+    func markVisibleThreadReadClearsAllThreadActivityItems() async throws {
+        let f = fixture()
+        f.service.activity.record(
+            ActivityItem(
+                id: "older-reply", roomID: f.roomID, eventID: "$paginated-out", roomName: "Actions",
+                senderID: "@alice:example.org", senderName: "Alice", body: "Older reply", timestamp: Date(),
+                hasMention: false, threadRootID: f.rootID, kind: .message))
+        f.service.activity.record(
+            ActivityItem(
+                id: "other-thread-reply", roomID: f.roomID, eventID: "$other-reply", roomName: "Actions",
+                senderID: "@alice:example.org", senderName: "Alice", body: "Other thread", timestamp: Date(),
+                hasMention: false, threadRootID: "$other-root", kind: .message))
+        #expect(ActivityBadge.count(rooms: [], items: f.service.activity.items) == 2)
+
+        try await f.service.markVisibleThreadRead(try target(f), retries: []) { true }
+
+        #expect(f.service.activity.items.first { $0.id == "older-reply" }?.opened == true)
+        #expect(f.service.activity.items.first { $0.id == "other-thread-reply" }?.opened == false)
+        #expect(ActivityBadge.count(rooms: [], items: f.service.activity.items) == 1)
+    }
 }

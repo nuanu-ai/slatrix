@@ -80,9 +80,10 @@ enum SidebarLayout {
                 preferred: 0, ideal: minimumPaneWidth, availableWidth: availableWidth, sidebarShown: false) != nil)
     }
 
-    /// The conversations a section lists. A collapsed one still lists the open conversation and every unread one,
-    /// as Slack does.
+    /// The conversations a section lists. A collapsed one still lists the open conversation, pending invitations, and
+    /// every unread one, as Slack does.
     static func sectionRooms(_ rooms: [ChatRoom], collapsed: Bool, selectedID: String?) -> [ChatRoom] {
-        collapsed ? rooms.filter { $0.id == selectedID || UnreadBadge($0) != .none } : rooms
+        collapsed
+            ? rooms.filter { $0.id == selectedID || $0.membership == "invite" || UnreadBadge($0) != .none } : rooms
     }
 }

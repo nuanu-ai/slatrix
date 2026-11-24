@@ -3,21 +3,28 @@ import MatrixRustSDK
 
 /// A room's thread list: one page of thread summaries that the test can replay.
 final class FakeThreadList: ThreadListService, @unchecked Sendable {
-    let values: [ThreadListItem]
-    let pages = Recorder<Void>()
     private let lock = NSLock()
+    private var storedValues: [ThreadListItem]
+    let pages = Recorder<Void>()
     private var listeners: [ThreadListEntriesListener] = []
     init(_ values: [ThreadListItem] = []) {
-        self.values = values
+        self.storedValues = values
         super.init(noHandle: .init())
     }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    var values: [ThreadListItem] {
+        get { lock.withLock { storedValues } }
+        set { lock.withLock { storedValues = newValue } }
+    }
     override func paginate() async throws { pages.append(()) }
     override func items() -> [ThreadListItem] { values }
     override func paginationState() -> ThreadListPaginationState { .idle(endReached: true) }
     override func subscribeToItemsUpdates(listener: ThreadListEntriesListener) -> TaskHandle {
-        lock.withLock { listeners.append(listener) }
-        listener.onUpdate(diff: [.reset(values: values)])
+        let current = lock.withLock {
+            listeners.append(listener)
+            return storedValues
+        }
+        listener.onUpdate(diff: [.reset(values: current)])
         return FakeCancellableHandle(noHandle: .init())
     }
     override func subscribeToPaginationStateUpdates(listener: ThreadListPaginationStateListener) -> TaskHandle {
@@ -25,7 +32,15 @@ final class FakeThreadList: ThreadListService, @unchecked Sendable {
         return FakeCancellableHandle(noHandle: .init())
     }
     func replaySnapshot() {
-        for listener in lock.withLock({ listeners }) { listener.onUpdate(diff: [.reset(values: values)]) }
+        let (callbacks, current) = lock.withLock { (listeners, storedValues) }
+        for listener in callbacks { listener.onUpdate(diff: [.reset(values: current)]) }
+    }
+    func emit(_ next: [ThreadListItem]) {
+        let callbacks = lock.withLock {
+            storedValues = next
+            return listeners
+        }
+        for listener in callbacks { listener.onUpdate(diff: [.reset(values: next)]) }
     }
 }
 
@@ -73,15 +88,30 @@ final class FakeThreadRoom: Room, @unchecked Sendable {
     let threads: FakeThreadList
     let timelines: [String: FakeEventTimeline]
     let configurations = Recorder<TimelineConfiguration>()
+    private let lock = NSLock()
+    private var storedReceipts: [ReceiptThread: UserReceipt]
     var fail = false
-    init(threads: FakeThreadList = FakeThreadList(), timelines: [String: FakeEventTimeline] = [:]) {
+    init(
+        threads: FakeThreadList = FakeThreadList(), timelines: [String: FakeEventTimeline] = [:],
+        receipts: [ReceiptThread: UserReceipt] = [:]
+    ) {
         self.threads = threads
         self.timelines = timelines
+        self.storedReceipts = receipts
         super.init(noHandle: .init())
     }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
+    var receipts: [ReceiptThread: UserReceipt] {
+        get { lock.withLock { storedReceipts } }
+        set { lock.withLock { storedReceipts = newValue } }
+    }
     override func membership() -> Membership { .joined }
     override func threadListService() -> ThreadListService { threads }
+    override func loadUserReceipt(receiptType: ReceiptType, thread: ReceiptThread, userId: String) async throws
+        -> UserReceipt?
+    {
+        receiptType == .read ? lock.withLock { storedReceipts[thread] } : nil
+    }
     override func timelineWithConfiguration(configuration: TimelineConfiguration) async throws -> Timeline {
         configurations.append(configuration)
         guard !fail, case .event(let eventID, _, _) = configuration.focus, let timeline = timelines[eventID] else {
@@ -104,8 +134,11 @@ final class FakeThreadClient: Client, @unchecked Sendable {
     override func getRoom(roomId: String) throws -> Room? { rooms[roomId] ?? room }
 }
 
-func threadEvent(_ id: String, timestamp: UInt64 = 1_000, content: TimelineItemContent? = nil) -> ThreadListItemEvent {
+func threadEvent(
+    _ id: String, timestamp: UInt64 = 1_000, sender: String = "@alice:example.org", isOwn: Bool = false,
+    content: TimelineItemContent? = nil
+) -> ThreadListItemEvent {
     ThreadListItemEvent(
-        eventId: id, timestamp: timestamp, sender: "@alice:example.org", senderProfile: .unavailable, isOwn: false,
+        eventId: id, timestamp: timestamp, sender: sender, senderProfile: .unavailable, isOwn: isOwn,
         content: content ?? textEvent(id, body: "Original snapshot").content)
 }

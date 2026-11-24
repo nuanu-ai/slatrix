@@ -69,6 +69,49 @@ struct ThreadFeedMappingTests {
         event.content = nil
         #expect(ThreadFeedMapping.message(event, roomID: room.id).kind == "unavailable")
     }
+
+    // capability: threads.feed
+    @Test("A thread is unread only when someone else replied after your threaded and unthreaded read receipts")
+    func unreadStateFromReceipts() throws {
+        let me = "@me:example.org"
+        let reply = threadEvent("$reply", timestamp: 5_000, sender: "@alice:example.org", isOwn: false)
+        let ownReply = threadEvent("$own", timestamp: 5_000, sender: me, isOwn: true)
+        let ownBySender = threadEvent("$own-sender", timestamp: 5_000, sender: me, isOwn: false)
+        #expect(
+            ThreadFeedMapping.isUnread(
+                latest: reply, ownUserID: me, threadReceipt: nil, unthreadedReceipt: nil))
+        #expect(
+            !ThreadFeedMapping.isUnread(
+                latest: nil, ownUserID: me, threadReceipt: nil, unthreadedReceipt: nil))
+        #expect(
+            !ThreadFeedMapping.isUnread(
+                latest: ownReply, ownUserID: me, threadReceipt: nil, unthreadedReceipt: nil))
+        #expect(
+            !ThreadFeedMapping.isUnread(
+                latest: ownBySender, ownUserID: me, threadReceipt: nil, unthreadedReceipt: nil))
+        // Older threaded receipt still leaves the newer reply unread.
+        let olderThread = UserReceipt(eventId: "$earlier", receipt: Receipt(timestamp: 4_000))
+        #expect(
+            ThreadFeedMapping.isUnread(
+                latest: reply, ownUserID: me, threadReceipt: olderThread, unthreadedReceipt: nil))
+        // Matching event ID or >= timestamp on either threaded or unthreaded receipt clears unread.
+        let exactThread = UserReceipt(eventId: "$reply", receipt: Receipt(timestamp: nil))
+        #expect(
+            !ThreadFeedMapping.isUnread(
+                latest: reply, ownUserID: me, threadReceipt: exactThread, unthreadedReceipt: nil))
+        let newerThread = UserReceipt(eventId: "$later", receipt: Receipt(timestamp: 5_000))
+        #expect(
+            !ThreadFeedMapping.isUnread(
+                latest: reply, ownUserID: me, threadReceipt: newerThread, unthreadedReceipt: nil))
+        let newerUnthreaded = UserReceipt(eventId: "$room-latest", receipt: Receipt(timestamp: 6_000))
+        #expect(
+            !ThreadFeedMapping.isUnread(
+                latest: reply, ownUserID: me, threadReceipt: olderThread, unthreadedReceipt: newerUnthreaded))
+        let olderUnthreaded = UserReceipt(eventId: "$room-old", receipt: Receipt(timestamp: 3_000))
+        #expect(
+            ThreadFeedMapping.isUnread(
+                latest: reply, ownUserID: me, threadReceipt: nil, unthreadedReceipt: olderUnthreaded))
+    }
 }
 
 private final class NotificationEvent: TimelineEvent, @unchecked Sendable {
@@ -319,5 +362,55 @@ struct ThreadFeedDiscoveryTests {
         feed.unavailable("Unavailable")
         feed.close()
         #expect(feed.items.isEmpty && feed.roomStates.isEmpty && !feed.isActive && feed.errorMessage == nil)
+    }
+
+    // capability: threads.feed
+    @Test("Threads load unread state from threaded and unthreaded receipts, clear when read, and re-arm on new replies")
+    func unreadStateAndReadClearing() async throws {
+        let me = "@me:example.org"
+        let unreadThread = ThreadListItem(
+            rootEvent: threadEvent("$t-unread", timestamp: 1_000),
+            latestEvent: threadEvent("$r-unread", timestamp: 5_000), numReplies: 2)
+        let readByThread = ThreadListItem(
+            rootEvent: threadEvent("$t-thread", timestamp: 1_000),
+            latestEvent: threadEvent("$r-thread", timestamp: 5_000), numReplies: 1)
+        let readByUnthreaded = ThreadListItem(
+            rootEvent: threadEvent("$t-unthreaded", timestamp: 1_000),
+            latestEvent: threadEvent("$r-unthreaded", timestamp: 4_000), numReplies: 1)
+        let ownLatest = ThreadListItem(
+            rootEvent: threadEvent("$t-own", timestamp: 1_000),
+            latestEvent: threadEvent("$r-own", timestamp: 6_000, sender: me, isOwn: true), numReplies: 1)
+        let list = FakeThreadList([unreadThread, readByThread, readByUnthreaded, ownLatest])
+        let fakeRoom = FakeThreadRoom(
+            threads: list,
+            receipts: [
+                .unthreaded: UserReceipt(eventId: "$room", receipt: Receipt(timestamp: 4_500)),
+                .thread(threadRootEventId: "$t-thread"): UserReceipt(
+                    eventId: "$r-thread", receipt: Receipt(timestamp: nil)),
+                .thread(threadRootEventId: "$t-unread"): UserReceipt(
+                    eventId: "$r-old", receipt: Receipt(timestamp: 2_000)),
+            ])
+        let client = FakeThreadClient(fakeRoom)
+        await feed.open(client: client, rooms: [rooms[0]], workspaceID: nil, ownUserID: me) { _ in }
+        let byRoot = Dictionary(uniqueKeysWithValues: feed.items.map { ($0.root.eventID, $0.isUnread) })
+        #expect(byRoot == ["$t-unread": true, "$t-thread": false, "$t-unthreaded": false, "$t-own": false])
+
+        // Reading the thread clears its unread flag immediately and keeps it cleared across close/reopen.
+        feed.markThreadRead(roomID: rooms[0].id, rootID: "$t-unread", eventID: "$r-unread")
+        #expect(feed.items.first { $0.root.eventID == "$t-unread" }?.isUnread == false)
+        feed.close()
+        await feed.open(client: client, rooms: [rooms[0]], workspaceID: nil, ownUserID: me) { _ in }
+        #expect(feed.items.first { $0.root.eventID == "$t-unread" }?.isUnread == false)
+
+        // A brand-new reply on that thread makes it unread again.
+        let updatedUnread = ThreadListItem(
+            rootEvent: threadEvent("$t-unread", timestamp: 1_000),
+            latestEvent: threadEvent("$r-newer", timestamp: 7_000), numReplies: 3)
+        list.emit([updatedUnread, readByThread, readByUnthreaded, ownLatest])
+        #expect(await eventually { feed.items.first { $0.root.eventID == "$t-unread" }?.isUnread == true })
+
+        // Marking the room read clears unread threads in that room.
+        feed.markRoomRead(roomID: rooms[0].id)
+        #expect(feed.items.filter(\.isUnread).map(\.root.eventID) == [])
     }
 }

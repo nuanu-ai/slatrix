@@ -31,10 +31,10 @@ enum ActivityBadge {
     ) {
         let scopedRooms = rooms.filter { room in
             room.membership != "leave"
-                && (room.isSpace
-                    ? room.membership == "invite"
-                    : WorkspaceMembership.includes(
-                        direct: room.isDirect, spaceIDs: room.spaceIDs, spaceID: workspaceID))
+                && (room.membership == "invite"
+                    || (!room.isSpace
+                        && WorkspaceMembership.includes(
+                            direct: room.isDirect, spaceIDs: room.spaceIDs, spaceID: workspaceID)))
         }
         let ids = Set(scopedRooms.map(\.id))
         let inviteIDs = Set(scopedRooms.filter { $0.membership == "invite" }.map(\.id))
@@ -45,11 +45,12 @@ enum ActivityBadge {
     }
 
     /// Whether Activity lists `room` in its Unread / Mentions summary: every room counted by the badge (invitations
-    /// and rooms with mentions, even when `hasUnread` is false) is always surfaced so nothing counted can stay hidden.
+    /// and rooms with mentions, even when `hasUnread` is false) is always surfaced, while muted rooms without mentions
+    /// or a manual unread flag stay quiet.
     static func isSummaryRoom(_ room: ChatRoom, mentionsOnly: Bool) -> Bool {
         room.membership != "leave"
             && (room.membership == "invite"
-                || (mentionsOnly ? room.mentions > 0 : (room.hasUnread || room.mentions > 0)))
+                || (mentionsOnly ? room.mentions > 0 : UnreadBadge(room) != .none))
     }
 
     static func count(rooms: [ChatRoom], items: [ActivityItem]) -> Int {

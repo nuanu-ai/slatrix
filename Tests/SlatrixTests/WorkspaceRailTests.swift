@@ -138,4 +138,29 @@ struct WorkspaceRailTests {
                 of: Self.room("x", spaces: spaces), current: current, workspaces: [Self.lab, Self.nested, Self.test])
                 == expected)
     }
+
+    // capability: home.workspace-switcher
+    @Test(
+        "All conversations never shows an unread dot for other spaces; a focused space dots only for other unread spaces"
+    )
+    func hasOtherUnread() {
+        let rooms = [
+            Self.room("a", spaces: ["!lab"], unread: 2),
+            Self.room("b", spaces: ["!test"], unread: 1, muted: true),
+            Self.room("orphan", unread: 1),
+        ]
+        let entries = WorkspaceRail.entries(workspaces: [Self.lab, Self.test], rooms: rooms)
+        // All conversations (nil) already shows every room, so no other-space dot appears.
+        #expect(!WorkspaceRail.hasOtherUnread(current: nil, entries: entries, rooms: rooms))
+        // Focused on !lab, the unread orphan room under All triggers the dot.
+        #expect(WorkspaceRail.hasOtherUnread(current: "!lab", entries: entries, rooms: rooms))
+        // Focused on !lab with only !lab unread and !test muted: no other-space dot.
+        let onlyLabUnread = [
+            Self.room("a", spaces: ["!lab"], unread: 2),
+            Self.room("b", spaces: ["!test"], unread: 1, muted: true),
+        ]
+        let labEntries = WorkspaceRail.entries(workspaces: [Self.lab, Self.test], rooms: onlyLabUnread)
+        #expect(!WorkspaceRail.hasOtherUnread(current: "!lab", entries: labEntries, rooms: onlyLabUnread))
+        #expect(WorkspaceRail.hasOtherUnread(current: "!test", entries: labEntries, rooms: onlyLabUnread))
+    }
 }

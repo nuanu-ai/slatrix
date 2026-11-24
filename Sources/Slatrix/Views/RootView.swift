@@ -755,7 +755,8 @@ struct RootView: View {
                                 let seen = await waitObserving(
                                     for: {
                                         target.eventID.map {
-                                            readInputs.seen(matrix)($0, target.roomID, notification.threadRootID)
+                                            readInputs.seen(matrix)(
+                                                $0, target.roomID, notification.threadRootID, notification.isReaction)
                                         } ?? false
                                     }, deadline: .now + ReadStatePolicy.layoutDeadline)
                                 return seen != true && appearance.notifications && composerIdentity == identity
@@ -1558,8 +1559,9 @@ struct RootView: View {
                 onOpenRoom: selectRoom,
                 onMarkRoomRead: { markReadState($0, unread: false) },
                 onMarkItemRead: { item in
-                    if item.hasMention, let room = matrix.rooms.first(where: { $0.id == item.roomID }),
-                        room.membership == "join", room.mentions > 0
+                    guard item.kind != .invite else { return }
+                    if let room = matrix.rooms.first(where: { $0.id == item.roomID }),
+                        room.membership == "join", room.hasUnread || room.mentions > 0
                     {
                         markReadState(room, unread: false)
                     } else {
@@ -1929,6 +1931,7 @@ struct RootView: View {
     ) {
         sidebarDrawer = false
         cancelThreadOpen()
+        readHold = ReadStateHold()
         if !keepPendingNotification, let target = PlatformIntegration.shared.pendingNotification {
             PlatformIntegration.shared.consumeNotification(target)
         }
@@ -2367,7 +2370,7 @@ struct RootView: View {
     private func markAllRead(inWorkspace spaceID: String?) {
         guard !matrix.isPreview else { return }
         let scope = ActivityBadge.scoped(rooms: matrix.rooms, items: matrix.activity.items, workspaceID: spaceID)
-        let roomsToRead = scope.rooms.filter { $0.membership == "join" && ($0.hasUnread || $0.mentions > 0) }
+        let roomsToRead = scope.rooms.filter { $0.membership == "join" && UnreadBadge($0) != .none }
         let readRoomIDs = Set(roomsToRead.map(\.id))
         for room in roomsToRead { markReadState(room, unread: false) }
         // Rooms written above mark their own items seen on success; mark local replies for already-read rooms at once.
@@ -3127,13 +3130,18 @@ private struct ReadInputs {
 
     /// Whether the reader has seen a message, by its event, its room and its thread's root when it has one: nil while
     /// its pane, shown, has yet to lay it out.
-    @MainActor func seen(_ matrix: MatrixService) -> (String, String, String?) -> Bool? {
+    @MainActor func seen(_ matrix: MatrixService) -> (String, String, String?, Bool) -> Bool? {
         let conversation = readContext(matrix)
         let thread = threadReadContext(matrix)
         let messages = TimelinePositions(matrix.messages.lazy.map(\.eventID))
         let replies = TimelinePositions(matrix.threadMessages.lazy.map(\.eventID))
         let reports = (conversation: matrix.shownConversationReport, thread: matrix.shownThreadReport)
-        return { eventID, roomID, threadRootID in
+        return { eventID, roomID, threadRootID, isReaction in
+            if isReaction && threadRootID == nil {
+                return ReadStatePolicy.seenReaction(
+                    eventID, roomID: roomID, conversation: conversation, thread: thread, messages: messages,
+                    replies: replies, conversationReport: reports.conversation, threadReport: reports.thread)
+            }
             let shown = ReadStatePolicy.isShown(
                 roomID: roomID, threadRootID: threadRootID, conversation: conversation, thread: thread)
             return threadRootID == nil
@@ -3207,7 +3215,7 @@ private struct ReadTracking: View {
             ) {
                 let seen = inputs.seen(matrix)
                 matrix.activity.markSeen { item in
-                    item.eventID.flatMap { seen($0, item.roomID, item.threadRootID) } == true
+                    item.eventID.flatMap { seen($0, item.roomID, item.threadRootID, item.kind == .reaction) } == true
                 }
             }
     }

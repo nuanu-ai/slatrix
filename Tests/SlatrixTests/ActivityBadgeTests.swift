@@ -107,4 +107,41 @@ struct ActivityBadgeTests {
         #expect(!ActivityBadge.isSummaryRoom(left, mentionsOnly: false))
         #expect(ActivityBadge.isSummaryRoom(spaceInvite, mentionsOnly: false))
     }
+
+    // capability: home.invitations
+    @Test("Channel invitations outside the active workspace still appear and count in Activity")
+    func scopedIncludesAllInvitesRegardlessOfWorkspace() {
+        var channelInvite = ChatRoom(id: "!chan-invite", name: "Invited channel", membership: "invite")
+        channelInvite.spaceIDs = []
+        var otherSpaceInvite = ChatRoom(id: "!other-invite", name: "Other space invite", membership: "invite")
+        otherSpaceInvite.spaceIDs = ["!space-b"]
+        let inviteItem = ActivityItem(
+            id: "invite-item", roomID: "!chan-invite", eventID: nil, roomName: "Invited channel",
+            senderID: "@alice:example.org", senderName: "Alice", body: "You were invited",
+            timestamp: Date(timeIntervalSince1970: 1), hasMention: false, threadRootID: nil, kind: .invite)
+
+        let scope = ActivityBadge.scoped(
+            rooms: [channelInvite, otherSpaceInvite], items: [inviteItem], workspaceID: "!space-a")
+        #expect(scope.rooms.map(\.id) == ["!chan-invite", "!other-invite"])
+        #expect(scope.items.map(\.id) == ["invite-item"])
+        #expect(ActivityBadge.count(rooms: scope.rooms, items: scope.items) == 2)
+    }
+
+    // capability: activity.feed
+    @Test("Muted rooms stay out of Activity's Unread summary unless mentioned or manually marked unread")
+    func summaryExcludesQuietMutedRooms() {
+        let mutedChannel = ChatRoom(id: "!m1", name: "Muted", unread: 5, unreadMessages: 5, muted: true)
+        let mutedDM = ChatRoom(id: "!m2", name: "Muted DM", isDirect: true, unread: 3, unreadMessages: 3, muted: true)
+        let mutedMention = ChatRoom(
+            id: "!m3", name: "Muted Mention", unread: 2, unreadMessages: 2, mentions: 1, muted: true)
+        let mutedMarked = ChatRoom(id: "!m4", name: "Muted Marked", isMarkedUnread: true, muted: true)
+        let unmuted = ChatRoom(id: "!u1", name: "Active", unread: 1, unreadMessages: 1)
+
+        #expect(!ActivityBadge.isSummaryRoom(mutedChannel, mentionsOnly: false))
+        #expect(!ActivityBadge.isSummaryRoom(mutedDM, mentionsOnly: false))
+        #expect(ActivityBadge.isSummaryRoom(mutedMention, mentionsOnly: false))
+        #expect(ActivityBadge.isSummaryRoom(mutedMention, mentionsOnly: true))
+        #expect(ActivityBadge.isSummaryRoom(mutedMarked, mentionsOnly: false))
+        #expect(ActivityBadge.isSummaryRoom(unmuted, mentionsOnly: false))
+    }
 }

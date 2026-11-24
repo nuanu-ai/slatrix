@@ -1009,7 +1009,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         authOperation == nil && !sessionCleanupPending && connectionStopTask == nil
     }
     var errorMessage: String?
-    var rooms: [ChatRoom] = [] { didSet { updateSelectedRoom() } }
+    var rooms: [ChatRoom] = [] {
+        didSet {
+            updateSelectedRoom()
+            withdrawReadRooms(from: oldValue, to: rooms)
+        }
+    }
     var workspaces: [Workspace] = []
     /// False until the first read of the room list after signing in, so an empty list is not shown as no rooms.
     var roomsLoaded = false
@@ -1163,6 +1168,20 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         room?.fullyReadEventID = nil
         room?.latest = nil
         if room != selectedRoom { selectedRoom = room }
+    }
+    private func withdrawReadRooms(from previous: [ChatRoom], to current: [ChatRoom]) {
+        guard let notifications, !previous.isEmpty, !current.isEmpty else { return }
+        let previousByID = Dictionary(previous.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let cleared = Set(
+            current.compactMap { room -> String? in
+                guard let old = previousByID[room.id] else { return nil }
+                let wasUnread = old.membership == "join" && (old.hasUnread || old.mentions > 0)
+                let isRead = room.membership == "join" && !room.hasUnread && room.mentions == 0
+                let resolvedInvite = old.membership == "invite" && room.membership != "invite"
+                return (wasUnread && isRead) || resolvedInvite ? room.id : nil
+            })
+        guard !cleared.isEmpty else { return }
+        Task { await notifications.withdrawRooms(cleared) }
     }
     var typingUsers: [String] = []
     var isPreview = false
@@ -1748,7 +1767,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                         self.notificationHandler?(
                             DesktopMessageNotification(
                                 target: target, title: title, body: body, playSound: notification.isNoisy == true,
-                                threadRootID: item.threadRootID))
+                                threadRootID: item.threadRootID, isReaction: item.kind == .reaction))
                     }
                 }
             })
@@ -2249,6 +2268,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             // Already on screen; this drops any other conversation that was still opening, or jump being prepared.
             jumping = nil
             selection = live.token
+            if rooms.first(where: { $0.id == id })?.isMarkedUnread == true {
+                lastAutomaticReceipt = nil
+                unreadAckToken += 1
+            }
             showTimeline(live.observer.snapshot, roomID: id)
             return true
         }
@@ -3865,7 +3888,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         do {
             let client = try requireClient()
             let token = sessionGeneration
-            await threadFeed.open(client: client, rooms: rooms, workspaceID: workspaceID) { [weak self] ids in
+            await threadFeed.open(
+                client: client, rooms: rooms, workspaceID: workspaceID, ownUserID: user?.id
+            ) { [weak self] ids in
                 guard let self, self.sessionGeneration == token else { throw CancellationError() }
                 try await self.roomSubscriptions.setFeedRooms(ids)
             }
@@ -3957,6 +3982,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     ) async throws {
         guard isVisible() else { throw CancellationError() }
         let original = try validatedThreadReadTimeline(target)
+        var marked = false
         try await retryingReceipt(retries) {
             try await readDelivery.perform(roomID: target.identity.roomID) { [weak self] in
                 guard let self else { throw CancellationError() }
@@ -3968,9 +3994,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 guard isVisible() else { throw CancellationError() }
                 _ = try self.validatedThreadReadTimeline(target)
                 self.lastThreadReceipt = target
+                marked = true
                 self.requestRefresh()
             }
         }
+        guard marked else { return }
+        activity.markSeen { $0.roomID == target.identity.roomID && $0.threadRootID == target.identity.rootID }
+        threadFeed.markThreadRead(
+            roomID: target.identity.roomID, rootID: target.identity.rootID, eventID: target.eventID)
+        await notifications?.withdrawThread(roomID: target.identity.roomID, rootID: target.identity.rootID)
     }
     /// A receipt the server turns down goes again after each of these, while the read policy still sends it.
     nonisolated static let receiptRetries: [Duration] = [.seconds(1), .seconds(5), .seconds(25)]
@@ -4013,6 +4045,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         guard lastAutomaticReceipt != target else { return }
         let originalTimeline = try validatedReadTimeline(target)
         let originalRoom = try requireRoom(target.roomID)
+        var marked = false
         try await retryingReceipt(retries) {
             try await readDelivery.perform(roomID: target.roomID) { [weak self] in
                 guard let self else { throw CancellationError() }
@@ -4028,9 +4061,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                     try check()
                 }
                 self.lastAutomaticReceipt = target
+                marked = true
                 self.requestRefresh()
             }
         }
+        if marked { await notifications?.withdrawRooms([target.roomID], includeThreads: false) }
     }
 
     private func validatedReadTimeline(_ target: ReadReceiptTarget) throws -> Timeline {
@@ -4070,6 +4105,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             try await room.setUnreadFlag(newValue: value)
             guard self.sessionGeneration == account, self.connectionStopTask == nil else { throw CancellationError() }
             self.requestRefresh()
+        }
+        if !value {
+            threadFeed.markRoomRead(roomID: roomID)
+            await notifications?.withdrawRooms([roomID], includeThreads: true)
         }
     }
 

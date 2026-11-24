@@ -46,7 +46,7 @@ struct ActivityFeedView: View {
         let summaryRooms = filteredSummaryRooms(scope)
         let hasMarkableUnread =
             !matrix.isPreview
-            && (scope.rooms.contains { $0.membership == "join" && ($0.hasUnread || $0.mentions > 0) }
+            && (scope.rooms.contains { $0.membership == "join" && UnreadBadge($0) != .none }
                 || scope.items.contains {
                     $0.kind != .invite && ActivityBadge.isUnread($0, room: roomsByID[$0.roomID])
                 })

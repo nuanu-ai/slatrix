@@ -12,6 +12,7 @@ struct ThreadFeedItem: Identifiable, Hashable {
     var root: ChatMessage
     var latest: ChatMessage?
     var replyCount: Int
+    var isUnread = false
     var lastActivityAt: Date { latest?.timestamp ?? root.timestamp }
 }
 
@@ -71,16 +72,42 @@ enum ThreadFeedMapping {
         return message
     }
 
-    static func project(_ values: [ThreadListItem], room: ChatRoom) -> [ThreadFeedItem] {
+    static func isRead(_ latest: ThreadListItemEvent, by receipt: UserReceipt?) -> Bool {
+        guard let receipt else { return false }
+        if receipt.eventId == latest.eventId { return true }
+        if let timestamp = receipt.receipt.timestamp, timestamp >= latest.timestamp { return true }
+        return false
+    }
+
+    static func isUnread(
+        latest: ThreadListItemEvent?, ownUserID: String?, threadReceipt: UserReceipt?, unthreadedReceipt: UserReceipt?
+    ) -> Bool {
+        guard let latest, let ownUserID, !latest.isOwn, latest.sender != ownUserID else { return false }
+        return !isRead(latest, by: threadReceipt) && !isRead(latest, by: unthreadedReceipt)
+    }
+
+    static func project(
+        _ values: [ThreadListItem], room: ChatRoom, ownUserID: String? = nil,
+        threadReceipts: [String: UserReceipt] = [:], unthreadedReceipt: UserReceipt? = nil,
+        locallyRead: [String: String] = [:]
+    ) -> [ThreadFeedItem] {
         var unique: [String: ThreadFeedItem] = [:]
         for value in values {
             var root = message(value.rootEvent, roomID: room.id)
             root.replyCount = Int(value.numReplies)
             let id = ActivityService.key(roomID: room.id, eventID: root.eventID)
+            let latestEvent = value.latestEvent
+            let readLocally = latestEvent.map { locallyRead[id] == $0.eventId } ?? false
+            let unread =
+                !readLocally
+                && isUnread(
+                    latest: latestEvent, ownUserID: ownUserID, threadReceipt: threadReceipts[root.eventID],
+                    unthreadedReceipt: unthreadedReceipt)
             let item = ThreadFeedItem(
                 id: id, roomID: room.id, roomName: room.name, isDirect: room.isDirect, isPrivate: room.isPrivate,
                 root: root,
-                latest: value.latestEvent.map { message($0, roomID: room.id) }, replyCount: Int(value.numReplies))
+                latest: latestEvent.map { message($0, roomID: room.id) }, replyCount: Int(value.numReplies),
+                isUnread: unread)
             if unique[id].map({ $0.lastActivityAt > item.lastActivityAt }) != true { unique[id] = item }
         }
         return Array(unique.values)
@@ -238,20 +265,28 @@ final class RoomSubscriptionCoordinator {
     private let limit = ConcurrencyLimit(slots: 2)
     private var client: Client?
     private var workspaceID: String?
+    private var ownUserID: String?
     private var rooms: [ChatRoom] = []
     private var generation = UUID()
     private var subscriptionOrder: [String] = []
     private var subscriptions: ((Set<String>) async throws -> Void)?
     private final class Record {
+        let room: Room
         let service: ThreadListService
         let token = UUID()
         var handles: [TaskHandle] = []
         var values: [ThreadListItem] = [] { didSet { projected = nil } }
+        var unthreadedReceipt: UserReceipt?
+        var threadReceipts: [String: UserReceipt] = [:]
+        var receiptRevision = 0
         /// `values` as rows, kept until they or the room change; projecting every room on each page is the cost.
         var projected: [ThreadFeedItem]?
         var revision = 0
         var paginationRevision = 0
-        init(_ service: ThreadListService) { self.service = service }
+        init(room: Room, service: ThreadListService) {
+            self.room = room
+            self.service = service
+        }
         func cancel() {
             for item in handles { item.cancel() }
             handles = []
@@ -283,17 +318,21 @@ final class RoomSubscriptionCoordinator {
     /// them at once while it checks again; signing out forgets them.
     @ObservationIgnored private var lastShown: (workspaceID: String?, items: [ThreadFeedItem])?
     @ObservationIgnored private var current: [String: ChatMessage] = [:]
+    /// Latest reply event ID already confirmed read locally, by thread key, so read state clears before sync echoes.
+    @ObservationIgnored private var locallyReadThreads: [String: String] = [:]
+    @ObservationIgnored private var unreadByRoom: [String: Bool] = [:]
     private static let firstScreen = 8
     @ObservationIgnored private var publishPending = false
 
     func open(
-        client: Client, rooms: [ChatRoom], workspaceID: String?,
+        client: Client, rooms: [ChatRoom], workspaceID: String?, ownUserID: String? = nil,
         subscriptions: @escaping (Set<String>) async throws -> Void
     ) async {
         close()
         isActive = true
         self.client = client
         self.workspaceID = workspaceID
+        self.ownUserID = ownUserID
         self.subscriptions = subscriptions
         let token = generation
         if let lastShown, lastShown.workspaceID == workspaceID { items = lastShown.items }
@@ -335,6 +374,7 @@ final class RoomSubscriptionCoordinator {
         close()
         lastShown = nil
         current = [:]
+        locallyReadThreads = [:]
     }
 
     func close() {
@@ -347,8 +387,10 @@ final class RoomSubscriptionCoordinator {
         previewOrder = []
         shownPreviews = [:]
         client = nil
+        ownUserID = nil
         subscriptions = nil
         rooms = []
+        unreadByRoom = [:]
         subscriptionOrder = []
         items = []
         roomStates = []
@@ -364,6 +406,57 @@ final class RoomSubscriptionCoordinator {
         errorMessage = message
     }
 
+    /// Clears a thread's unread indicator once a read receipt succeeds, before sync echoes it back.
+    func markThreadRead(roomID: String, rootID: String, eventID: String? = nil) {
+        let key = ActivityService.key(roomID: roomID, eventID: rootID)
+        let readEventID =
+            eventID
+            ?? records[roomID]?.values.first(where: { $0.rootEvent.eventId == rootID })?.latestEvent?.eventId
+            ?? lastShown?.items.first(where: { $0.id == key })?.latest?.eventID
+        if let readEventID { locallyReadThreads[key] = readEventID }
+        if var cached = lastShown {
+            var changed = false
+            for index in cached.items.indices where cached.items[index].id == key && cached.items[index].isUnread {
+                cached.items[index].isUnread = false
+                changed = true
+            }
+            if changed { lastShown = cached }
+        }
+        guard isActive, let record = records[roomID] else { return }
+        record.projected = nil
+        publishItems()
+        refreshReceipts(for: roomID)
+    }
+
+    /// Clears every thread's unread indicator in `roomID` once the room itself is marked read.
+    func markRoomRead(roomID: String) {
+        if var cached = lastShown {
+            var changed = false
+            for index in cached.items.indices where cached.items[index].roomID == roomID {
+                if records[roomID] == nil, let latestID = cached.items[index].latest?.eventID {
+                    locallyReadThreads[cached.items[index].id] = latestID
+                }
+                if cached.items[index].isUnread {
+                    cached.items[index].isUnread = false
+                    changed = true
+                }
+            }
+            if changed { lastShown = cached }
+        }
+        if let record = records[roomID] {
+            for value in record.values {
+                if let latestID = value.latestEvent?.eventId {
+                    let key = ActivityService.key(roomID: roomID, eventID: value.rootEvent.eventId)
+                    locallyReadThreads[key] = latestID
+                }
+            }
+            record.projected = nil
+        }
+        guard isActive, records[roomID] != nil else { return }
+        publishItems()
+        refreshReceipts(for: roomID)
+    }
+
     func updateRooms(_ candidates: [ChatRoom]) {
         guard isActive else { return }
         let next = candidates.filter { ThreadFeedMapping.isInScope($0, workspaceID: workspaceID) }
@@ -373,6 +466,16 @@ final class RoomSubscriptionCoordinator {
                 return lhs.name == rhs.name
                     ? lhs.id < rhs.id : lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             }
+        var becameRead: [String] = []
+        var nextUnread: [String: Bool] = [:]
+        nextUnread.reserveCapacity(next.count)
+        for room in next {
+            let unread = room.hasUnread || room.mentions > 0
+            if unreadByRoom[room.id] == true && !unread { becameRead.append(room.id) }
+            nextUnread[room.id] = unread
+        }
+        unreadByRoom = nextUnread
+        for roomID in becameRead { refreshReceipts(for: roomID) }
         // The room list refreshes with every unread change; the feed shows only which rooms, in order, and how.
         if next.elementsEqual(
             rooms,
@@ -557,7 +660,7 @@ final class RoomSubscriptionCoordinator {
         guard let room = try client.getRoom(roomId: roomID), room.membership() == .joined else {
             throw MatrixServiceError.noRoom
         }
-        let record = Record(room.threadListService())
+        let record = Record(room: room, service: room.threadListService())
         let token = generation
         records[roomID] = record
         let recordToken = record.token
@@ -570,6 +673,7 @@ final class RoomSubscriptionCoordinator {
                         else { return }
                         current.revision = revision
                         current.values = values
+                        if !self.isDiscovering { self.refreshReceipts(for: roomID) }
                         self.publishSoon()
                     }
                 }))
@@ -587,17 +691,60 @@ final class RoomSubscriptionCoordinator {
         return record
     }
 
+    private func refreshReceipts(for roomID: String) {
+        guard isActive, let userID = ownUserID, let record = records[roomID] else { return }
+        record.receiptRevision += 1
+        let token = generation
+        let recordToken = record.token
+        let revision = record.receiptRevision
+        let room = record.room
+        let values = record.values
+        Task { [weak self] in
+            let receipts = await Self.loadReceipts(room: room, values: values, ownUserID: userID)
+            await MainActor.run {
+                guard let self, self.generation == token, let current = self.records[roomID],
+                    current.token == recordToken, current.receiptRevision == revision
+                else { return }
+                current.unthreadedReceipt = receipts.unthreaded
+                current.threadReceipts = receipts.threads
+                current.projected = nil
+                self.publishSoon()
+            }
+        }
+    }
+
+    private nonisolated static func loadReceipts(
+        room: Room, values: [ThreadListItem], ownUserID: String?
+    ) async -> (unthreaded: UserReceipt?, threads: [String: UserReceipt]) {
+        guard let ownUserID, !values.isEmpty else { return (nil, [:]) }
+        let unthreaded = try? await room.loadUserReceipt(receiptType: .read, thread: .unthreaded, userId: ownUserID)
+        var threads: [String: UserReceipt] = [:]
+        for value in values {
+            guard let latest = value.latestEvent, !latest.isOwn, latest.sender != ownUserID,
+                !ThreadFeedMapping.isRead(latest, by: unthreaded)
+            else { continue }
+            let rootID = value.rootEvent.eventId
+            guard threads[rootID] == nil else { continue }
+            if let receipt = try? await room.loadUserReceipt(
+                receiptType: .read, thread: .thread(threadRootEventId: rootID), userId: ownUserID)
+            {
+                threads[rootID] = receipt
+            }
+        }
+        return (unthreaded, threads)
+    }
+
     private func paginate(roomIDs: [String]) async {
         guard let client, isActive, !roomIDs.isEmpty else { return }
         let token = generation
         isLoading = true
         errorMessage = nil
         defer { if generation == token { isLoading = false } }
-        var requests: [(String, ThreadListService)] = []
+        var requests: [(String, Room, ThreadListService)] = []
         for roomID in roomIDs {
             do {
                 let record = try record(for: roomID, client: client)
-                requests.append((roomID, record.service))
+                requests.append((roomID, record.room, record.service))
                 update(roomID) {
                     $0.state = .loading
                     $0.errorMessage = nil
@@ -620,29 +767,38 @@ final class RoomSubscriptionCoordinator {
         }
         guard generation == token, !Task.isCancelled else { return }
         let limit = limit
-        await withTaskGroup(of: (String, String?).self) { group in
+        let userID = ownUserID
+        await withTaskGroup(
+            of: (String, String?, [ThreadListItem], (unthreaded: UserReceipt?, threads: [String: UserReceipt])).self
+        ) { group in
             var cursor = 0
             func addNext() {
                 guard cursor < requests.count else { return }
-                let (id, service) = requests[cursor]
+                let (id, room, service) = requests[cursor]
                 cursor += 1
                 group.addTask {
+                    let failure: String?
                     do {
                         try await limit.run { try await service.paginate() }
-                        return (id, nil)
-                    } catch { return (id, await MatrixService.safeError(error)) }
+                        failure = nil
+                    } catch { failure = await MatrixService.safeError(error) }
+                    let values = service.items()
+                    let receipts = await Self.loadReceipts(room: room, values: values, ownUserID: userID)
+                    return (id, failure, values, receipts)
                 }
             }
             addNext()
             addNext()
-            for await (roomID, failure) in group {
+            for await (roomID, failure, values, receipts) in group {
                 guard generation == token, !Task.isCancelled else {
                     group.cancelAll()
                     continue
                 }
                 if let record = records[roomID] {
                     // Reading the service snapshot also covers completion arriving before queued listener callbacks.
-                    record.values = record.service.items()
+                    record.unthreadedReceipt = receipts.unthreaded
+                    record.threadReceipts = receipts.threads
+                    record.values = values
                     update(roomID) {
                         $0.state = failure == nil ? .ready : .error
                         $0.errorMessage = failure
@@ -683,7 +839,9 @@ final class RoomSubscriptionCoordinator {
         let all = rooms.flatMap { room -> [ThreadFeedItem] in
             guard let record = records[room.id] else { return [] }
             if let projected = record.projected { return projected }
-            let projected = ThreadFeedMapping.project(record.values, room: room)
+            let projected = ThreadFeedMapping.project(
+                record.values, room: room, ownUserID: ownUserID, threadReceipts: record.threadReceipts,
+                unthreadedReceipt: record.unthreadedReceipt, locallyRead: locallyReadThreads)
             record.projected = projected
             return projected
         }
