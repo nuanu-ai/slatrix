@@ -24,6 +24,34 @@ struct ActivityItem: Identifiable, Hashable {
 /// Activity's red count, as in Slack: unread mentions, thread replies Activity lists that you haven't opened, and
 /// invitations. Direct messages and channels keep their own badges, so their messages count only as mentions.
 enum ActivityBadge {
+    /// Rooms and activity items in the shown workspace, excluding rooms you already left so a left room's old reply
+    /// can never keep a phantom count on Activity.
+    static func scoped(rooms: [ChatRoom], items: [ActivityItem], workspaceID: String?) -> (
+        rooms: [ChatRoom], items: [ActivityItem]
+    ) {
+        let scopedRooms = rooms.filter { room in
+            room.membership != "leave"
+                && (room.isSpace
+                    ? room.membership == "invite"
+                    : WorkspaceMembership.includes(
+                        direct: room.isDirect, spaceIDs: room.spaceIDs, spaceID: workspaceID))
+        }
+        let ids = Set(scopedRooms.map(\.id))
+        let inviteIDs = Set(scopedRooms.filter { $0.membership == "invite" }.map(\.id))
+        let scopedItems = items.filter { item in
+            ids.contains(item.roomID) && (item.kind != .invite || inviteIDs.contains(item.roomID))
+        }
+        return (scopedRooms, scopedItems)
+    }
+
+    /// Whether Activity lists `room` in its Unread / Mentions summary: every room counted by the badge (invitations
+    /// and rooms with mentions, even when `hasUnread` is false) is always surfaced so nothing counted can stay hidden.
+    static func isSummaryRoom(_ room: ChatRoom, mentionsOnly: Bool) -> Bool {
+        room.membership != "leave"
+            && (room.membership == "invite"
+                || (mentionsOnly ? room.mentions > 0 : (room.hasUnread || room.mentions > 0)))
+    }
+
     static func count(rooms: [ChatRoom], items: [ActivityItem]) -> Int {
         let mentions = rooms.reduce(0) { count, room in
             switch room.membership {

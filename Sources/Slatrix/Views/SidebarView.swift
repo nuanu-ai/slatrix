@@ -37,13 +37,8 @@ struct SidebarView: View {
     @ThemeColors private var colors
     private var workspace: Workspace? { matrix.workspaces.first { $0.id == workspaceID } }
     private var activityCount: Int {
-        let rooms = matrix.rooms.filter { room in
-            room.isSpace
-                ? room.membership == "invite"
-                : WorkspaceMembership.includes(direct: room.isDirect, spaceIDs: room.spaceIDs, spaceID: workspaceID)
-        }
-        let ids = Set(rooms.map(\.id))
-        return ActivityBadge.count(rooms: rooms, items: matrix.activity.items.filter { ids.contains($0.roomID) })
+        let scope = ActivityBadge.scoped(rooms: matrix.rooms, items: matrix.activity.items, workspaceID: workspaceID)
+        return ActivityBadge.count(rooms: scope.rooms, items: scope.items)
     }
     private var visibleRooms: [ChatRoom] {
         matrix.rooms.filter { room in
@@ -400,7 +395,7 @@ private struct SidebarRoomRow: View, Equatable {
                 ].compactMap(\.self).joined(separator: ", ")
             )
             .contextMenu {
-                if room.hasUnread {
+                if room.hasUnread || room.mentions > 0 {
                     Button("Mark as read") { onMarkRead(room) }.disabled(isPreview || room.membership != "join")
                 } else {
                     Button("Mark as unread") { onMarkUnread(room) }.disabled(isPreview || room.membership != "join")
