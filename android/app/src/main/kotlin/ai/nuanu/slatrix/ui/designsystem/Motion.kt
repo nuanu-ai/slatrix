@@ -54,6 +54,9 @@ object Motion {
     /** Visibility threshold for normalized 0..1 progress animations so full-width slides settle sub-pixel. */
     const val UnitThreshold = 0.001f
 
+    /** Visibility threshold for pixel-space springs (sheets, swipes, media viewer) so exits finish right as they clear the edge. */
+    const val PixelThreshold = 1f
+
     /** Critically damped responsive spring for screen push/pop, bottom sheets, composer banner height, focus lift. */
     fun <T> spatial(visibilityThreshold: T? = null): SpringSpec<T> =
         spring(dampingRatio = SpatialDamping, stiffness = SpatialStiffness, visibilityThreshold = visibilityThreshold)
@@ -65,8 +68,6 @@ object Motion {
     /** Smooth exit and fade spring for highlight wash fade-out, scrims, and blur settle. */
     fun <T> gentle(visibilityThreshold: T? = null): SpringSpec<T> =
         spring(dampingRatio = GentleDamping, stiffness = GentleStiffness, visibilityThreshold = visibilityThreshold)
-
-    fun <T> pane(): SpringSpec<T> = spatial()
 }
 
 /** True when Android's animator duration scale is zero (Accessibility "Remove animations" or developer setting). */

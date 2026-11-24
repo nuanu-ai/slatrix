@@ -10,13 +10,21 @@ import ai.nuanu.slatrix.core.MentionPeople
 import ai.nuanu.slatrix.core.MentionSearch
 import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.MenuItem
+import ai.nuanu.slatrix.ui.designsystem.Motion
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -170,8 +178,9 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
         }) { linking = null }
     }
     var height by remember { mutableIntStateOf(0) }
-    // The field is a capsule on the glass panel under it.
-    Column(Modifier.fillMaxWidth().onSizeChanged { height = it.height }.padding(horizontal = UiMetrics.GapTiny, vertical = UiMetrics.GapSmall)) {
+    // The field is a capsule on the glass panel under it; banner and toolbar changes animate smoothly.
+    Column(Modifier.fillMaxWidth().animateContentSize(Motion.spatial()).onSizeChanged { height = it.height }
+        .padding(horizontal = UiMetrics.GapTiny, vertical = UiMetrics.GapSmall)) {
         if (suggestions != null && !editing) Popup(Alignment.BottomStart, IntOffset(0, -height),
             properties = PopupProperties(focusable = false)) {
             MentionList(suggestions.candidates) { candidate ->
@@ -260,10 +269,31 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
                 }
                 Spacer(Modifier.weight(1f))
             }
-            IconButton(onClick = onSend, enabled = !composer.loading && !composer.sending && composer.text.isNotBlank()) {
-                Icon(if (editing) Icons.Outlined.Check else Icons.AutoMirrored.Filled.Send,
-                    if (editing) "Save changes" else "Send message",
-                    tint = if (composer.text.isNotBlank()) colors.accent else colors.textTertiary)
+            ComposerSendButton(canSend = !composer.loading && !composer.sending && composer.text.isNotBlank(),
+                editing = editing, onSend = onSend)
+        }
+    }
+}
+
+@Composable
+private fun ComposerSendButton(canSend: Boolean, editing: Boolean, onSend: () -> Unit) {
+    val colors = SlatrixTheme.colors
+    val sendLabel = if (editing) "Save changes" else "Send message"
+    val icon = if (editing) Icons.Outlined.Check else Icons.AutoMirrored.Filled.Send
+    IconButton(onClick = onSend, enabled = canSend, modifier = Modifier.semantics { contentDescription = sendLabel }) {
+        Box(Modifier.size(UiMetrics.SwipeBadge), contentAlignment = Alignment.Center) {
+            AnimatedVisibility(!canSend,
+                enter = fadeIn(Motion.gentle()) + scaleIn(Motion.gentle(), initialScale = 0.8f),
+                exit = fadeOut(Motion.gentle()) + scaleOut(Motion.gentle(), targetScale = 0.8f)) {
+                Icon(icon, null, Modifier.size(UiMetrics.Icon), tint = colors.textTertiary)
+            }
+            AnimatedVisibility(canSend,
+                enter = fadeIn(Motion.snappy()) + scaleIn(Motion.snappy(), initialScale = 0.72f),
+                exit = fadeOut(Motion.gentle()) + scaleOut(Motion.gentle(), targetScale = 0.72f)) {
+                Box(Modifier.size(UiMetrics.SwipeBadge).background(colors.accentFill, CircleShape),
+                    contentAlignment = Alignment.Center) {
+                    Icon(icon, null, Modifier.size(UiMetrics.Icon), tint = colors.onAccent)
+                }
             }
         }
     }

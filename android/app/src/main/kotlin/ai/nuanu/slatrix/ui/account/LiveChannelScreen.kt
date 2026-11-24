@@ -681,6 +681,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, aft
     val threshold = remember(message.id) { Animatable(0f) }
     var activated by remember(message.id) { mutableStateOf(false) }
     val reach = with(LocalDensity.current) { UiMetrics.Swipe.toPx() }
+    val context = LocalContext.current
     val swipes = rememberCoroutineScope()
     val reply = onReply?.takeIf { message.eventId != null && !failed }
     Box(Modifier.fillMaxWidth().onGloballyPositioned { place.y = it.positionInWindow().y }
@@ -688,8 +689,14 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, aft
         var past = false
         fun settle() {
             activated = false
-            swipes.launch { drag.animateTo(0f, Motion.snappy()) }
-            swipes.launch { threshold.animateTo(0f, Motion.gentle(Motion.UnitThreshold)) }
+            swipes.launch {
+                if (coroutineContext.isMotionReduced(context)) drag.snapTo(0f)
+                else drag.animateTo(0f, Motion.snappy(Motion.PixelThreshold))
+            }
+            swipes.launch {
+                if (coroutineContext.isMotionReduced(context)) threshold.snapTo(0f)
+                else threshold.animateTo(0f, Motion.gentle(Motion.UnitThreshold))
+            }
         }
         detectHorizontalDragGestures(onDragStart = { past = false; activated = false }, onDragCancel = ::settle, onDragEnd = {
             if (past) reply(message)

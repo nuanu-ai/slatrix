@@ -1,8 +1,10 @@
 package ai.nuanu.slatrix
 
 import ai.nuanu.slatrix.core.ComposerState
+import ai.nuanu.slatrix.core.ComposerTarget
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
+import ai.nuanu.slatrix.core.MessageAttachment
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.RoomSummary
@@ -13,6 +15,7 @@ import ai.nuanu.slatrix.ui.account.LiveChannelScreen
 import ai.nuanu.slatrix.ui.account.LivePreferencesScreen
 import ai.nuanu.slatrix.ui.account.MessageActions
 import ai.nuanu.slatrix.ui.account.MessageActionsHost
+import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import android.app.Application
@@ -29,8 +32,15 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollToIndexAction
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -39,7 +49,9 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.semantics.SemanticsActions
+import java.io.ByteArrayOutputStream
 import kotlin.math.abs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -425,6 +437,131 @@ class MotionTest {
         val restored = topPixel()
         assertTrue("Conversation returns to rest after smooth exit ($restored vs $atRest)",
             abs(restored.red - atRest.red) < 0.02f)
+    }
+
+    @Test fun bottomSheetSlidesDownSmoothlyOnDismissBeforeClosing() {
+        var open by mutableStateOf(true)
+        var dismissed = false
+        compose.setContent {
+            SlatrixTheme {
+                if (open) BottomSheet({ dismissed = true; open = false }, SlatrixTheme.colors.overlay) {
+                    Text("Sheet item")
+                }
+            }
+        }
+        compose.waitForIdle()
+        val restTop = compose.onNodeWithText("Sheet item").getUnclippedBoundsInRoot().top.value
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithContentDescription("Close").performSemanticsAction(SemanticsActions.OnClick)
+        compose.runOnUiThread { Snapshot.sendApplyNotifications() }
+        compose.mainClock.advanceTimeBy(48)
+        assertFalse("Sheet animates down before calling onDismissRequest", dismissed)
+        val slidingTop = compose.onNodeWithText("Sheet item").getUnclippedBoundsInRoot().top.value
+        assertTrue("Sheet moves downward while dismissing ($slidingTop vs $restTop)", slidingTop > restTop + 1f)
+        compose.mainClock.advanceTimeBy(1_000)
+        assertTrue("Sheet finishes dismissing once off-screen", dismissed)
+        compose.onNodeWithText("Sheet item").assertDoesNotExist()
+    }
+
+    @Test fun mediaViewerSwipeDownDismissesWhenUnzoomedAndSpringsBackWhenShort() {
+        val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
+        val png = ByteArrayOutputStream().also { Bitmap.createBitmap(16, 9, Bitmap.Config.ARGB_8888).compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        val photo = ConversationMessage("p", "\$p", "@mira:example.org", "Mira", "office.jpg", null,
+            1_700_000_000_000L, MessageKind.Attachment, MessageSendState.Sent, false, "M", 0,
+            attachment = MessageAttachment(MessageAttachment.Kind.Image, "office.jpg", "image/jpeg", 2_000_000, 1600, 900, TestMediaSource("mxc://example.org/swipe")))
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(photo), loading = false, hasMore = false),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                    loadPicture = { _, _, _, _ -> png })
+            }
+        }
+        compose.onNodeWithContentDescription("office.jpg").performClick()
+        val viewer = hasContentDescription("office.jpg") and hasAnyAncestor(isDialog())
+        compose.onNode(viewer).assertIsDisplayed()
+
+        // A short downward nudge below threshold springs back without dismissing.
+        compose.onNode(viewer).performTouchInput { swipeDown(startY = centerY, endY = centerY + 40f, durationMillis = 300) }
+        compose.onNodeWithContentDescription("Close").assertIsDisplayed()
+
+        // While zoomed in, a vertical drag pans rather than dismissing.
+        compose.onNode(viewer).performTouchInput { doubleClick() }
+        compose.onNode(viewer).performTouchInput { swipeDown(startY = top + 100f, endY = bottom - 100f, durationMillis = 300) }
+        compose.onNodeWithContentDescription("Close").assertIsDisplayed()
+
+        // Unzoom back to 1x, then a full vertical swipe dismisses the viewer.
+        compose.onNode(viewer).performTouchInput { doubleClick() }
+        compose.onNode(viewer).performTouchInput { swipeDown(startY = top + 100f, endY = bottom - 50f, durationMillis = 200) }
+        compose.onNodeWithContentDescription("Close").assertDoesNotExist()
+    }
+
+    @Test fun composerBannerAnimatesHeightAndSendButtonKeepsSemantics() {
+        val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
+        var composer by mutableStateOf(ComposerState(loading = false))
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(emptyList(), loading = false, hasMore = false),
+                    composer, {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onNodeWithText("Message #design").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithContentDescription("Send message").assertIsNotEnabled()
+
+        compose.mainClock.autoAdvance = false
+        compose.runOnUiThread {
+            composer = composer.copy(
+                text = "Sounds good",
+                target = ComposerTarget.Reply("\$p", "Mira", "Ship it?"),
+            )
+            Snapshot.sendApplyNotifications()
+        }
+        compose.mainClock.advanceTimeBy(32)
+        val midTop = compose.onNodeWithText("Replying to Mira").getUnclippedBoundsInRoot().top.value
+        compose.mainClock.advanceTimeBy(800)
+        val settledTop = compose.onNodeWithText("Replying to Mira").getUnclippedBoundsInRoot().top.value
+        assertTrue("Reply banner animates the composer upward smoothly instead of snapping ($midTop vs $settledTop)",
+            midTop > settledTop + 1f)
+        compose.onNodeWithContentDescription("Send message").assertIsEnabled()
+    }
+
+    @Test fun jumpHighlightFadesOutSmoothlyAfterHoldInsteadOfSnapping() {
+        val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
+        val rows = (1..20).map { i ->
+            ConversationMessage("m$i", "\$m$i", "@mira:example.org", "Mira", "Message $i", null,
+                1_700_000_000_000L + i * 60_000L, MessageKind.Text, MessageSendState.Sent, false, "M", 0)
+        }
+        lateinit var rootView: View
+        fun rowEdgePixel(bounds: Rect): Color {
+            val bitmap = Bitmap.createBitmap(rootView.width, rootView.height, Bitmap.Config.ARGB_8888)
+            rootView.draw(Canvas(bitmap))
+            val x = (bounds.left + 8f).toInt().coerceIn(0, bitmap.width - 1)
+            val y = bounds.center.y.toInt().coerceIn(0, bitmap.height - 1)
+            return Color(bitmap.getPixel(x, y))
+        }
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            rootView = LocalView.current
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false, highlight = "\$m10"),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.mainClock.advanceTimeBy(160)
+        val targetBounds = compose.onNodeWithText("Message 10").fetchSemanticsNode().boundsInRoot
+        val fullLit = rowEdgePixel(targetBounds)
+
+        // Just past the hold duration, the highlight wash is fading smoothly rather than snapping off.
+        compose.mainClock.advanceTimeBy(UiMetrics.HighlightMillis - 160 + 48)
+        val midFade = rowEdgePixel(targetBounds)
+
+        compose.mainClock.advanceTimeBy(1_000)
+        val cleared = rowEdgePixel(targetBounds)
+
+        assertTrue("Jump highlight visibly tints the target row ($fullLit vs $cleared)",
+            abs(fullLit.blue - cleared.blue) > 0.04f)
+        assertTrue("Jump highlight fades smoothly after hold instead of snapping ($midFade between $fullLit and $cleared)",
+            abs(midFade.blue - cleared.blue) > 0.01f && abs(midFade.blue - fullLit.blue) > 0.01f)
     }
 
     /** After [show], [text] is still on its way in two frames later, and settles cleanly within 600 ms. */
