@@ -51,7 +51,8 @@ struct DesignTokenTests {
     func colors(theme: ColorTheme) throws {
         let roles: [String: KeyPath<AppColors, Color>] = [
             "textPrimary": \.textPrimary, "textBody": \.textBody, "textSecondary": \.textSecondary,
-            "textTertiary": \.textTertiary, "canvas": \.canvas, "raised": \.raised, "sunken": \.sunken,
+            "textTertiary": \.textTertiary, "canvas": \.canvas, "rowHover": \.rowHover, "raised": \.raised,
+            "surfaceCard": \.surfaceCard, "sunken": \.sunken,
             "overlay": \.overlay, "control": \.control, "tooltip": \.tooltip, "onTooltip": \.onTooltip,
             "scrim": \.scrim, "sidebar": \.sidebar, "border": \.border, "borderStrong": \.borderStrong,
             "hover": \.hover, "pressed": \.pressed, "selection": \.selection, "highlight": \.highlight,

@@ -32,7 +32,7 @@ struct AppColors {
 
     /// What a theme changes: its surfaces, its text, and the ink its lines, wells and hovers are drawn in.
     private struct Neutrals {
-        var text, secondary, tertiary, canvas, sidebar, overlay, control: UInt32
+        var text, secondary, tertiary, canvas, rowHover, raised, surfaceCard, sidebar, overlay, control: UInt32
         var ink: UInt32
         /// How much stronger lines and the selection are than the default theme's.
         var lines = 1.0
@@ -49,32 +49,40 @@ struct AppColors {
             switch (theme, dark) {
             case (.standard, false):
                 (text, secondary, tertiary) = (0x1d1d1f, 0x58585e, 0x6c6c72)
-                (canvas, sidebar, overlay, control, ink) = (0xffffff, 0xf3f3f5, 0xfbfbfd, 0xffffff, 0x000000)
+                (canvas, rowHover, raised, surfaceCard) = (0xffffff, 0xf6f6f8, 0xf2f2f5, 0xffffff)
+                (sidebar, overlay, control, ink) = (0xf3f3f5, 0xfbfbfd, 0xffffff, 0x000000)
             case (.standard, true):
                 (text, secondary, tertiary) = (0xf5f5f7, 0x9e9ea5, 0x8e8e94)
-                (canvas, sidebar, overlay, control, ink) = (0x141416, 0x1d1d20, 0x252528, 0x1f1f22, 0xffffff)
+                (canvas, rowHover, raised, surfaceCard) = (0x141416, 0x1b1b1f, 0x222227, 0x222227)
+                (sidebar, overlay, control, ink) = (0x1d1d20, 0x27272d, 0x1f1f22, 0xffffff)
             // Cool blue-gray, like a slate.
             case (.slate, false):
                 (text, secondary, tertiary) = (0x111827, 0x556070, 0x616b7f)
-                (canvas, sidebar, overlay, control, ink) = (0xffffff, 0xeef1f7, 0xfafbfd, 0xffffff, 0x101828)
+                (canvas, rowHover, raised, surfaceCard) = (0xffffff, 0xf4f6fa, 0xeef1f7, 0xffffff)
+                (sidebar, overlay, control, ink) = (0xeef1f7, 0xfafbfd, 0xffffff, 0x101828)
             case (.slate, true):
                 (text, secondary, tertiary) = (0xe8ecf4, 0x9aa3b5, 0x8b94a7)
-                (canvas, sidebar, overlay, control, ink) = (0x0d1017, 0x151a26, 0x1e2536, 0x1a2030, 0xffffff)
+                (canvas, rowHover, raised, surfaceCard) = (0x0d1017, 0x131823, 0x1b2231, 0x1b2231)
+                (sidebar, overlay, control, ink) = (0x151a26, 0x222a3c, 0x1a2030, 0xffffff)
             // Warm paper.
             case (.sand, false):
                 (text, secondary, tertiary) = (0x231f1a, 0x60574c, 0x6e655a)
-                (canvas, sidebar, overlay, control, ink) = (0xfdfbf7, 0xf2ece2, 0xfffdfa, 0xffffff, 0x3c2814)
+                (canvas, rowHover, raised, surfaceCard) = (0xfdfbf7, 0xf7f3eb, 0xf2ece2, 0xfffdfa)
+                (sidebar, overlay, control, ink) = (0xf2ece2, 0xfffdfa, 0xffffff, 0x3c2814)
             case (.sand, true):
                 (text, secondary, tertiary) = (0xf2ede6, 0xaaa195, 0x9b9286)
-                (canvas, sidebar, overlay, control, ink) = (0x171512, 0x221f1a, 0x2a2620, 0x26221d, 0xfff0dc)
+                (canvas, rowHover, raised, surfaceCard) = (0x171512, 0x1f1c18, 0x27231e, 0x27231e)
+                (sidebar, overlay, control, ink) = (0x221f1a, 0x2e2a24, 0x26221d, 0xfff0dc)
             // Black and white text, and lines twice as strong.
             case (.contrast, false):
                 (text, secondary, tertiary) = (0x000000, 0x3d3d42, 0x55555b)
-                (canvas, sidebar, overlay, control, ink) = (0xffffff, 0xf0f0f2, 0xffffff, 0xffffff, 0x000000)
+                (canvas, rowHover, raised, surfaceCard) = (0xffffff, 0xf5f5f7, 0xf0f0f2, 0xffffff)
+                (sidebar, overlay, control, ink) = (0xf0f0f2, 0xffffff, 0xffffff, 0x000000)
                 lines = 2
             case (.contrast, true):
                 (text, secondary, tertiary) = (0xffffff, 0xc7c7cc, 0xaeaeb2)
-                (canvas, sidebar, overlay, control, ink) = (0x000000, 0x141416, 0x1c1c1f, 0x161618, 0xffffff)
+                (canvas, rowHover, raised, surfaceCard) = (0x000000, 0x101012, 0x19191d, 0x19191d)
+                (sidebar, overlay, control, ink) = (0x141416, 0x222226, 0x161618, 0xffffff)
                 lines = 2
             default: preconditionFailure("\(theme) draws a frame")
             }
@@ -119,8 +127,8 @@ struct AppColors {
     /// theme's and never as marks among the words.
     var wallpaperDoodle: Color {
         guard let frame = neutrals.frame else { return .clear }
-        if dark { return .white.opacity(0.035) }
-        return frame.translucent ? .black.opacity(0.03) : Color(hex: frame.start).opacity(0.035)
+        if dark { return .white.opacity(0.025) }
+        return frame.translucent ? .black.opacity(0.025) : Color(hex: frame.start).opacity(0.025)
     }
     /// The colors of what sits on the frame, such as the sidebar: on a colored frame its text, lines and fills are
     /// light, and the accent is white, as in Slack's sidebar.
@@ -134,6 +142,9 @@ struct AppColors {
         colors.neutrals.text = 0xffffff
         colors.neutrals.ink = 0xffffff
         (colors.neutrals.canvas, colors.neutrals.sidebar) = (frame.start, frame.start)
+        colors.neutrals.rowHover = Self.mix(0xffffff, 0.08, over: frame.start)
+        colors.neutrals.raised = Self.mix(0xffffff, 0.12, over: frame.start)
+        colors.neutrals.surfaceCard = colors.neutrals.raised
         colors.neutrals.control = Self.mix(0xffffff, 0.12, over: frame.start)
         colors.neutrals.onAccent = frame.start
         colors.neutrals.lines = 1.6
@@ -162,8 +173,12 @@ struct AppColors {
 
     /// The window: the conversation, panes and modals. Near black in dark mode, as Apple's own apps are.
     var canvas: Color { Color(hex: neutrals.canvas) }
-    /// Cards and tiles that sit on the canvas, in the sidebar's gray.
-    var raised: Color { sidebar }
+    /// Opaque hover band for message and list rows, keeping wallpaper doodles from bleeding through.
+    var rowHover: Color { Color(hex: neutrals.rowHover) }
+    /// Grouped cards, secondary panels and footers that sit on the canvas.
+    var raised: Color { Color(hex: neutrals.raised) }
+    /// Interactive cards (files, attachments) lifted above hovered rows in both light and dark modes.
+    var surfaceCard: Color { Color(hex: neutrals.surfaceCard) }
     /// Wells: reserved media boxes, chips, skeletons, filled round buttons.
     var sunken: Color { ink.opacity(dark ? 0.07 : 0.05) }
     /// Menus, popovers, the switcher and toasts that float over content.
@@ -228,10 +243,10 @@ struct AppColors {
     /// An @Name pill in a message or the composer. Deeper than the accent in light mode, so it reads on its tint.
     var mentionText: Color { dark ? accent : deepAccent }
     var mentionFill: Color { accentTint }
-    /// The pill of a mention that notifies you, or everyone: a stronger fill than anyone else's, under white text in
-    /// dark mode.
-    var mentionYouText: Color { dark ? onAccent : deepAccent }
-    var mentionYouFill: Color { accentFill.opacity(dark ? 0.42 : 0.24) }
+    /// The pill of a mention that notifies you, or everyone: warm amber so it stands apart from links and other
+    /// mentions, matching Slack desktop and Slatrix Android.
+    var mentionYouText: Color { Color(hex: dark ? 0xffe58f : 0x7a4d00) }
+    var mentionYouFill: Color { Color(hex: dark ? 0xcc8e14 : 0xf2c744).opacity(dark ? 0.22 : 0.3) }
     private var deepAccent: Color { Color(nsColor: accentBase.blended(withFraction: 0.5, of: .black) ?? accentBase) }
     /// Inline code in a message.
     var code: Color { sunken }
@@ -250,20 +265,30 @@ struct AppColors {
     var onMedia: Color { .white }
     /// A thin edge around white lines over a photo, such as the crop frame, so they still show against white.
     var onMediaEdge: Color { Color.black.opacity(0.4) }
-    /// A file card's type tile, under a white glyph in either theme.
-    func file(_ kind: FileKind) -> Color {
+    private static func fileHex(_ kind: FileKind) -> UInt32 {
         switch kind {
-        case .pdf: Color(hex: 0xd93a3a)
-        case .document: Color(hex: 0x2f6fde)
-        case .spreadsheet: Color(hex: 0x1f8f55)
-        case .presentation: Color(hex: 0xe8771e)
-        case .archive: Color(hex: 0x7d8086)
-        case .code: Color(hex: 0x5b55c9)
-        case .audio: Color(hex: 0xc23d84)
-        case .video: Color(hex: 0x8a4fd1)
-        case .image: Color(hex: 0x1b93a8)
-        case .generic: Color(hex: 0x5c6878)
+        case .pdf: 0xd93a3a
+        case .document: 0x2f6fde
+        case .spreadsheet: 0x1f8f55
+        case .presentation: 0xe8771e
+        case .archive: 0x7d8086
+        case .code: 0x5b55c9
+        case .audio: 0xc23d84
+        case .video: 0x8a4fd1
+        case .image: 0x1b93a8
+        case .generic: 0x5c6878
         }
+    }
+
+    /// A file type's shared hue from `design/tokens.json`.
+    func file(_ kind: FileKind) -> Color { Color(hex: Self.fileHex(kind)) }
+    /// Soft tinted fill behind a file type symbol, avoiding saturated blocks that compete with links.
+    func fileFill(_ kind: FileKind) -> Color { file(kind).opacity(dark ? 0.16 : 0.12) }
+    /// Subtle tinted hairline around a file type tile.
+    func fileEdge(_ kind: FileKind) -> Color { file(kind).opacity(dark ? 0.24 : 0.18) }
+    /// Vector symbol tint inside a file type tile, lifted in dark mode and deepened in light mode for contrast.
+    func fileGlyph(_ kind: FileKind) -> Color {
+        Color(hex: Self.mix(dark ? 0xffffff : 0x000000, dark ? 0.28 : 0.16, over: Self.fileHex(kind)))
     }
 }
 
