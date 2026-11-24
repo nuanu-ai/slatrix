@@ -223,10 +223,11 @@ class MatrixRoomsTest {
     }
 
     @Test fun aRoomTransitioningToReadOnSyncEmitsOnReadRooms() = runTest {
-        val design = TestRoom(roomInfo("!design:example.org", "design").copy(numUnreadMessages = 3u, numUnreadNotifications = 1u))
+        val design = TestRoom(roomInfo("!design:example.org", "design").copy(numUnreadMessages = 3u, numUnreadNotifications = 1u),
+            latest = latest(5_000u, "See you", own = false))
         val general = TestRoom(roomInfo("!general:example.org", "general"))
         val rooms = MatrixRooms(backgroundScope, RoomsClient(listOf(design, general)))
-        val read = Channel<String>(Channel.UNLIMITED)
+        val read = Channel<ReadRoom>(Channel.UNLIMITED)
         val collector = backgroundScope.launch { rooms.readRooms.collect { read.trySend(it) } }
         try {
             rooms.state.first { !it.loading }
@@ -236,7 +237,7 @@ class MatrixRoomsTest {
             assertTrue("Non-read updates must not emit on readRooms", read.tryReceive().isFailure)
 
             design.emit(design.info.copy(topic = "Still unread", numUnreadMessages = 0u, numUnreadNotifications = 0u))
-            assertEquals("!design:example.org", read.receive())
+            assertEquals(ReadRoom("!design:example.org", 5_000L), read.receive())
 
             design.emit(design.info.copy(topic = "Already read", numUnreadMessages = 0u, numUnreadNotifications = 0u))
             rooms.state.first { state -> state.rooms.single { it.id == "!design:example.org" }.topic == "Already read" }

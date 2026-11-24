@@ -177,6 +177,8 @@ data class ConversationState(
     val replies: Int? = null,
     /** Bumped when a non-own reaction or edit lands on an existing message, so the open screen sends a fresh read receipt. */
     val ackToken: Int = 0,
+    /** True while paginating a long thread backwards to locate a jumped-to older reply, holding auto-read back. */
+    val seekingTarget: Boolean = false,
 )
 
 /** Whether [message] joins [previous] under one avatar and name; the rule's cases are in spec/message-grouping.json. */
@@ -257,6 +259,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private var lastRead: Pair<String, Int>? = null
     /** Marked unread on this visit, so reading stops; guarded by [readLock]. */
     private var heldUnread = false
+    /** True after [clearVisit] already reset per-visit read state, so a warm [revisit] doesn't double-send a receipt. */
+    @Volatile private var visitCleared = false
     /** The timeline on screen; it and [pending] change only on [operations], which runs on one thread. */
     private var shown: Source? = null
     /** A timeline that replaces [shown] once it holds [pendingAnchor], or with none at its first update. */
@@ -372,16 +376,22 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 val nextRows = withRoot(rows)
                 val needsAck = initialized && !swapped && hasNewReactionOrEdit(mutableState.value.rows, nextRows)
                 initialized = true
-                mutableState.update {
-                    it.copy(rows = nextRows, loading = false, hasMore = it.hasMore || reset || swapped, focused = source.focused,
-                        highlight = it.highlight ?: target?.takeIf { id -> !resume && source.holds(id) }, firstUnread = unread,
-                        ackToken = if (needsAck) it.ackToken + 1 else it.ackToken).counted()
-                }
                 val jumpTarget = target
+                val seekTarget = jumpTarget?.takeIf {
+                    threadRoot != null && view == ConversationView.Timeline && !initialThreadPaged &&
+                        (mutableState.value.hasMore || reset || swapped) && !resume && !source.holds(it)
+                }
+                mutableState.update {
+                    val foundHighlight = it.highlight ?: jumpTarget?.takeIf { id -> !resume && source.holds(id) }
+                    it.copy(rows = nextRows, loading = false, hasMore = it.hasMore || reset || swapped, focused = source.focused,
+                        highlight = foundHighlight, firstUnread = unread,
+                        ackToken = if (needsAck) it.ackToken + 1 else it.ackToken,
+                        seekingTarget = if (foundHighlight != null) false else it.seekingTarget || seekTarget != null).counted()
+                }
                 if (threadRoot != null && view == ConversationView.Timeline && !initialThreadPaged && mutableState.value.hasMore) {
-                    if (jumpTarget != null && !resume && !source.holds(jumpTarget)) {
+                    if (seekTarget != null) {
                         initialThreadPaged = true
-                        loadOlderForTarget(jumpTarget)
+                        loadOlderForTarget(seekTarget)
                     } else if (rows.none { it is ConversationMessage && it.eventId != threadRoot }) {
                         initialThreadPaged = true
                         loadOlder()
@@ -507,7 +517,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     currentCoroutineContext().ensureActive()
                     mutableState.update { it.copy(error = "Couldn’t load older messages.") }
                 } finally {
-                    if (lifetime.isActive) mutableState.update { it.copy(loadingHistory = false) }
+                    if (lifetime.isActive) mutableState.update { it.copy(loadingHistory = false, seekingTarget = false) }
                 }
             }
         }
@@ -905,6 +915,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
             readLock.withLock {
                 try {
                     val timeline = timeline()
+                    // Drain already-queued SDK diffs so a newly arrived undecrypted message isn't marked read prematurely.
+                    caughtUp()
                     val token = mutableState.value.ackToken
                     if (heldUnread || !isLatestRemote(eventId)) return@withLock false
                     if (lastRead == eventId to token) return@withLock true
@@ -941,7 +953,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     /** Clears per-visit jump/unread state when parking a conversation in cache so Frame 1 of reuse never flashes it. */
     internal fun clearVisit() {
         target = null
-        mutableState.update { it.copy(highlight = null, startsAtUnread = false, ackToken = it.ackToken + 1) }
+        visitCleared = true
+        mutableState.update { it.copy(highlight = null, startsAtUnread = false, seekingTarget = false) }
         operations.launch { readLock.withLock { heldUnread = false; lastRead = null } }
     }
 
@@ -951,6 +964,8 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
      */
     fun revisit(root: ConversationMessage? = null, openedWith: Int? = null, listedRoot: Boolean = false) {
         target = null
+        val needsReset = !visitCleared
+        visitCleared = false
         val nextRoot = root?.asThreadRoot()
         if (threadRoot != null) {
             if (nextRoot != null) {
@@ -971,9 +986,9 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 if (current != null && merged != current) state.rows.toMutableList().apply { this[rootIndex] = merged!! }
                 else state.rows
             } else state.rows
-            state.copy(rows = updatedRows, highlight = null, startsAtUnread = false, ackToken = state.ackToken + 1).counted()
+            state.copy(rows = updatedRows, highlight = null, startsAtUnread = false, seekingTarget = false).counted()
         }
-        operations.launch { readLock.withLock { heldUnread = false; lastRead = null } }
+        if (needsReset) operations.launch { readLock.withLock { heldUnread = false; lastRead = null } }
     }
 
     /** Highlights [eventId] where it is when the rows on screen hold it, so a jump within the conversation doesn't reload it. */

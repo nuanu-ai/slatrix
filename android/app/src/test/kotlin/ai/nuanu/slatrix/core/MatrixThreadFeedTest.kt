@@ -99,10 +99,32 @@ class MatrixThreadFeedTest {
         feed.markRoomRead(design.roomId)
         assertEquals(false, feed.state.first { !it.items.single().unread }.items.single().unread)
     }
+
+    // capability: threads.feed
+    @Test fun anUnthreadedReceiptSentLaterOnAnEarlierEventDoesNotClearANewerThreadReply() = runTest {
+        val design = FeedRoom("!design:example.org", listOf(
+            thread(root = event("\$started", "@alex:example.org", 1u, "Shall we ship?"),
+                latest = event("\$answer", "@sam:example.org", 50u, "Yes, Friday")),
+        ), eventTimestamps = mapOf("\$earlier" to 10u, "\$room-latest" to 60u))
+        // Receipt was sent at t=80 (after reply at t=50), but points to an older room event from t=10.
+        design.unthreadedReceipt = UserReceipt("\$earlier", Receipt(80u))
+        val client = object : Client(NoHandle) {
+            override fun getRoom(roomId: String): Room? = design.takeIf { it.roomId == roomId }
+        }
+        val feed = MatrixThreadFeed(backgroundScope, client, "@alex:example.org",
+            listOf(RoomSummary(design.roomId, "design", false, "", UnreadBadge.Bold, "D", 0)))
+
+        assertEquals(true, feed.state.first { !it.loading }.items.single().unread)
+
+        design.unthreadedReceipt = UserReceipt("\$room-latest", Receipt(80u))
+        feed.refresh(design.roomId)
+        assertEquals(false, feed.state.first { !it.items.single().unread }.items.single().unread)
+    }
 }
 
 private class FeedRoom(val roomId: String, private val threads: List<ThreadListItem>,
-    private val receipts: Map<String, UserReceipt> = emptyMap()) : Room(NoHandle) {
+    private val receipts: Map<String, UserReceipt> = emptyMap(),
+    private val eventTimestamps: Map<String, ULong> = emptyMap()) : Room(NoHandle) {
     @Volatile var unthreadedReceipt: UserReceipt? = null
     private var loaded = emptyList<ThreadListItem>()
     private var listener: ThreadListEntriesListener? = null
@@ -117,6 +139,12 @@ private class FeedRoom(val roomId: String, private val threads: List<ThreadListI
         override fun subscribeToItemsUpdates(listener: ThreadListEntriesListener): TaskHandle {
             this@FeedRoom.listener = listener
             return object : TaskHandle(NoHandle) { override fun cancel() = Unit }
+        }
+    }
+    override suspend fun loadOrFetchEvent(eventId: String): TimelineEvent {
+        val ts = eventTimestamps[eventId] ?: throw IllegalStateException("Unknown event $eventId")
+        return object : TimelineEvent(NoHandle) {
+            override fun timestamp(): ULong = ts
         }
     }
     override suspend fun loadUserReceipt(receiptType: ReceiptType, thread: ReceiptThread, userId: String): UserReceipt? =

@@ -149,6 +149,11 @@ class MatrixActivity(private val userId: String, scope: CoroutineScope,
         current.map { if (it.roomId == roomId) it.copy(unread = false) else it }
     }
 
+    /** Permanently marks non-thread items in [roomId] read so old mentions don't resurrect on a later mention. */
+    fun markRoomMessagesRead(roomId: String) = mutableItems.update { current ->
+        current.map { if (it.roomId == roomId && it.kind != ActivityKind.ThreadReply) it.copy(unread = false) else it }
+    }
+
     private fun add(item: ActivityItem) {
         mutableItems.update { current ->
             // A later decryption of the same event replaces it in place, read if it was.

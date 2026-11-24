@@ -51,9 +51,13 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 try {
-                    activeOpenRoom(accountModel.workspace, accountModel.threads).collect { PushNotifications.openRoom = it }
+                    activeOpenTarget(accountModel.workspace, accountModel.threads).collect { target ->
+                        PushNotifications.openRoom = target?.first
+                        PushNotifications.openThread = target?.second
+                    }
                 } finally {
                     PushNotifications.openRoom = null
+                    PushNotifications.openThread = null
                 }
             }
         }
@@ -80,12 +84,12 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** The room currently on screen, preferring an active thread (e.g. opened from Threads) over the channel under it. */
+/** The room (and optional thread) currently on screen, preferring an active thread over the channel under it. */
 @OptIn(ExperimentalCoroutinesApi::class)
-internal fun activeOpenRoom(workspace: StateFlow<MatrixWorkspace?>, threads: StateFlow<MatrixWorkspace?>): Flow<String?> =
+internal fun activeOpenTarget(workspace: StateFlow<MatrixWorkspace?>, threads: StateFlow<MatrixWorkspace?>): Flow<Pair<String, String?>?> =
     combine(workspace, threads) { main, thread -> main to thread }.flatMapLatest { (main, thread) ->
         combine(main?.selected ?: flowOf(null), thread?.selected ?: flowOf(null)) { channel, activeThread ->
-            activeThread?.room?.id ?: channel?.room?.id
+            activeThread?.let { it.room.id to it.threadRoot } ?: channel?.let { it.room.id to null }
         }
     }
 

@@ -182,6 +182,44 @@ class MatrixConversationTest {
     }
 
     // capability: conversation.read
+    @Test fun warmReuseReadingBeforeRevisitDoesNotSendADuplicateReceipt() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$a", "First")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        conversation.state.first { it.rows.messages.size == 1 }
+        assertTrue(conversation.markRead("\$a"))
+        assertEquals(ReceiptType.READ to "\$a", timeline.receipts.receive())
+        assertEquals(ReceiptType.FULLY_READ to "\$a", timeline.receipts.receive())
+
+        // Parked in cache: clearVisit resets lastRead once.
+        conversation.clearVisit()
+        // Reopened warm: UI marks read immediately before the workspace worker runs revisit().
+        assertTrue(conversation.markRead("\$a"))
+        assertEquals(ReceiptType.READ to "\$a", timeline.receipts.receive())
+        assertEquals(ReceiptType.FULLY_READ to "\$a", timeline.receipts.receive())
+
+        conversation.revisit()
+        assertTrue(conversation.markRead("\$a"))
+        assertTrue("Revisit after clearVisit must not trigger a duplicate receipt", timeline.receipts.tryReceive().isFailure)
+        conversation.close()
+    }
+
+    // capability: conversation.read
+    @Test fun markReadDrainsQueuedDiffsBeforeMarkingAnEarlierMessageRead() = runTest {
+        val undecrypted = TimelineItemContent.MsgLike(MsgLikeContent(
+            MsgLikeKind.UnableToDecrypt(EncryptedMessage.Unknown), null, null, null))
+        val timeline = ConversationTimeline(listOf(conversationItem("old", "\$old", "Earlier")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        conversation.state.first { it.rows.messages.size == 1 }
+
+        // A newly arrived undecrypted message is queued in the SDK listener before Compose observes it.
+        timeline.emit(listOf(TimelineDiff.PushBack(conversationItem("enc", "\$enc", "Waiting", content = undecrypted))))
+        assertFalse("Must drain queued diffs and refuse to mark earlier message read past an undecrypted tail",
+            conversation.markRead("\$old"))
+        assertTrue(timeline.receipts.tryReceive().isFailure)
+        conversation.close()
+    }
+
+    // capability: conversation.read
     @Test fun anUndecryptedLatestMessageIsNotMarkedReadUntilItDecrypts() = runTest {
         val undecrypted = TimelineItemContent.MsgLike(MsgLikeContent(
             MsgLikeKind.UnableToDecrypt(EncryptedMessage.Unknown), null, null, null))
@@ -214,10 +252,28 @@ class MatrixConversationTest {
         }
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root", at = "\$oldReply")
         val found = withContext(Dispatchers.Default) {
-            withTimeout(2_000) { conversation.state.first { it.highlight == "\$oldReply" && !it.loadingHistory } }
+            withTimeout(2_000) { conversation.state.first { it.highlight == "\$oldReply" && !it.loadingHistory && !it.seekingTarget } }
         }
         assertEquals("\$oldReply", found.highlight)
+        assertFalse(found.seekingTarget)
         assertEquals("Stops immediately once the target reply lands", 3, timeline.pages)
+        conversation.close()
+    }
+
+    // capability: conversation.jump-to-message
+    @Test fun seekingTargetStaysTrueWhileThreadJumpPaginatesAndClearsOnceFound() = runTest {
+        val timeline = ConversationTimeline(listOf(conversationItem("r5", "\$r5", "Reply 5")))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root", at = "\$oldReply")
+        timeline.pageStarted.await()
+        assertTrue("Auto-read must be held back while seeking an older thread reply", conversation.state.value.seekingTarget)
+
+        timeline.emit(listOf(TimelineDiff.PushFront(conversationItem("old", "\$oldReply", "Found me"))))
+        timeline.page.complete(false)
+        val found = withContext(Dispatchers.Default) {
+            withTimeout(2_000) { conversation.state.first { it.highlight == "\$oldReply" && !it.seekingTarget } }
+        }
+        assertEquals("\$oldReply", found.highlight)
+        assertFalse(found.seekingTarget)
         conversation.close()
     }
 
@@ -230,9 +286,10 @@ class MatrixConversationTest {
         }
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline), threadRoot = "\$root", at = "\$missing")
         val settled = withContext(Dispatchers.Default) {
-            withTimeout(2_000) { conversation.state.first { it.rows.messages.size >= 6 && !it.loadingHistory } }
+            withTimeout(2_000) { conversation.state.first { it.rows.messages.size >= 6 && !it.loadingHistory && !it.seekingTarget } }
         }
         assertNull(settled.highlight)
+        assertFalse(settled.seekingTarget)
         assertEquals("Bounded backward pagination stops after 5 pages", 5, timeline.pages)
         conversation.close()
     }

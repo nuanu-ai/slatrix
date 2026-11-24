@@ -228,9 +228,12 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         if (activeThreadFeed === feed) activeThreadFeed = null
                     }
                 }
-                // Cross-device reads clear stale message alerts from the shade and launcher dot.
-                LaunchedEffect(rooms) {
-                    rooms?.readRooms?.collect { PushNotifications(context).clearMessages(it) }
+                // Cross-device reads clear stale message alerts (without erasing newer pushes) and keep Activity mentions read.
+                LaunchedEffect(rooms, activity) {
+                    rooms?.readRooms?.collect { read ->
+                        PushNotifications(context).clearMessages(read.roomId, throughTimestamp = read.throughTimestamp)
+                        activity?.markRoomMessagesRead(read.roomId)
+                    }
                 }
                 LaunchedEffect(rooms, activeThreadFeed) {
                     val feed = activeThreadFeed ?: return@LaunchedEffect
@@ -272,7 +275,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         // Bottom to top: each page is pushed over the ones before it in this order.
                         LiveWorkspace(listOfNotNull(
                             selected?.let { WorkspaceCover(it.room.id) {
-                                LiveConversation(it, workspace, workspace, jump, rooms, media, saved, setSaved, people, { id, name -> person = id to name }) { root, row, openedWith, replying ->
+                                LiveConversation(it, workspace, workspace, jump, rooms, media, saved, setSaved, people, { id, name -> person = id to name },
+                                    activity = activity) { root, row, openedWith, replying ->
                                     threads?.open(it.room, root, root = row, openedWith = openedWith, replying = replying)
                                 }
                             } },
@@ -334,7 +338,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 }) {
                                 LiveActivity(activity, rooms, threads, selectedSpaceId, threadFeed, jump,
                                     onInvitation = { invitation = it },
-                                    onOpenRoom = { room -> threads?.back(); workspace?.open(room) }) { list ->
+                                    onOpenRoom = { room -> threads?.back(); workspace?.open(room) },
+                                    onThreadsShown = { activeThreadFeed?.refresh() }) { list ->
                                     if (list.map { it.id }.toSet() != threadRooms?.map { it.id }?.toSet()) threadRooms = list
                                 }
                             }
@@ -454,8 +459,13 @@ internal fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: 
             { event ->
                 scope.launch {
                     if (conversation?.markRead(event) == true) {
-                        PushNotifications(context).clear(open.room.id)
-                        if (open.threadRoot != null) onThreadRead(open.room.id, open.threadRoot, event)
+                        if (open.threadRoot != null) {
+                            PushNotifications(context).clearMessages(open.room.id, threadRoot = open.threadRoot)
+                            onThreadRead(open.room.id, open.threadRoot, event)
+                        } else {
+                            PushNotifications(context).clearMessages(open.room.id)
+                            activity?.markRoomMessagesRead(open.room.id)
+                        }
                     }
                 }
             },
@@ -592,7 +602,7 @@ private fun LiveHome(userId: String, userAvatarUrl: String?, rooms: MatrixRooms?
 @Composable
 private fun LiveActivity(activity: MatrixActivity?, rooms: MatrixRooms?, threads: MatrixWorkspace?,
     selectedSpaceId: String?, threadFeed: ThreadFeedState, jump: (RoomSummary, String, String?) -> Unit,
-    onInvitation: (String) -> Unit, onOpenRoom: (RoomSummary) -> Unit,
+    onInvitation: (String) -> Unit, onOpenRoom: (RoomSummary) -> Unit, onThreadsShown: () -> Unit,
     onThreadRooms: (List<RoomSummary>) -> Unit) {
     val all = activity?.items?.collectAsState()?.value.orEmpty()
     val roomState = rooms?.state?.collectAsState()?.value
@@ -605,7 +615,8 @@ private fun LiveActivity(activity: MatrixActivity?, rooms: MatrixRooms?, threads
     ActivityScreen(items, { item -> activity?.markRead(item.id); room(item.roomId)?.let { jump(it, item.eventId, item.threadRoot) } },
         { thread -> room(thread.roomId)?.let { threads?.open(it, thread) } },
         invitations = invitations, mentionRooms = mentionRooms, onOpenInvitation = onInvitation, onOpenRoom = onOpenRoom) { onOpenThread, unreadOnly ->
-        // Asks for the feed only while the Threads filter shows, and again only when the set of conversations changes.
+        // Asks for the feed only while the Threads filter shows, and refreshes receipts on each visit to Threads.
+        LaunchedEffect(Unit) { onThreadsShown() }
         LaunchedEffect(inScope) { onThreadRooms(inScope) }
         ThreadsFeed(threadFeed, unreadOnly, onOpenThread)
     }
@@ -613,11 +624,12 @@ private fun LiveActivity(activity: MatrixActivity?, rooms: MatrixRooms?, threads
 
 private enum class ChannelPage { Browse, Create }
 
-/** Resolves a tapped notification's thread root when absent (e.g. a Later reminder) before jumping to it. */
+/** Resolves a tapped notification's message (following reactions) and thread root before jumping to it. */
 internal suspend fun openNotification(target: NotificationTarget, room: RoomSummary, workspace: MatrixWorkspace,
     threads: MatrixWorkspace?, clearOverlays: () -> Unit = {}) {
-    val threadRoot = target.threadRoot ?: workspace.threadRootOf(room.id, target.eventId)
+    val (eventId, resolvedRoot) = workspace.notificationTargetOf(room.id, target.eventId)
+    val threadRoot = resolvedRoot ?: target.threadRoot
     clearOverlays()
-    workspace.jumpTo(room, target.eventId, threadRoot)
-    if (threadRoot != null) threads?.open(room, threadRoot, at = target.eventId) else threads?.back()
+    workspace.jumpTo(room, eventId, threadRoot)
+    if (threadRoot != null) threads?.open(room, threadRoot, at = eventId) else threads?.back()
 }

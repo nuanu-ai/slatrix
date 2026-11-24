@@ -184,9 +184,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         hadConnection.value = connected
     }
     val read by rememberUpdatedState(onRead)
-    LaunchedEffect(latest?.id, latest?.eventId, latest?.kind, state.ackToken, resumed, jumped, reconnects) {
+    LaunchedEffect(latest?.id, latest?.eventId, latest?.kind, state.ackToken, state.seekingTarget, resumed, jumped, reconnects) {
         val event = latest?.eventId ?: return@LaunchedEffect
-        if (!resumed || !jumped) return@LaunchedEffect
+        if (!resumed || !jumped || state.seekingTarget) return@LaunchedEffect
         snapshotFlow {
             list.layoutInfo.visibleItemsInfo.any { item ->
                 item.key == latest.id && ReadState.seen(item.offset.toFloat(), (item.offset + item.size).toFloat(),

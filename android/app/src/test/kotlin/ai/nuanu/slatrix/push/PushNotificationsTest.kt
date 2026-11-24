@@ -215,16 +215,76 @@ class PushNotificationsTest {
             shadowOf(it.notification.contentIntent).savedIntent.getStringExtra(PushNotifications.EVENT_ID)
         })
     }
+
+    @Test fun anOpenThreadSuppressesAndClearsOnlyItsOwnAlerts() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.cancelAll()
+        val notifications = PushNotifications(context)
+        val verified = IdentityState(status = IdentityStatus.Verified)
+
+        PushNotifications.openRoom = "!team:example.org"
+        PushNotifications.openThread = "\$root"
+        try {
+            notifications.show("@alex:example.org", "!team:example.org", "\$same-thread",
+                notificationMessage(threadId = "\$root"), verified)
+            notifications.show("@alex:example.org", "!team:example.org", "\$channel-mention",
+                notificationMessage(threadId = null), verified)
+            notifications.show("@alex:example.org", "!team:example.org", "\$other-thread",
+                notificationMessage(threadId = "\$other"), verified)
+            assertEquals(setOf("\$channel-mention", "\$other-thread"), manager.activeNotifications.map {
+                shadowOf(it.notification.contentIntent).savedIntent.getStringExtra(PushNotifications.EVENT_ID)
+            }.toSet())
+        } finally {
+            PushNotifications.openRoom = null
+            PushNotifications.openThread = null
+        }
+
+        notifications.show("@alex:example.org", "!team:example.org", "\$thread-alert",
+            notificationMessage(threadId = "\$root"), verified)
+        notifications.remind("@alex:example.org", "!team:example.org", "\$rem", "Team", "Reminder")
+
+        notifications.clearMessages("!team:example.org", threadRoot = "\$root")
+        assertEquals(setOf("\$channel-mention", "\$other-thread", "\$rem"), manager.activeNotifications.map {
+            shadowOf(it.notification.contentIntent).savedIntent.getStringExtra(PushNotifications.EVENT_ID)
+        }.toSet())
+    }
+
+    @Test fun clearMessagesThroughTimestampPreservesNewerAlerts() {
+        val context = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(context).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val manager = context.getSystemService(NotificationManager::class.java)
+        manager.cancelAll()
+        val notifications = PushNotifications(context)
+        val verified = IdentityState(status = IdentityStatus.Verified)
+
+        notifications.show("@alex:example.org", "!team:example.org", "\$old",
+            notificationMessage(timestamp = 1_000u), verified)
+        notifications.show("@alex:example.org", "!team:example.org", "\$exact",
+            notificationMessage(timestamp = 2_000u), verified)
+        notifications.show("@alex:example.org", "!team:example.org", "\$newer",
+            notificationMessage(timestamp = 3_000u), verified)
+        notifications.show("@alex:example.org", "!team:example.org", "\$fallback",
+            NotificationStatus.EventNotFound, verified)
+
+        notifications.clearMessages("!team:example.org", throughTimestamp = 2_000L)
+        assertEquals(listOf("\$newer"), manager.activeNotifications.map {
+            shadowOf(it.notification.contentIntent).savedIntent.getStringExtra(PushNotifications.EVENT_ID)
+        })
+    }
 }
 
-private fun notificationMessage(body: String = "Review budget?", noisy: Boolean = true, senderName: String? = "Sam") = NotificationStatus.Event(NotificationItem(
+private fun notificationMessage(body: String = "Review budget?", noisy: Boolean = true, senderName: String? = "Sam",
+    threadId: String? = null, timestamp: ULong = 0u) = NotificationStatus.Event(NotificationItem(
     event = NotificationEvent.Timeline(object : TimelineEvent(NoHandle) {
         override fun content(): TimelineEventContent = TimelineEventContent.MessageLike(
             MessageLikeEventContent.RoomMessage(MessageType.Text(TextMessageContent(body, null)), null))
         override fun senderId(): String = "@sam:example.org"
+        override fun timestamp(): ULong = timestamp
     }),
     rawEvent = """{"type":"m.room.message","content":{"msgtype":"m.text","body":"Review budget?"}}""",
     senderInfo = NotificationSenderInfo(senderName, null, false),
     roomInfo = NotificationRoomInfo("Team", null, null, null, null, 2u, 0u, emptyList(), true, false, false, false),
-    isNoisy = noisy, hasMention = false, threadId = null, actions = null,
+    isNoisy = noisy, hasMention = false, threadId = threadId, actions = null,
 ))

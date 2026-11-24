@@ -215,6 +215,27 @@ class LiveWorkspaceTest {
         assertEquals(listOf("\$First"), reads)
     }
 
+    // capability: conversation.jump-to-message
+    @Test fun whileSeekingAThreadJumpTargetLiveChannelScreenHoldsBackAutoRead() {
+        val room = RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)
+        val latest = ConversationMessage("Latest", "\$Latest", "@sam:example.org", "Sam", "Latest", null,
+            0, MessageKind.Text, MessageSendState.Sent, false, "S", 0)
+        val timeline = mutableStateOf(ConversationState(listOf(latest), loading = false, hasMore = false, seekingTarget = true))
+        val reads = mutableListOf<String>()
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, timeline.value, ComposerState(loading = false), {}, {}, {}, {}, { reads += it }, {}, {}, {})
+            }
+        }
+        compose.waitForIdle()
+        assertEquals("Must not mark newest reply read while paginating backwards for an older jump target",
+            emptyList<String>(), reads)
+
+        compose.runOnIdle { timeline.value = timeline.value.copy(seekingTarget = false) }
+        compose.waitForIdle()
+        assertEquals(listOf("\$Latest"), reads)
+    }
+
     // capability: conversation.read
     @Test fun reconnectingRetriesMarkingTheLatestVisibleMessageRead() {
         val room = RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)

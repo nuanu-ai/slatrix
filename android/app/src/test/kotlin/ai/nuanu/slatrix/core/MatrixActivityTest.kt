@@ -119,6 +119,23 @@ class MatrixActivityTest {
         assertEquals(listOf("\$otherRoom"), activity.items.value.filter { it.unread }.map { it.eventId })
     }
 
+    // capability: activity.badge
+    @Test fun markingRoomMessagesReadPermanentlyClearsNonThreadItemsWithoutClearingThreadReplies() = runTest {
+        val activity = MatrixActivity("@alex:example.org", backgroundScope) { _, _ -> null }
+        activity.listener.onNotification(notification("\$mention", "Ping", at = 1_000u, mention = true), "!team:example.org")
+        activity.listener.onNotification(reaction("\$liked", "👍", at = 2_000u), "!team:example.org")
+        activity.listener.onNotification(notification("\$reply", "In thread", at = 3_000u, thread = "\$root"), "!team:example.org")
+        activity.listener.onNotification(notification("\$other", "Elsewhere", at = 4_000u, mention = true), "!design:example.org")
+        activity.items.first { it.size == 4 }
+
+        activity.markRoomMessagesRead("!team:example.org")
+        assertEquals(listOf("\$other", "\$reply"), activity.items.value.filter { it.unread }.map { it.eventId })
+
+        // A later unread mention in the same room must not resurrect the earlier read mention.
+        val unreadTeam = listOf(RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.Count("1"), "T", 0))
+        assertEquals(listOf("\$other", "\$reply"), activity.items.value.readWith(unreadTeam).filter { it.unread }.map { it.eventId })
+    }
+
     // capability: people.names
     @Test fun aMentionReadsAsThePeopleItNamesAndASenderWithoutANameByTheirLocalpart() = runTest {
         val activity = MatrixActivity("@alex:example.org", backgroundScope, memberNames = { room, ids ->

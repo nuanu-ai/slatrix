@@ -17,7 +17,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.matrix.rustcomponents.sdk.Client
+import org.matrix.rustcomponents.sdk.MessageLikeEventContent
 import org.matrix.rustcomponents.sdk.Room
+import org.matrix.rustcomponents.sdk.TimelineEventContent
 
 data class OpenChannel(
     val room: RoomSummary,
@@ -166,6 +168,26 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
         } catch (_: Exception) {
             // Unknown, it opens where the message is; the live timeline then simply doesn't hold a reply.
             null
+        }
+    }
+
+    /** Resolves a notification's [eventId] to its message (following reactions) and thread root, if any. */
+    suspend fun notificationTargetOf(roomId: String, eventId: String): Pair<String, String?> = withContext(Dispatchers.Default) {
+        try {
+            client.getRoom(roomId)?.use { room ->
+                val (targetId, root) = room.loadOrFetchEvent(eventId).use { event ->
+                    val related = ((runCatching { event.content() }.getOrNull() as? TimelineEventContent.MessageLike)
+                        ?.content as? MessageLikeEventContent.ReactionContent)?.relatedEventId
+                    if (related != null) related to null else eventId to event.threadRootEventId()
+                }
+                if (targetId != eventId) {
+                    targetId to quietly { room.loadOrFetchEvent(targetId).use { it.threadRootEventId() } }
+                } else targetId to root
+            } ?: (eventId to null)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            eventId to null
         }
     }
 

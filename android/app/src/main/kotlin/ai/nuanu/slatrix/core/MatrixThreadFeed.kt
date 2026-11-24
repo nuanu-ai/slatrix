@@ -140,8 +140,9 @@ class MatrixThreadFeed(scope: CoroutineScope, private val client: Client, privat
     private suspend fun project(summary: RoomSummary, room: Room, list: ThreadListService): List<ThreadFeedItem> {
         val threads = list.items()
         try {
-            // An unthreaded room receipt (from Mark as read or another device) marks threads up to its timestamp read too.
+            // An unthreaded room receipt (from Mark as read or another device) marks threads up to its target event's timestamp read too.
             val unthreadedRead = loadReceipt(room, ReceiptThread.Unthreaded)
+            val unthreadedAt = unthreadedRead?.let { receiptTime(room, it) }
             return threads.mapNotNull { thread ->
                 val latest = thread.latestEvent
                 val threadRead = loadReceipt(room, ReceiptThread.Thread(thread.rootEvent.eventId))
@@ -149,10 +150,13 @@ class MatrixThreadFeed(scope: CoroutineScope, private val client: Client, privat
                 val key = summary.id to thread.rootEvent.eventId
                 if (latest != null) latestEventIds[key] = latest.eventId
                 val readLocally = latest != null && locallyRead[key] == latest.eventId
+                val coveredByThread = latest != null && threadRead != null &&
+                    (threadRead.eventId == latest.eventId || (receiptTime(room, threadRead) ?: 0u) >= latest.timestamp)
+                val coveredByRoom = latest != null && unthreadedRead != null &&
+                    (unthreadedRead.eventId == latest.eventId || (unthreadedAt ?: 0u) >= latest.timestamp)
                 ThreadFeedItem(summary.id, summary.name, summary.direct, thread.rootEvent.eventId, message(thread.rootEvent),
                     latest?.let(::message), thread.numReplies.toInt(),
-                    unread = latest != null && !latest.isOwn && !readLocally &&
-                        !threadRead.covers(latest) && !unthreadedRead.covers(latest),
+                    unread = latest != null && !latest.isOwn && !readLocally && !coveredByThread && !coveredByRoom,
                     rootRow = thread.rootEvent.run {
                         (content as? TimelineItemContent.MsgLike)?.content
                             ?.let { messageRow(eventId, eventId, sender, senderProfile, isOwn, timestamp, it) }
@@ -171,8 +175,9 @@ class MatrixThreadFeed(scope: CoroutineScope, private val client: Client, privat
         null
     }
 
-    private fun UserReceipt?.covers(event: ThreadListItemEvent): Boolean =
-        this != null && (eventId == event.eventId || (receipt.timestamp ?: 0u) >= event.timestamp)
+    /** Prefers the receipt target event's own timestamp over the client time the receipt was sent. */
+    private suspend fun receiptTime(room: Room, receipt: UserReceipt): ULong? =
+        quietly { room.loadOrFetchEvent(receipt.eventId).use { it.timestamp() } } ?: receipt.receipt.timestamp
 
     private fun message(event: ThreadListItemEvent): ThreadFeedMessage {
         val profile = event.senderProfile as? ProfileDetails.Ready
