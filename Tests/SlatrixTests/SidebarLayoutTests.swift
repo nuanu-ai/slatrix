@@ -123,13 +123,14 @@ struct SidebarLayoutTests {
         ChatRoom(id: "dm", name: "dm", isDirect: true, unreadMessages: 2),
         ChatRoom(id: "muted", name: "muted", unreadMessages: 5, muted: true),
         ChatRoom(id: "muted mention", name: "muted mention", mentions: 1, muted: true),
+        ChatRoom(id: "invite", name: "invite", membership: "invite"),
     ]
 
     // capability: home.sections-collapse
-    @Test("A collapsed section keeps the open conversation and the ones its badge marks unread, in order")
+    @Test("A collapsed section keeps the open conversation, invitations, and the ones its badge marks unread, in order")
     func collapsedSection() {
         let rooms = SidebarLayout.sectionRooms(Self.section, collapsed: true, selectedID: "open")
-        #expect(rooms.map(\.id) == ["open", "unread", "mention", "marked", "dm", "muted mention"])
+        #expect(rooms.map(\.id) == ["open", "unread", "mention", "marked", "dm", "muted mention", "invite"])
     }
 
     // capability: home.conversations

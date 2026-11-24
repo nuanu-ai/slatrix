@@ -120,4 +120,50 @@ struct ConversationNavigationTests {
             ConversationNavigation.shown(AppRoute.home, from: AppRoute.files, showing: showing, opening: opening)
                 == expected)
     }
+
+    @Test("Reopening the previous head room after going Back advances history instead of leaving Back disabled")
+    func historyReopeningPreviousHead() {
+        var history = NavigationHistory()
+        history.record("A")
+        history.record("B")
+        #expect(history.step(-1) == "A")
+        #expect(history.index == 0 && !history.canGoBack && history.canGoForward)
+
+        history.record("B")
+        #expect(history.entries == ["A", "B"])
+        #expect(history.index == 1)
+        #expect(history.canGoBack && !history.canGoForward)
+        #expect(history.step(-1) == "A")
+    }
+
+    @Test("Reopening the tail room from an earlier position truncates intermediate forward history")
+    func historyTruncatesIntermediateForwardEntries() {
+        var history = NavigationHistory()
+        history.record("A")
+        history.record("B")
+        history.record("C")
+        #expect(history.step(-1) == "B")
+        #expect(history.step(-1) == "A")
+        #expect(history.index == 0)
+
+        history.record("C")
+        #expect(history.entries == ["A", "C"])
+        #expect(history.index == 1)
+        #expect(history.canGoBack && !history.canGoForward)
+        #expect(history.step(-1) == "A")
+    }
+
+    @Test("Re-recording the current room keeps forward history intact")
+    func historyRerecordingCurrentKeepsForward() {
+        var history = NavigationHistory()
+        history.record("A")
+        history.record("B")
+        #expect(history.step(-1) == "A")
+
+        history.record("A")
+        #expect(history.entries == ["A", "B"])
+        #expect(history.index == 0)
+        #expect(!history.canGoBack && history.canGoForward)
+        #expect(history.visited == ["A"])
+    }
 }

@@ -43,7 +43,9 @@ struct SidebarView: View {
     private var visibleRooms: [ChatRoom] {
         matrix.rooms.filter { room in
             !room.isSpace
-                && WorkspaceMembership.includes(direct: room.isDirect, spaceIDs: room.spaceIDs, spaceID: workspaceID)
+                && (room.membership == "invite"
+                    || WorkspaceMembership.includes(
+                        direct: room.isDirect, spaceIDs: room.spaceIDs, spaceID: workspaceID))
                 && room.membership != "leave"
         }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
@@ -62,7 +64,7 @@ struct SidebarView: View {
                 if route == .directMessages {
                     DirectMessagesColumn(
                         matrix: matrix, search: $directMessageSearch, unreadOnly: $unreadDirectMessagesOnly,
-                        onSelect: onSelect, onCompose: { onCreate(.directMessage) })
+                        onBack: { route = .home }, onSelect: onSelect, onCompose: { onCreate(.directMessage) })
                 } else {
                     header
                     list
@@ -255,9 +257,7 @@ private struct SpacesMenu: View {
     var body: some View {
         let entries = WorkspaceRail.entries(workspaces: matrix.workspaces, rooms: matrix.rooms)
         let current = matrix.workspaces.first { $0.id == workspaceID }
-        let othersUnread = entries.contains {
-            $0?.id != workspaceID && WorkspaceRail.badge($0?.id, rooms: matrix.rooms) != .none
-        }
+        let othersUnread = WorkspaceRail.hasOtherUnread(current: workspaceID, entries: entries, rooms: matrix.rooms)
         Menu {
             ForEach(Array(entries.enumerated()), id: \.offset) { index, space in
                 // The menu is AppKit's and draws in the window's colors, not the frame's.

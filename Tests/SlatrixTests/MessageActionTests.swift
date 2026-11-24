@@ -233,4 +233,51 @@ struct MessageActionTests {
         await f.service.loadReplyPreview(for: target)
         #expect(f.thread.writes.all == ["details:$root"])
     }
+
+    // capability: message.edit
+    @Test(
+        "Editing a message preserves m.mentions for mentioned users and gates @room on canMentionRoom",
+        arguments: [true, false])
+    func editMessagePreservesMentions(canMentionRoom: Bool) async throws {
+        let server = try await FakeHomeserver(
+            room: "!edit-mentions:localhost",
+            messages: [
+                [
+                    "type": "m.room.message", "event_id": "$orig", "sender": "@me:localhost",
+                    "origin_server_ts": 1, "content": ["msgtype": "m.text", "body": "Original"],
+                ]
+            ])
+        let scratch = try TemporaryDirectory()
+        let client = try await signIn("me", to: server, in: scratch)
+        let room = try await client.joinRoomById(roomId: server.room)
+        let pane = try await room.timeline()
+        _ = try await pane.paginateBackwards(numEvents: 20)
+
+        let service = MatrixService.scratch()
+        service.user = ChatUser(id: "@me:localhost", name: "Me")
+        service.selectedRoomID = server.room
+        service.rooms = [ChatRoom(id: server.room, name: "Room")]
+        service.canMentionRoom = canMentionRoom
+        let original = ChatMessage(
+            id: "$orig", roomID: server.room, senderID: "@me:localhost", senderName: "Me", body: "Original",
+            timestamp: Date(timeIntervalSince1970: 1))
+        service.messages = [original]
+        service.configureMessageActionsForChecks(
+            client: client, main: pane, thread: nil, rootID: nil, sessionID: UUID(), selectionID: UUID(),
+            threadID: UUID())
+        let target = try #require(service.captureMessageAction(message: original, surface: .conversation))
+
+        let draft = "Hi <a href=\"https://matrix.to/#/@alice:localhost\">Alice</a> and @room"
+        try await service.editMessage(target, body: draft)
+
+        try #require(
+            await eventually(timeout: .seconds(10)) {
+                server.contents.contains { $0["m.new_content"] != nil }
+            })
+        let editContent = try #require(server.contents.last { $0["m.new_content"] != nil })
+        let replacement = try #require(editContent["m.new_content"] as? [String: Any])
+        let mentions = try #require(replacement["m.mentions"] as? [String: Any])
+        #expect(mentions["user_ids"] as? [String] == ["@alice:localhost"])
+        #expect((mentions["room"] as? Bool ?? false) == canMentionRoom)
+    }
 }

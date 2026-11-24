@@ -315,4 +315,99 @@ struct ThreadReadTests {
         await #expect(throws: CancellationError.self) { try await reading.value }
         #expect(f.thread.writes.all == ["mark-read"])
     }
+
+    // capability: conversation.read
+    @Test("A reaction or unread count bump in an already-open conversation re-sends a read receipt without looping")
+    func reactionOrUnreadIncreaseReacknowledgesOpenConversation() async throws {
+        let f = fixture()
+        let target = ReadReceiptTarget(
+            accountID: "@reader:example.org", sessionGeneration: f.session, timelineGeneration: f.selection,
+            roomID: f.roomID, eventID: f.rootID)
+        try await f.service.markVisibleRead(target, retries: []) { true }
+        #expect(f.main.writes.all == ["mark-read", "fully:\(f.rootID)"])
+
+        // A second call with nothing new stays suppressed.
+        let beforeToken = f.service.unreadAckToken
+        try await f.service.markVisibleRead(target, retries: []) { true }
+        #expect(f.main.writes.all.count == 2 && f.service.unreadAckToken == beforeToken)
+
+        // Adding your own reaction never triggers a new receipt.
+        var ownReaction = f.service.messages[0]
+        ownReaction.reactions = [MessageReaction(key: "👍", count: 1, mine: true)]
+        f.service.messages = [ownReaction]
+        #expect(f.service.unreadAckToken == beforeToken)
+
+        // Someone else's reaction on the latest (already-read) message bumps unreadAckToken and allows a new receipt.
+        var otherReaction = ownReaction
+        otherReaction.reactions = [MessageReaction(key: "👍", count: 2, mine: true)]
+        f.service.messages = [otherReaction]
+        #expect(f.service.unreadAckToken == beforeToken + 1)
+        try await f.service.markVisibleRead(target, retries: []) { true }
+        #expect(f.main.writes.all == ["mark-read", "fully:\(f.rootID)", "mark-read", "fully:\(f.rootID)"])
+
+        // An unread count increase on the open room (e.g., reaction/edit on an earlier message) also re-arms once.
+        let tokenBeforeRoom = f.service.unreadAckToken
+        var room = ChatRoom(id: f.roomID, name: "Actions")
+        f.service.rooms = [room]
+        #expect(f.service.unreadAckToken == tokenBeforeRoom)
+        room.unread = 1
+        f.service.rooms = [room]
+        #expect(f.service.unreadAckToken == tokenBeforeRoom + 1)
+        // Clearing unread back to 0 must never bump the token again (no receipt loop).
+        room.unread = 0
+        f.service.rooms = [room]
+        #expect(f.service.unreadAckToken == tokenBeforeRoom + 1)
+    }
+
+    // capability: thread.read-state
+    @Test("A reaction from someone else in an already-open thread re-sends a thread read receipt")
+    func reactionInOpenThreadReacknowledgesThread() async throws {
+        let f = fixture()
+        let target = try target(f)
+        try await f.service.markVisibleThreadRead(target, retries: []) { true }
+        #expect(f.thread.writes.all == ["mark-read"])
+
+        let beforeToken = f.service.threadAckToken
+        var reacted = f.service.threadMessages[1]
+        reacted.reactions = [MessageReaction(key: "🔥", count: 1, mine: false)]
+        f.service.threadMessages = [f.service.threadMessages[0], reacted]
+        #expect(f.service.threadAckToken == beforeToken + 1)
+
+        try await f.service.markVisibleThreadRead(target, retries: []) { true }
+        #expect(f.thread.writes.all == ["mark-read", "mark-read"])
+    }
+
+    // capability: activity.badge
+    @Test(
+        "Reading a thread to the bottom marks older paginated-out Activity replies opened without consuming newer unrendered ones"
+    )
+    func markVisibleThreadReadClearsAllThreadActivityItems() async throws {
+        let f = fixture()
+        f.service.threadMessages[1].timestamp = Date(timeIntervalSince1970: 1_000)
+        f.service.activity.record(
+            ActivityItem(
+                id: "older-reply", roomID: f.roomID, eventID: "$paginated-out", roomName: "Actions",
+                senderID: "@alice:example.org", senderName: "Alice", body: "Older reply",
+                timestamp: Date(timeIntervalSince1970: 500), hasMention: false, threadRootID: f.rootID, kind: .message))
+        f.service.activity.record(
+            ActivityItem(
+                id: "newer-reply", roomID: f.roomID, eventID: "$not-in-timeline-yet", roomName: "Actions",
+                senderID: "@alice:example.org", senderName: "Alice", body: "Newer reply",
+                timestamp: Date(timeIntervalSince1970: 2_000), hasMention: false, threadRootID: f.rootID, kind: .message
+            ))
+        f.service.activity.record(
+            ActivityItem(
+                id: "other-thread-reply", roomID: f.roomID, eventID: "$other-reply", roomName: "Actions",
+                senderID: "@alice:example.org", senderName: "Alice", body: "Other thread",
+                timestamp: Date(timeIntervalSince1970: 500), hasMention: false, threadRootID: "$other-root",
+                kind: .message))
+        #expect(ActivityBadge.count(rooms: [], items: f.service.activity.items) == 3)
+
+        try await f.service.markVisibleThreadRead(try target(f), retries: []) { true }
+
+        #expect(f.service.activity.items.first { $0.id == "older-reply" }?.opened == true)
+        #expect(f.service.activity.items.first { $0.id == "newer-reply" }?.opened == false)
+        #expect(f.service.activity.items.first { $0.id == "other-thread-reply" }?.opened == false)
+        #expect(ActivityBadge.count(rooms: [], items: f.service.activity.items) == 2)
+    }
 }

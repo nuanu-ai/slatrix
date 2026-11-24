@@ -37,6 +37,7 @@ struct DesktopMessageNotification {
     var body: String
     var playSound: Bool
     var threadRootID: String? = nil
+    var isReaction = false
 
     /// The title and one-line text of a message, as the cases in `spec/notification-text.json` say.
     static func message(room: String, sender: String, direct: Bool, body: String, reply: Bool = false)
@@ -102,6 +103,7 @@ struct DeliveredNotification {
     let identifier: String
     let target: MatrixNotificationTarget
     let date: Date
+    var threadRootID: String? = nil
 }
 
 enum DesktopNotificationError: LocalizedError {
@@ -113,12 +115,21 @@ enum DesktopNotificationError: LocalizedError {
 
 /// Permission checks and OS submission can finish after an account or privacy preference changes.
 @MainActor final class DesktopNotificationDelivery {
+    private struct PendingDelivery {
+        let key: String
+        let roomID: String
+        let threadRootID: String?
+    }
     private let transport: DesktopNotificationTransport
     private(set) var accountID: String?
     private var generation = UUID()
-    /// Banners on their way, each by its message's Activity key. Deleting a message drops its entries, so their
-    /// banners never stay.
-    private var deliveries: [UUID: String] = [:]
+    /// Banners on their way, each by its message's Activity key, room, and thread. Deleting or reading drops matching
+    /// entries, so their banners never stay.
+    private var deliveries: [UUID: PendingDelivery] = [:]
+    /// Sequence number of each delivered banner submitted in this session, so a withdrawal never removes a newer banner
+    /// that arrives while Notification Center answers.
+    private var nextSequence: UInt64 = 0
+    private var deliveredSequence: [String: UInt64] = [:]
     /// Whether a banner went up since the last clear; until one does, Notification Center holds none to take back.
     private var hasShown = false
 
@@ -133,14 +144,46 @@ enum DesktopNotificationError: LocalizedError {
     func clear() {
         generation = UUID()
         hasShown = false
+        deliveredSequence = [:]
         transport.clear()
     }
 
     /// Takes back the banners of deleted messages, by Activity key: those on their way at once, those shown with one
     /// read of Notification Center.
     func withdraw(_ keys: Set<String>) async {
-        deliveries = deliveries.filter { !keys.contains($0.value) }
-        for banner in await shown() where keys.contains(Self.key(banner.target)) { transport.remove(banner.identifier) }
+        guard !keys.isEmpty else { return }
+        await withdraw(
+            pending: { keys.contains($0.key) },
+            delivered: { keys.contains(Self.key($0.target)) })
+    }
+
+    /// Takes back banners for read conversations; `includeThreads` leaves unread thread banners up on a main-timeline
+    /// read and clears everything on a room-wide or cross-device read.
+    func withdrawRooms(_ roomIDs: Set<String>, includeThreads: Bool = true) async {
+        guard !roomIDs.isEmpty else { return }
+        await withdraw(
+            pending: { roomIDs.contains($0.roomID) && (includeThreads || $0.threadRootID == nil) },
+            delivered: { roomIDs.contains($0.target.roomID) && (includeThreads || $0.threadRootID == nil) })
+    }
+
+    /// Takes back banners for a read thread.
+    func withdrawThread(roomID: String, rootID: String) async {
+        await withdraw(
+            pending: { $0.roomID == roomID && $0.threadRootID == rootID },
+            delivered: { $0.target.roomID == roomID && $0.threadRootID == rootID })
+    }
+
+    private func withdraw(
+        pending: (PendingDelivery) -> Bool,
+        delivered: (DeliveredNotification) -> Bool
+    ) async {
+        let cutoff = nextSequence
+        deliveries = deliveries.filter { !pending($0.value) }
+        for banner in await shown() where delivered(banner) {
+            if let seq = deliveredSequence[banner.identifier], seq > cutoff { continue }
+            deliveredSequence[banner.identifier] = nil
+            transport.remove(banner.identifier)
+        }
     }
 
     /// This account's message banners in Notification Center.
@@ -162,7 +205,8 @@ enum DesktopNotificationError: LocalizedError {
         guard message.target.accountID == accountID else { return false }
         let token = generation
         let delivery = UUID()
-        deliveries[delivery] = Self.key(message.target)
+        deliveries[delivery] = PendingDelivery(
+            key: Self.key(message.target), roomID: message.target.roomID, threadRootID: message.threadRootID)
         defer { deliveries[delivery] = nil }
         func due() -> Bool {
             token == generation && message.target.accountID == accountID && !Task.isCancelled
@@ -183,6 +227,8 @@ enum DesktopNotificationError: LocalizedError {
             transport.remove(request.identifier)
             return false
         }
+        nextSequence += 1
+        deliveredSequence[request.identifier] = nextSequence
         hasShown = true
         return true
     }

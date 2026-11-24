@@ -137,8 +137,7 @@ struct RootView: View {
     @State private var localReady = false
     @State private var localError: String?
     @State private var bootstrapping = true
-    @State private var history: [String] = []
-    @State private var historyIndex = -1
+    @State private var history = NavigationHistory()
     @State private var logoutConfirmation = false
     @StateObject private var logoutRecovery = LogoutRecoveryController()
     @State private var windowCanRead = false
@@ -377,7 +376,7 @@ struct RootView: View {
             ).onAppear { Performance.finishOnScreen(.preferencesOpen) }
         case .switcher:
             QuickSwitcherView(
-                matrix: matrix, visited: history,
+                matrix: matrix, visited: history.entries,
                 onSelect: {
                     selectRoom($0)
                     closeModal()
@@ -755,7 +754,8 @@ struct RootView: View {
                                 let seen = await waitObserving(
                                     for: {
                                         target.eventID.map {
-                                            readInputs.seen(matrix)($0, target.roomID, notification.threadRootID)
+                                            readInputs.seen(matrix)(
+                                                $0, target.roomID, notification.threadRootID, notification.isReaction)
                                         } ?? false
                                     }, deadline: .now + ReadStatePolicy.layoutDeadline)
                                 return seen != true && appearance.notifications && composerIdentity == identity
@@ -876,7 +876,7 @@ struct RootView: View {
         .focusedSceneValue(\.rightPaneShown, paneOpen)
         .overlay(alignment: .topLeading) {
             SearchMenu(
-                bar: searchBar, matrix: matrix, recents: recentSearches, visited: history,
+                bar: searchBar, matrix: matrix, recents: recentSearches, visited: history.entries,
                 top: m.paneHeader + (colors.theme.framed ? m.sidebarInset : 0), onPick: pickSearch)
         }
         // The window moves by its top edge wherever nothing there takes the click, and its buttons sit centered in it,
@@ -1064,10 +1064,16 @@ struct RootView: View {
     private var automaticReadTarget: ReadReceiptTarget? { ReadStatePolicy.automaticTarget(readContext, hold: readHold) }
     private func markReadState(_ targetRoom: ChatRoom, unread: Bool) {
         guard !matrix.isPreview, targetRoom.membership == "join" else { return }
-        let rollbackContext =
-            unread && targetRoom.id == matrix.selectedRoomID && !readHold.blocks(readContext) ? readContext : nil
+        var rollback: (context: ReadStateContext, token: UUID)?
         if targetRoom.id == matrix.selectedRoomID {
-            if unread { readHold.markUnread(readContext) } else { readHold.clearForExplicitRead(readContext) }
+            if unread {
+                let context = readContext
+                if !readHold.blocks(context), let token = readHold.markUnread(context) {
+                    rollback = (context, token)
+                }
+            } else {
+                readHold.clearForExplicitRead(readContext)
+            }
         }
         let account = matrix.notificationSessionID
         let seenItemIDs =
@@ -1083,7 +1089,7 @@ struct RootView: View {
                 }
             } catch {
                 guard matrix.notificationSessionID == account else { return }
-                if let rollbackContext { readHold.rollbackMarkUnread(rollbackContext) }
+                if let rollback { readHold.rollbackMarkUnread(rollback.context, token: rollback.token) }
                 matrix.errorMessage = MatrixService.safeError(error)
             }
         }
@@ -1176,15 +1182,14 @@ struct RootView: View {
                 trailing()
                 ToolbarCapsule {
                     IconButton(symbol: "chevron.left", label: "Back", role: .body) { navigateHistory(-1) }
-                        .disabled(historyIndex <= 0)
+                        .disabled(!history.canGoBack)
                     IconButton(symbol: "chevron.right", label: "Forward", role: .body) { navigateHistory(1) }
-                        .disabled(historyIndex >= history.count - 1)
+                        .disabled(!history.canGoForward)
                 }
                 .contextMenu {
-                    ForEach(Array(history.enumerated()).reversed(), id: \.offset) { index, id in
+                    ForEach(Array(history.entries.enumerated()).reversed(), id: \.offset) { index, id in
                         Button(matrix.rooms.first { $0.id == id }?.name ?? "Conversation") {
-                            historyIndex = index
-                            selectRoom(history[index], record: false)
+                            if let target = history.jump(to: index) { selectRoom(target, record: false) }
                         }
                     }
                 }
@@ -1192,7 +1197,7 @@ struct RootView: View {
                     SearchBarField(
                         bar: searchBar,
                         prompt: WorkspaceRail.searchPrompt(workspaceID: workspaceID, workspaces: matrix.workspaces),
-                        matrix: matrix, recents: recentSearches, visited: history, onPick: pickSearch
+                        matrix: matrix, recents: recentSearches, visited: history.entries, onPick: pickSearch
                     ).frame(width: m(Self.searchWidth))
                 }.disabled(matrix.user == nil)
             }
@@ -1558,8 +1563,9 @@ struct RootView: View {
                 onOpenRoom: selectRoom,
                 onMarkRoomRead: { markReadState($0, unread: false) },
                 onMarkItemRead: { item in
-                    if item.hasMention, let room = matrix.rooms.first(where: { $0.id == item.roomID }),
-                        room.membership == "join", room.mentions > 0
+                    guard item.kind != .invite else { return }
+                    if let room = matrix.rooms.first(where: { $0.id == item.roomID }),
+                        room.membership == "join", room.hasUnread || room.mentions > 0
                     {
                         markReadState(room, unread: false)
                     } else {
@@ -1916,7 +1922,7 @@ struct RootView: View {
         directMessagesColumn = true
         route = .home
         guard room?.isDirect != true else { return }
-        guard let id = ChatRoom.directMessageToOpen(matrix.rooms, visited: Array(history.prefix(historyIndex + 1)))
+        guard let id = ChatRoom.directMessageToOpen(matrix.rooms, visited: history.visited)
         else { return }
         // Picked in the drawer, the list stays open there.
         let drawer = sidebarDrawer
@@ -1929,6 +1935,7 @@ struct RootView: View {
     ) {
         sidebarDrawer = false
         cancelThreadOpen()
+        readHold = ReadStateHold()
         if !keepPendingNotification, let target = PlatformIntegration.shared.pendingNotification {
             PlatformIntegration.shared.consumeNotification(target)
         }
@@ -1952,11 +1959,7 @@ struct RootView: View {
         let generation = UUID()
         let identity = composerIdentity
         navigationGeneration = generation
-        if record && history.last != id {
-            if historyIndex + 1 < history.count { history = Array(history.prefix(historyIndex + 1)) }
-            history.append(id)
-            historyIndex = history.count - 1
-        }
+        if record { history.record(id) }
         pickedFrom = screen
         pendingRoomID = id
         if let target = matrix.rooms.first(where: { $0.id == id }) {
@@ -2100,10 +2103,8 @@ struct RootView: View {
         }
     }
     private func navigateHistory(_ step: Int) {
-        let next = historyIndex + step
-        guard history.indices.contains(next) else { return }
-        historyIndex = next
-        selectRoom(history[next], record: false)
+        guard let target = history.step(step) else { return }
+        selectRoom(target, record: false)
     }
     /// Opens a message's thread from a place that showed no reply count.
     private var openThreadAction: (ChatMessage) -> Void { threadAction { _ in nil } }
@@ -2367,7 +2368,7 @@ struct RootView: View {
     private func markAllRead(inWorkspace spaceID: String?) {
         guard !matrix.isPreview else { return }
         let scope = ActivityBadge.scoped(rooms: matrix.rooms, items: matrix.activity.items, workspaceID: spaceID)
-        let roomsToRead = scope.rooms.filter { $0.membership == "join" && ($0.hasUnread || $0.mentions > 0) }
+        let roomsToRead = scope.rooms.filter { $0.membership == "join" && UnreadBadge($0) != .none }
         let readRoomIDs = Set(roomsToRead.map(\.id))
         for room in roomsToRead { markReadState(room, unread: false) }
         // Rooms written above mark their own items seen on success; mark local replies for already-read rooms at once.
@@ -2456,7 +2457,10 @@ struct RootView: View {
         return BindingScope({ editBinding(target, context: context) }) { text in
             MessageComposer(
                 text: text, placeholder: "Edit message", members: matrix.members,
-                isEditing: true,
+                recentSenders: { [matrix] in
+                    (isThread ? matrix.threadMessages : matrix.messages).reversed().map(\.senderID)
+                },
+                canMentionRoom: matrix.canMentionRoom, isEditing: true,
                 onSend: { body, files in
                     guard files.isEmpty, isCurrentEdit(target, context: context), let action = editActionTarget else {
                         throw CancellationError()
@@ -2893,8 +2897,7 @@ struct RootView: View {
         pinPermissionRoomID = nil
         pinPermission = false
         route = .home
-        history = []
-        historyIndex = -1
+        history = NavigationHistory()
         directMessagesColumn = false
         directMessageSearch = ""
         unreadDirectMessagesOnly = false
@@ -3127,13 +3130,18 @@ private struct ReadInputs {
 
     /// Whether the reader has seen a message, by its event, its room and its thread's root when it has one: nil while
     /// its pane, shown, has yet to lay it out.
-    @MainActor func seen(_ matrix: MatrixService) -> (String, String, String?) -> Bool? {
+    @MainActor func seen(_ matrix: MatrixService) -> (String, String, String?, Bool) -> Bool? {
         let conversation = readContext(matrix)
         let thread = threadReadContext(matrix)
         let messages = TimelinePositions(matrix.messages.lazy.map(\.eventID))
         let replies = TimelinePositions(matrix.threadMessages.lazy.map(\.eventID))
         let reports = (conversation: matrix.shownConversationReport, thread: matrix.shownThreadReport)
-        return { eventID, roomID, threadRootID in
+        return { eventID, roomID, threadRootID, isReaction in
+            if isReaction && threadRootID == nil {
+                return ReadStatePolicy.seenReaction(
+                    eventID, roomID: roomID, conversation: conversation, thread: thread, messages: messages,
+                    replies: replies, conversationReport: reports.conversation, threadReport: reports.thread)
+            }
             let shown = ReadStatePolicy.isShown(
                 roomID: roomID, threadRootID: threadRootID, conversation: conversation, thread: thread)
             return threadRootID == nil
@@ -3164,10 +3172,12 @@ private struct SeenInputs: Equatable {
     }
 }
 
-/// Pairs a read target with the session's reconnect count so receipts that failed while disconnected re-attempt.
+/// Pairs a read target with the session's reconnect count and unread re-arm token so receipts that failed while
+/// disconnected or that cover new reactions on an already-read message are sent.
 private struct ReconnectReadKey<Target: Equatable>: Equatable {
     let target: Target
     let reconnect: Int
+    let ackToken: Int
 }
 
 /// Marks what the reader can see as read. Apart from the window, so a new message reruns only these checks.
@@ -3181,16 +3191,18 @@ private struct ReadTracking: View {
         let context = inputs.readContext(matrix)
         let thread = inputs.threadReadContext(matrix)
         let reconnect = matrix.reconnectCount
+        let unreadAck = matrix.unreadAckToken
+        let threadAck = matrix.threadAckToken
         Color.clear
             .onChange(of: context) { _, context in onReadContext(context) }
             .task(
                 id: ReadStatePolicy.automaticTarget(context, hold: inputs.readHold).map {
-                    ReconnectReadKey(target: $0, reconnect: reconnect)
+                    ReconnectReadKey(target: $0, reconnect: reconnect, ackToken: unreadAck)
                 }
             ) { await acknowledgeTimeline() }
             .task(
                 id: ThreadReadPolicy.target(thread).map {
-                    ReconnectReadKey(target: $0, reconnect: reconnect)
+                    ReconnectReadKey(target: $0, reconnect: reconnect, ackToken: threadAck)
                 }
             ) { await acknowledgeThread() }
             // Activity takes what the reader has seen off its count, the messages that land in view too.
@@ -3203,7 +3215,7 @@ private struct ReadTracking: View {
             ) {
                 let seen = inputs.seen(matrix)
                 matrix.activity.markSeen { item in
-                    item.eventID.flatMap { seen($0, item.roomID, item.threadRootID) } == true
+                    item.eventID.flatMap { seen($0, item.roomID, item.threadRootID, item.kind == .reaction) } == true
                 }
             }
     }

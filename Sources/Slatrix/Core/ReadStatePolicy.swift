@@ -49,18 +49,25 @@ private struct ReadStateVisit: Equatable {
 /// Arm before requesting Mark unread, so an already-visible bottom cannot immediately clear it.
 struct ReadStateHold: Equatable {
     private var heldVisit: ReadStateVisit?
+    private var heldToken: UUID?
 
-    mutating func markUnread(_ context: ReadStateContext) {
-        guard !context.isPreview, context.isJoined, context.roomID == context.selectedRoomID,
+    @discardableResult
+    mutating func markUnread(_ context: ReadStateContext) -> UUID? {
+        guard !context.isPreview, context.isJoined, context.isMainTimeline, context.roomID == context.selectedRoomID,
             let visit = ReadStateVisit(context)
-        else { return }
+        else { return nil }
+        let token = UUID()
         heldVisit = visit
+        heldToken = token
+        return token
     }
 
     mutating func observe(_ context: ReadStateContext) {
         guard let heldVisit else { return }
-        if ReadStateVisit(context) != heldVisit || context.selectedRoomID != heldVisit.roomID {
+        if !context.isMainTimeline || ReadStateVisit(context) != heldVisit || context.selectedRoomID != heldVisit.roomID
+        {
             self.heldVisit = nil
+            self.heldToken = nil
         }
     }
 
@@ -69,12 +76,14 @@ struct ReadStateHold: Equatable {
             heldVisit.sessionGeneration == context.sessionGeneration, heldVisit.roomID == context.roomID
         else { return }
         self.heldVisit = nil
+        self.heldToken = nil
     }
 
-    /// Reverses a provisional Mark unread hold when the server write fails, without touching a newer visit.
-    mutating func rollbackMarkUnread(_ context: ReadStateContext) {
-        guard let heldVisit, heldVisit == ReadStateVisit(context) else { return }
+    /// Reverses a provisional Mark unread hold when the server write fails, without touching a newer hold or visit.
+    mutating func rollbackMarkUnread(_ context: ReadStateContext, token: UUID? = nil) {
+        guard let heldVisit, heldVisit == ReadStateVisit(context), token == nil || heldToken == token else { return }
         self.heldVisit = nil
+        self.heldToken = nil
     }
 
     func blocks(_ context: ReadStateContext) -> Bool {
@@ -129,6 +138,23 @@ enum ReadStatePolicy {
             guard isSeen(eventID, newestInView: report?.laidOut, position: position) else { return nil }
             return isSeen(eventID, newestInView: report?.newestInView, position: position)
         }
+    }
+
+    /// Reactions don't carry a thread root, so a reaction to a thread reply checks both the open conversation and any
+    /// open thread in `roomID`.
+    static func seenReaction<MainEvents, ThreadEvents>(
+        _ eventID: String, roomID: String, conversation: ReadStateContext, thread: ThreadReadContext,
+        messages: TimelinePositions<MainEvents>, replies: TimelinePositions<ThreadEvents>,
+        conversationReport: PaneReport?, threadReport: PaneReport?
+    ) -> Bool? {
+        let mainShown = isShown(roomID: roomID, threadRootID: nil, conversation: conversation, thread: thread)
+        let threadShown = thread.identity?.roomID == roomID && ThreadReadPolicy.isShown(thread)
+        let inMain = seen(eventID, shown: mainShown, in: messages, report: conversationReport)
+        let inThread = seen(eventID, shown: threadShown, in: replies, report: threadReport)
+        if inMain == true || inThread == true { return true }
+        if mainShown && inMain == false && !replies.ask({ $0(eventID) != nil }) { return false }
+        if threadShown && inThread == false && !messages.ask({ $0(eventID) != nil }) { return false }
+        return inMain == nil || inThread == nil ? nil : false
     }
 
     static func automaticTarget(_ context: ReadStateContext, hold: ReadStateHold = ReadStateHold())

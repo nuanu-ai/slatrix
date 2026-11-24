@@ -46,7 +46,7 @@ struct ActivityFeedView: View {
         let summaryRooms = filteredSummaryRooms(scope)
         let hasMarkableUnread =
             !matrix.isPreview
-            && (scope.rooms.contains { $0.membership == "join" && ($0.hasUnread || $0.mentions > 0) }
+            && (scope.rooms.contains { $0.membership == "join" && UnreadBadge($0) != .none }
                 || scope.items.contains {
                     $0.kind != .invite && ActivityBadge.isUnread($0, room: roomsByID[$0.roomID])
                 })
@@ -168,7 +168,11 @@ struct ActivityFeedView: View {
                         m.font(.body, unread ? .semibold : .regular)
                     ).foregroundStyle(colors.textPrimary).lineLimit(1)
                     Text(
-                        item.kind == .invite ? "invited you" : item.hasMention ? "mentioned you" : "in \(item.roomName)"
+                        item.kind == .invite
+                            ? "invited you"
+                            : item.kind == .reaction
+                                ? "reacted in \(item.roomName)"
+                                : item.hasMention ? "mentioned you" : "in \(item.roomName)"
                     ).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary).lineLimit(1)
                     Spacer()
                     Text(item.timestamp, format: .dateTime.month(.abbreviated).day().hour().minute()).font(

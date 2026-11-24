@@ -74,4 +74,73 @@ struct ComposerMentionTests {
 
         #expect(editor.string == "the x", "The space typed before the correction stays between the words")
     }
+
+    // capability: message.edit
+    // capability: composer.mentions
+    @Test("Editing a message offers @room when permitted and ranks recent senders first in @ suggestions")
+    func editComposerOffersRecentSendersAndRoomMention() async throws {
+        _ = NSApplication.shared
+        let f = ActionFixture()
+        try f.service.credentials.save(
+            StoredSession(
+                accessToken: "synthetic-token", userId: f.userID, deviceId: "FIXTURE",
+                homeserverUrl: "https://example.org", storeID: UUID().uuidString,
+                storeKey: Data(repeating: 0x31, count: 32)))
+        f.service.status = .ready
+        let alice = ChatUser(id: "@alice:example.org", name: "Alice")
+        let zara = ChatUser(id: "@zara:example.org", name: "Zara")
+        f.service.members = [alice, zara]
+        f.service.canMentionRoom = true
+        var zaraMsg = f.message("$zara", sender: zara.id)
+        zaraMsg.senderName = zara.name
+        zaraMsg.body = "From Zara"
+        let ownMsg = f.message("$own")
+        f.service.messages = [zaraMsg, ownMsg]
+
+        let hosting = NSHostingView(
+            rootView: RootView(scratch: f.service)
+                .environmentObject(AppearanceStore())
+                .environment(\.metrics, Metrics(zoom: 1)))
+        let window = offscreenWindow(NSSize(width: 960, height: 640))
+        window.contentView = hosting
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        func editableEditor() -> NSTextView? {
+            hosting.layoutSubtreeIfNeeded()
+            return views(hosting).compactMap { $0 as? NSTextView }.first { $0.isEditable }
+        }
+
+        // Wait for the primary composer to become active, then press Up to open the edit composer.
+        try #require(await eventually(timeout: .seconds(5)) { editableEditor() != nil })
+        let primary = try #require(editableEditor())
+        let upEvent = try #require(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, characters: "",
+                charactersIgnoringModifiers: "", isARepeat: false, keyCode: 126))
+        primary.keyDown(with: upEvent)
+
+        try #require(await eventually(timeout: .seconds(5)) { editableEditor()?.string == "Original" })
+        let editor = try #require(editableEditor())
+        let atCaret = NSRange(location: NSNotFound, length: 0)
+        let returnEvent = try #require(
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, characters: "\r",
+                charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36))
+
+        // Typing "@" and pressing Return picks the top suggestion: Zara (recent sender) ahead of Alice.
+        editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
+        for ch in " @" { editor.insertText(String(ch), replacementRange: atCaret) }
+        editor.keyDown(with: returnEvent)
+        #expect(editor.string.contains("@Zara"), "Expected recent sender @Zara first, got: \(editor.string)")
+
+        // Typing "@ro" and pressing Return inserts "@room " when canMentionRoom is true.
+        for ch in "@ro" { editor.insertText(String(ch), replacementRange: atCaret) }
+        editor.keyDown(with: returnEvent)
+        #expect(editor.string.contains("@room"), "Expected @room suggestion in edit composer, got: \(editor.string)")
+    }
 }

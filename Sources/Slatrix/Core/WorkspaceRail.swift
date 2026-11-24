@@ -20,6 +20,12 @@ enum WorkspaceRail {
         return channels.contains { UnreadBadge($0) != .none } ? .bold : .none
     }
 
+    /// Whether another workspace in `entries` has unread channels; All conversations already shows everything.
+    static func hasOtherUnread(current workspaceID: String?, entries: [Workspace?], rooms: [ChatRoom]) -> Bool {
+        guard let workspaceID else { return false }
+        return entries.contains { $0?.id != workspaceID && badge($0?.id, rooms: rooms) != .none }
+    }
+
     /// The title bar's search prompt, Slack's "Search <workspace>". All has no name of its own, so it says what it
     /// holds, as the sidebar's header does.
     static func searchPrompt(workspaceID: String?, workspaces: [Workspace]) -> String {

@@ -69,6 +69,49 @@ struct ThreadFeedMappingTests {
         event.content = nil
         #expect(ThreadFeedMapping.message(event, roomID: room.id).kind == "unavailable")
     }
+
+    // capability: threads.feed
+    @Test("A thread is unread only when someone else replied after your threaded and unthreaded read receipts")
+    func unreadStateFromReceipts() throws {
+        let me = "@me:example.org"
+        let reply = threadEvent("$reply", timestamp: 5_000, sender: "@alice:example.org", isOwn: false)
+        let ownReply = threadEvent("$own", timestamp: 5_000, sender: me, isOwn: true)
+        let ownBySender = threadEvent("$own-sender", timestamp: 5_000, sender: me, isOwn: false)
+        #expect(
+            ThreadFeedMapping.isUnread(
+                latest: reply, ownUserID: me, threadReceipt: nil, unthreadedReceipt: nil))
+        #expect(
+            !ThreadFeedMapping.isUnread(
+                latest: nil, ownUserID: me, threadReceipt: nil, unthreadedReceipt: nil))
+        #expect(
+            !ThreadFeedMapping.isUnread(
+                latest: ownReply, ownUserID: me, threadReceipt: nil, unthreadedReceipt: nil))
+        #expect(
+            !ThreadFeedMapping.isUnread(
+                latest: ownBySender, ownUserID: me, threadReceipt: nil, unthreadedReceipt: nil))
+        // Older threaded receipt still leaves the newer reply unread.
+        let olderThread = UserReceipt(eventId: "$earlier", receipt: Receipt(timestamp: 4_000))
+        #expect(
+            ThreadFeedMapping.isUnread(
+                latest: reply, ownUserID: me, threadReceipt: olderThread, unthreadedReceipt: nil))
+        // Matching event ID or >= timestamp on either threaded or unthreaded receipt clears unread.
+        let exactThread = UserReceipt(eventId: "$reply", receipt: Receipt(timestamp: nil))
+        #expect(
+            !ThreadFeedMapping.isUnread(
+                latest: reply, ownUserID: me, threadReceipt: exactThread, unthreadedReceipt: nil))
+        let newerThread = UserReceipt(eventId: "$later", receipt: Receipt(timestamp: 5_000))
+        #expect(
+            !ThreadFeedMapping.isUnread(
+                latest: reply, ownUserID: me, threadReceipt: newerThread, unthreadedReceipt: nil))
+        let newerUnthreaded = UserReceipt(eventId: "$room-latest", receipt: Receipt(timestamp: 6_000))
+        #expect(
+            !ThreadFeedMapping.isUnread(
+                latest: reply, ownUserID: me, threadReceipt: olderThread, unthreadedReceipt: newerUnthreaded))
+        let olderUnthreaded = UserReceipt(eventId: "$room-old", receipt: Receipt(timestamp: 3_000))
+        #expect(
+            ThreadFeedMapping.isUnread(
+                latest: reply, ownUserID: me, threadReceipt: nil, unthreadedReceipt: olderUnthreaded))
+    }
 }
 
 private final class NotificationEvent: TimelineEvent, @unchecked Sendable {
@@ -210,6 +253,27 @@ struct ActivityTests {
         activity.clear()
         #expect(activity.items.isEmpty && activity.mentions.isEmpty)
     }
+
+    // capability: activity.feed
+    @Test("A reaction notification appears in Activity targeting the reacted message without inflating the badge count")
+    func reactionNotificationShowsInActivity() throws {
+        let event = NotificationEvent(noHandle: .init())
+        event.value = .messageLike(content: .reactionContent(relatedEventId: "$mine"))
+        var raw = notification(event)
+        raw.hasMention = false
+        raw.threadId = nil
+        raw.rawEvent = #"{"content":{"m.relates_to":{"rel_type":"m.annotation","event_id":"$mine","key":"👍"}}}"#
+        let item = try #require(activity.receive(raw, roomID: room.id, ownUserID: me))
+        #expect(item.kind == .reaction)
+        #expect(item.eventID == "$mine")
+        #expect(item.body == "Reacted 👍")
+        #expect(ActivityBadge.count(rooms: [], items: activity.items) == 0)
+        var unreadRoom = room
+        unreadRoom.unread = 1
+        #expect(ActivityBadge.isUnread(item, room: unreadRoom))
+        unreadRoom.unread = 0
+        #expect(!ActivityBadge.isUnread(item, room: unreadRoom))
+    }
 }
 
 @MainActor
@@ -298,5 +362,106 @@ struct ThreadFeedDiscoveryTests {
         feed.unavailable("Unavailable")
         feed.close()
         #expect(feed.items.isEmpty && feed.roomStates.isEmpty && !feed.isActive && feed.errorMessage == nil)
+    }
+
+    // capability: threads.feed
+    @Test("Threads load unread state from threaded and unthreaded receipts, clear when read, and re-arm on new replies")
+    func unreadStateAndReadClearing() async throws {
+        let me = "@me:example.org"
+        let unreadThread = ThreadListItem(
+            rootEvent: threadEvent("$t-unread", timestamp: 1_000),
+            latestEvent: threadEvent("$r-unread", timestamp: 5_000), numReplies: 2)
+        let readByThread = ThreadListItem(
+            rootEvent: threadEvent("$t-thread", timestamp: 1_000),
+            latestEvent: threadEvent("$r-thread", timestamp: 5_000), numReplies: 1)
+        let readByUnthreaded = ThreadListItem(
+            rootEvent: threadEvent("$t-unthreaded", timestamp: 1_000),
+            latestEvent: threadEvent("$r-unthreaded", timestamp: 4_000), numReplies: 1)
+        let ownLatest = ThreadListItem(
+            rootEvent: threadEvent("$t-own", timestamp: 1_000),
+            latestEvent: threadEvent("$r-own", timestamp: 6_000, sender: me, isOwn: true), numReplies: 1)
+        let list = FakeThreadList([unreadThread, readByThread, readByUnthreaded, ownLatest])
+        let fakeRoom = FakeThreadRoom(
+            threads: list,
+            receipts: [
+                .unthreaded: UserReceipt(eventId: "$room", receipt: Receipt(timestamp: 4_500)),
+                .thread(threadRootEventId: "$t-thread"): UserReceipt(
+                    eventId: "$r-thread", receipt: Receipt(timestamp: nil)),
+                .thread(threadRootEventId: "$t-unread"): UserReceipt(
+                    eventId: "$r-old", receipt: Receipt(timestamp: 2_000)),
+            ])
+        let client = FakeThreadClient(fakeRoom)
+        await feed.open(client: client, rooms: [rooms[0]], workspaceID: nil, ownUserID: me) { _ in }
+        let byRoot = Dictionary(uniqueKeysWithValues: feed.items.map { ($0.root.eventID, $0.isUnread) })
+        #expect(byRoot == ["$t-unread": true, "$t-thread": false, "$t-unthreaded": false, "$t-own": false])
+
+        // Reading the thread clears its unread flag immediately and keeps it cleared across close/reopen.
+        feed.markThreadRead(roomID: rooms[0].id, rootID: "$t-unread", eventID: "$r-unread")
+        #expect(feed.items.first { $0.root.eventID == "$t-unread" }?.isUnread == false)
+        feed.close()
+        await feed.open(client: client, rooms: [rooms[0]], workspaceID: nil, ownUserID: me) { _ in }
+        #expect(feed.items.first { $0.root.eventID == "$t-unread" }?.isUnread == false)
+
+        // A brand-new reply on that thread makes it unread again.
+        let updatedUnread = ThreadListItem(
+            rootEvent: threadEvent("$t-unread", timestamp: 1_000),
+            latestEvent: threadEvent("$r-newer", timestamp: 7_000), numReplies: 3)
+        list.emit([updatedUnread, readByThread, readByUnthreaded, ownLatest])
+        #expect(await eventually { feed.items.first { $0.root.eventID == "$t-unread" }?.isUnread == true })
+
+        // Marking the room read clears unread threads in that room.
+        feed.markRoomRead(roomID: rooms[0].id)
+        #expect(feed.items.filter(\.isUnread).map(\.root.eventID) == [])
+    }
+
+    // capability: threads.feed
+    @Test(
+        "Private read receipts and partial cross-device unread decreases clear read threads without rolling back live replies"
+    )
+    func privateReceiptsCrossDeviceDecreaseAndLiveRace() async throws {
+        let me = "@me:example.org"
+        let privateRead = ThreadListItem(
+            rootEvent: threadEvent("$t-private", timestamp: 1_000),
+            latestEvent: threadEvent("$r-private", timestamp: 5_000), numReplies: 1)
+        let pending = ThreadListItem(
+            rootEvent: threadEvent("$t-pending", timestamp: 1_000),
+            latestEvent: threadEvent("$r-a", timestamp: 5_000), numReplies: 1)
+        let list = FakeThreadList([privateRead, pending])
+        let fakeRoom = FakeThreadRoom(
+            threads: list,
+            privateReceipts: [
+                .thread(threadRootEventId: "$t-private"): UserReceipt(
+                    eventId: "$r-private", receipt: Receipt(timestamp: 5_000))
+            ])
+        let client = FakeThreadClient(fakeRoom)
+        var chatRoom = rooms[0]
+        chatRoom.unread = 3
+        await feed.open(client: client, rooms: [chatRoom], workspaceID: nil, ownUserID: me) { _ in }
+        #expect(feed.items.first { $0.root.eventID == "$t-private" }?.isUnread == false)
+        #expect(feed.items.first { $0.root.eventID == "$t-pending" }?.isUnread == true)
+
+        // A partial unread count decrease (e.g. phone read one thread while main stays unread) refreshes receipts.
+        fakeRoom.receipts = [
+            .thread(threadRootEventId: "$t-pending"): UserReceipt(eventId: "$r-a", receipt: Receipt(timestamp: 5_000))
+        ]
+        chatRoom.unread = 2
+        feed.updateRooms([chatRoom])
+        #expect(await eventually { feed.items.first { $0.root.eventID == "$t-pending" }?.isUnread == false })
+
+        // Pagination suspended during receipt load must never overwrite a newer live reply emitted meanwhile.
+        fakeRoom.receiptGate.arm()
+        let paging = Task {
+            await feed.open(client: client, rooms: [chatRoom], workspaceID: nil, ownUserID: me) { _ in }
+        }
+        #expect(await eventually { fakeRoom.receiptGate.isWaiting })
+        let liveReply = ThreadListItem(
+            rootEvent: threadEvent("$t-pending", timestamp: 1_000),
+            latestEvent: threadEvent("$r-b", timestamp: 6_000), numReplies: 2)
+        list.emit([privateRead, liveReply])
+        await drainMainActor()
+        fakeRoom.receiptGate.release()
+        await paging.value
+        let updated = try #require(feed.items.first { $0.root.eventID == "$t-pending" })
+        #expect(updated.latest?.eventID == "$r-b" && updated.isUnread)
     }
 }

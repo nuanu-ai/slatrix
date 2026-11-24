@@ -5,6 +5,7 @@ struct DirectMessagesColumn: View {
     let matrix: MatrixService
     @Binding var search: String
     @Binding var unreadOnly: Bool
+    let onBack: () -> Void
     let onSelect: (String) -> Void
     let onCompose: () -> Void
     @Environment(\.metrics) private var m
@@ -13,12 +14,14 @@ struct DirectMessagesColumn: View {
         let openID = matrix.selectedRoomID
         VStack(spacing: 0) {
             HStack(spacing: m.sp4) {
+                IconButton(symbol: "chevron.left", label: "Back to channels", role: .body, action: onBack)
+                    .foregroundStyle(colors.textSecondary)
                 Text("Direct messages").font(m.font(.title3, .semibold)).lineLimit(1)
                     .foregroundStyle(colors.textPrimary)
                 Spacer(minLength: m.sp2)
                 IconButton(symbol: "square.and.pencil", label: "New message", role: .body, action: onCompose)
                     .foregroundStyle(colors.textSecondary)
-            }.padding(.leading, m.sp8).frame(height: m(36))
+            }.frame(height: m(36))
             // Slack has Unreads in the header; under the field it leaves the title whole in a sidebar this narrow.
             VStack(alignment: .trailing, spacing: m.sp8) {
                 SearchField(prompt: "Find a DM", text: $search)

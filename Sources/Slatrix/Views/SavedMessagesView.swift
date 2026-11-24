@@ -149,58 +149,68 @@ private struct SavedMessageRow: View {
     }
 
     var body: some View {
-        Button {
-            actions.open(reference)
-        } label: {
-            HStack(alignment: .top, spacing: m.sp12) {
-                AvatarView(name: message?.senderName ?? "", size: m.avatar, matrix: matrix, source: message?.avatarURL)
-                    .padding(.top, m.sp16 + m.sp2)
-                VStack(alignment: .leading, spacing: m.sp2) {
-                    // The reminder shares the conversation's line, so setting one never changes the row's height.
-                    HStack(spacing: m.sp8) {
-                        Text(location).font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary)
-                        if let remindAt = reference.remindAt { DueLabel(date: remindAt) }
-                    }.lineLimit(1).frame(height: m.sp16)
-                    HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
-                        Text(message?.senderName ?? "Placeholder name").font(m.font(.reading, .semibold))
-                            .foregroundStyle(colors.textPrimary)
-                        Text(
-                            message?.timestamp ?? reference.savedAt,
-                            format: .dateTime.month(.abbreviated).day().hour().minute()
-                        ).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-                    }.lineLimit(1)
-                    content
-                }
-                // Room for the actions that show on hover, so they never cover the text.
-                .padding(.trailing, m(120)).frame(maxWidth: .infinity, alignment: .leading)
+        Group {
+            if message == nil && error != nil {
+                rowContent
+            } else {
+                Button {
+                    actions.open(reference)
+                } label: {
+                    rowContent
+                }.buttonStyle(.row).disabled(room?.membership != "join")
             }
-            // Until the message arrives, its outline holds the row's place.
-            .redacted(reason: message == nil && error == nil ? .placeholder : [])
-            .padding(m.sp12)
-            .background(hovered ? colors.hover : .clear, in: RoundedRectangle(cornerRadius: m.radius))
-            .contentShape(Rectangle())
-        }.buttonStyle(.row).disabled(room?.membership != "join")
-            .overlay(alignment: .topTrailing) {
-                if hovered { toolbar.padding(.trailing, m.sp12).padding(.top, m.sp12) }
-            }
-            // After the overlay, so the pointer on the actions still hovers the row.
-            .onHover { hovered = $0 }
-            .accessibilityActions {
-                ForEach(commands, id: \.title) { command in Button(command.title, action: command.run) }
-                if reference.laterState == .inProgress {
-                    ForEach(ReminderPreset.allCases, id: \.self) { preset in
-                        Button("Remind me \(preset.title.lowercased())") {
-                            actions.remind(reference, preset.date(from: Date()))
-                        }
+        }
+        .overlay(alignment: .topTrailing) {
+            if hovered { toolbar.padding(.trailing, m.sp12).padding(.top, m.sp12) }
+        }
+        // After the overlay, so the pointer on the actions still hovers the row.
+        .onHover { hovered = $0 }
+        .accessibilityActions {
+            ForEach(commands, id: \.title) { command in Button(command.title, action: command.run) }
+            if reference.laterState == .inProgress {
+                ForEach(ReminderPreset.allCases, id: \.self) { preset in
+                    Button("Remind me \(preset.title.lowercased())") {
+                        actions.remind(reference, preset.date(from: Date()))
                     }
                 }
-                Button("Remove from Later") { actions.remove(reference) }
             }
-            .task(id: retry) { await load() }
-            .onDisappear {
-                message = nil
-                error = nil
+            Button("Remove from Later") { actions.remove(reference) }
+        }
+        .task(id: retry) { await load() }
+        .onDisappear {
+            message = nil
+            error = nil
+        }
+    }
+
+    private var rowContent: some View {
+        HStack(alignment: .top, spacing: m.sp12) {
+            AvatarView(name: message?.senderName ?? "", size: m.avatar, matrix: matrix, source: message?.avatarURL)
+                .padding(.top, m.sp16 + m.sp2)
+            VStack(alignment: .leading, spacing: m.sp2) {
+                // The reminder shares the conversation's line, so setting one never changes the row's height.
+                HStack(spacing: m.sp8) {
+                    Text(location).font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary)
+                    if let remindAt = reference.remindAt { DueLabel(date: remindAt) }
+                }.lineLimit(1).frame(height: m.sp16)
+                HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
+                    Text(message?.senderName ?? "Placeholder name").font(m.font(.reading, .semibold))
+                        .foregroundStyle(colors.textPrimary)
+                    Text(
+                        message?.timestamp ?? reference.savedAt,
+                        format: .dateTime.month(.abbreviated).day().hour().minute()
+                    ).font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                }.lineLimit(1)
+                content
             }
+            // Room for the actions that show on hover, so they never cover the text.
+            .padding(.trailing, m(120)).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        // Until the message arrives, its outline holds the row's place.
+        .redacted(reason: message == nil && error == nil ? .placeholder : [])
+        .padding(m.sp12)
+        .background(hovered ? colors.hover : .clear, in: RoundedRectangle(cornerRadius: m.radius))
+        .contentShape(Rectangle())
     }
 
     private struct Command {

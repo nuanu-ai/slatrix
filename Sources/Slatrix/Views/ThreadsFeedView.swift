@@ -9,13 +9,19 @@ struct ThreadsFeedView: View {
     var onOpen: (ChatMessage) -> Void
     @EnvironmentObject private var appearance: AppearanceStore
     @State private var coverageExpanded = false
+    @State private var unreadOnly = false
     private var colors: AppColors { appearance.colors }
     private var failedRoomCount: Int { feed.roomStates.filter { $0.state == .error }.count }
+    private var displayedItems: [ThreadFeedItem] { unreadOnly ? feed.items.filter(\.isUnread) : feed.items }
 
     var body: some View {
+        let visibleItems = displayedItems
         VStack(spacing: 0) {
             HStack(spacing: m.sp12) {
                 Spacer()
+                Toggle(isOn: $unreadOnly) { Text("Unreads").font(m.font(.body)) }
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
                 FeedWorkspacePicker(matrix: matrix, workspaceID: $workspaceID)
                 IconButton(symbol: "arrow.clockwise", label: "Refresh threads", role: .body) { refresh() }.disabled(
                     feed.isLoading)
@@ -28,9 +34,11 @@ struct ThreadsFeedView: View {
                         .trailing, m.sp20)
                 }.disabled(feed.isLoading)
             }
-            if feed.items.isEmpty {
-                if feed.isLoading || feed.isDiscovering {
+            if visibleItems.isEmpty {
+                if feed.items.isEmpty && (feed.isLoading || feed.isDiscovering) {
                     SkeletonRows(interval: .threadsLoading)
+                } else if unreadOnly && !feed.items.isEmpty {
+                    EmptyStateView(symbol: "bubble.left.and.bubble.right", title: "No unread threads")
                 } else {
                     EmptyStateView(symbol: "bubble.left.and.bubble.right", title: "No threads yet") {
                         if feed.canCheckMore { Button("Look further") { Task { await matrix.checkMoreThreads() } } }
@@ -39,7 +47,7 @@ struct ThreadsFeedView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(feed.items) { item in
+                        ForEach(visibleItems) { item in
                             ThreadFeedRow(
                                 item: item, root: feed.preview(roomID: item.roomID, eventID: item.root.eventID),
                                 latest: item.latest.flatMap {
@@ -150,18 +158,19 @@ private struct ThreadFeedRow: View {
                         systemName: item.isDirect ? "bubble.left.and.bubble.right" : item.isPrivate ? "lock" : "number"
                     ).font(
                         m.font(.subheadline))
-                    Text(item.roomName).font(m.font(.subheadline, .semibold)).lineLimit(1)
+                    Text(item.roomName).font(m.font(.subheadline, item.isUnread ? .semibold : .regular)).lineLimit(1)
                     Spacer()
                     Text(item.lastActivityAt, format: .dateTime.month(.abbreviated).day().hour().minute()).font(
                         m.font(.subheadline)
                     ).foregroundStyle(colors.textSecondary)
-                }.foregroundStyle(colors.textSecondary)
+                    if item.isUnread { Circle().fill(colors.accent).frame(width: m.sp8, height: m.sp8) }
+                }.foregroundStyle(item.isUnread ? colors.textPrimary : colors.textSecondary)
                 HStack(alignment: .top, spacing: m.sp12) {
                     AvatarView(
                         name: rootMessage.senderName, size: m.avatar, matrix: matrix, source: rootMessage.avatarURL)
                     VStack(alignment: .leading, spacing: m.sp4) {
-                        Text(rootMessage.senderName).font(m.font(.reading, .semibold)).foregroundStyle(
-                            colors.textPrimary)
+                        Text(rootMessage.senderName).font(m.font(.reading, item.isUnread ? .semibold : .medium))
+                            .foregroundStyle(colors.textPrimary)
                         previewBody(rootMessage, state: root.state, shape: item.root).font(m.font(.reading))
                             .foregroundStyle(
                                 colors.textBody
@@ -177,12 +186,13 @@ private struct ThreadFeedRow: View {
                             name: message.senderName, size: m.avatarMedium, matrix: matrix, source: message.avatarURL)
                         VStack(alignment: .leading, spacing: m.sp4) {
                             HStack(spacing: m.sp8) {
-                                Text(message.senderName).font(m.font(.caption, .semibold))
+                                Text(message.senderName).font(m.font(.caption, item.isUnread ? .semibold : .regular))
+                                    .foregroundStyle(item.isUnread ? colors.textPrimary : colors.textSecondary)
                                 Text("Latest reply").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
                             }
                             previewBody(message, state: latest.state, shape: snapshot).font(m.font(.caption))
                                 .foregroundStyle(
-                                    colors.textSecondary
+                                    item.isUnread ? colors.textBody : colors.textSecondary
                                 ).lineLimit(2).multilineTextAlignment(.leading)
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }.fixedSize(horizontal: false, vertical: true)
@@ -206,7 +216,7 @@ private struct ThreadFeedRow: View {
                 .contentShape(Rectangle())
                 .accessibilityElement(children: .combine).accessibilityLabel(
                     "Thread in \(item.roomName), \(rootMessage.senderName), \(Self.preview(rootMessage)), \(item.replyCount) replies"
-                )
+                ).accessibilityValue(item.isUnread ? "Unread" : "")
         }.buttonStyle(.row)
             .task(id: item.id + (item.latest?.eventID ?? "")) { await hydrate(false) }
             .contextMenu {

@@ -42,7 +42,8 @@ struct ReadStatePolicyTests {
         ("another room", otherRoom), ("newer message", { $0.latestVisibleEventID = "$next-rendered" }),
     ]
     static let visitEnds: [(String, Change)] = [
-        ("left the room", otherRoom), ("reopened", { $0.timelineGeneration = UUID() }),
+        ("left the room", otherRoom), ("left main timeline", { $0.isMainTimeline = false }),
+        ("reopened", { $0.timelineGeneration = UUID() }),
         (
             "signed out",
             {
@@ -229,14 +230,67 @@ struct ReadStatePolicyTests {
         #expect(hold.blocks(Self.visible))
     }
 
-    @Test("Rolling back a failed Mark unread releases that visit without affecting a newer visit")
+    @Test("Rolling back a failed Mark unread releases that hold without affecting a newer hold or visit")
     func rollbackMarkUnread() {
         var hold = ReadStateHold()
-        hold.markUnread(Self.visible)
-        hold.rollbackMarkUnread(Self.changed { $0.timelineGeneration = UUID() })
+        let first = hold.markUnread(Self.visible)
+        hold.rollbackMarkUnread(Self.changed { $0.timelineGeneration = UUID() }, token: first)
         #expect(hold.blocks(Self.visible))
-        hold.rollbackMarkUnread(Self.visible)
+        // Re-arming on the same timeline produces a newer token; rolling back the older token keeps the newer hold.
+        let second = hold.markUnread(Self.visible)
+        hold.rollbackMarkUnread(Self.visible, token: first)
+        #expect(hold.blocks(Self.visible))
+        hold.rollbackMarkUnread(Self.visible, token: second)
         #expect(!hold.blocks(Self.visible))
+    }
+
+    @Test("Mark unread outside the main timeline does not arm a stuck hold")
+    func markUnreadOutsideMainTimelineDoesNotHold() {
+        var hold = ReadStateHold()
+        hold.markUnread(Self.changed { $0.isMainTimeline = false })
+        #expect(!hold.blocks(Self.visible))
+    }
+
+    // capability: notifications.alert
+    @Test("A reaction targeting a message checks both the open conversation and open thread panes")
+    func seenReactionChecksConversationAndThread() {
+        let messages = TimelinePositions(["$root", "$m1"])
+        let replies = TimelinePositions(["$root", "$reply", "$later"])
+        let mainReport = PaneReport(newestInView: "$m1", laidOut: "$m1")
+        let threadReport = PaneReport(newestInView: "$reply", laidOut: "$later")
+        let thread = ThreadReadContext(
+            identity: ThreadReadIdentity(
+                accountID: "@reader:example.org", sessionID: UUID(), roomID: "!room:example.org", timelineID: UUID(),
+                rootID: "$root", threadSelectionID: UUID(), presentationID: UUID()),
+            eventID: "$later", isPresented: true, isReady: true, isAtBottom: false, isWindowActive: true,
+            isWindowVisible: true, isWindowUnoccluded: true)
+        // Reaction to a visible thread reply is seen even though main timeline does not contain it.
+        #expect(
+            ReadStatePolicy.seenReaction(
+                "$reply", roomID: "!room:example.org", conversation: Self.visible, thread: thread, messages: messages,
+                replies: replies, conversationReport: mainReport, threadReport: threadReport) == true)
+        // Reaction to a visible thread reply is also seen when the thread pane covers main in a narrow window.
+        let coveredConversation = Self.changed { $0.isCovered = true }
+        #expect(
+            ReadStatePolicy.seenReaction(
+                "$reply", roomID: "!room:example.org", conversation: coveredConversation, thread: thread,
+                messages: messages, replies: replies, conversationReport: mainReport, threadReport: threadReport)
+                == true)
+        // Reaction to a reply scrolled below newestInView in the open thread is immediately unseen (false, not nil).
+        #expect(
+            ReadStatePolicy.seenReaction(
+                "$later", roomID: "!room:example.org", conversation: Self.visible, thread: thread, messages: messages,
+                replies: replies, conversationReport: mainReport, threadReport: threadReport) == false)
+        // Reaction to a main-timeline message is seen when visible in main.
+        #expect(
+            ReadStatePolicy.seenReaction(
+                "$m1", roomID: "!room:example.org", conversation: Self.visible, thread: thread, messages: messages,
+                replies: replies, conversationReport: mainReport, threadReport: threadReport) == true)
+        // Reaction in another room is not seen.
+        #expect(
+            ReadStatePolicy.seenReaction(
+                "$reply", roomID: "!other:example.org", conversation: Self.visible, thread: thread, messages: messages,
+                replies: replies, conversationReport: mainReport, threadReport: threadReport) == false)
     }
 
     @Test(

@@ -82,7 +82,16 @@ struct DirectMessagesHostedTests {
         #expect(await eventually { matrix.selectedRoomID == id("Alex") })
         #expect(field("Find a DM") != nil)
 
-        // Switching workspace brings its conversations back.
+        // Back to channels returns to the workspace sidebar without changing the open conversation.
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+        try #require(await eventually { !accessible("Back to channels", in: hosting).isEmpty })
+        #expect(accessible("Back to channels", in: hosting).first?.accessibilityPerformPress?() == true)
+        #expect(await eventually { sidebarShown(in: hosting) && field("Find a DM") == nil })
+
+        // Back in DMs, switching workspace also brings its conversations back.
+        menu("dms")
+        #expect(await eventually { field("Find a DM") != nil })
         menu("workspace-1")
         #expect(await eventually { sidebarShown(in: hosting) && field("Find a DM") == nil })
 
