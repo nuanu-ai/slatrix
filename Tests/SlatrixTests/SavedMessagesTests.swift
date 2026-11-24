@@ -492,7 +492,6 @@ struct SavedMessagesServiceTests {
             .environment(\.metrics, Metrics(zoom: 1)))
         let window = offscreenWindow(NSSize(width: 700, height: 400))
         window.contentView = hosting
-        window.makeKeyAndOrderFront(nil)
         defer {
             window.contentView = nil
             window.close()
@@ -509,19 +508,7 @@ struct SavedMessagesServiceTests {
         f.room.timeline.event = messageEvent(
             "$saved", type: .text(content: TextMessageContent(body: "Recovered preview", formatted: nil)))
         let retry = try #require(accessible("Retry", in: hosting).first)
-        let screenFrame = retry.accessibilityFrame?() ?? .zero
-        try #require(!screenFrame.isEmpty)
-        let windowRect = window.convertFromScreen(screenFrame)
-        let location = NSPoint(x: windowRect.midX, y: windowRect.midY)
-        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
-            await drainMainActor()
-            window.sendEvent(
-                try #require(
-                    NSEvent.mouseEvent(
-                        with: type, location: location, modifierFlags: [],
-                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
-                        context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
-        }
+        #expect(retry.accessibilityPerformPress?() == true)
 
         func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
         #expect(

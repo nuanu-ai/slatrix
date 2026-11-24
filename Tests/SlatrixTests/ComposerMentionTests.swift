@@ -101,7 +101,7 @@ struct ComposerMentionTests {
             rootView: RootView(scratch: f.service)
                 .environmentObject(AppearanceStore())
                 .environment(\.metrics, Metrics(zoom: 1)))
-        let window = offscreenWindow(NSSize(width: 960, height: 640), key: true)
+        let window = offscreenWindow(NSSize(width: 960, height: 640))
         window.contentView = hosting
         defer {
             window.contentView = nil
