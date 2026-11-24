@@ -12,6 +12,7 @@ import ai.nuanu.slatrix.BuildConfig
 import ai.nuanu.slatrix.core.AccountState
 import ai.nuanu.slatrix.core.AttachmentImport
 import ai.nuanu.slatrix.core.ComposerTarget
+import ai.nuanu.slatrix.core.AndroidTheme
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.MatrixAccount
 import ai.nuanu.slatrix.core.MatrixMedia
@@ -114,7 +115,10 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     val appearance = remember(context) { AppearancePreferences(context) }
     var darkOverride by rememberSaveable { mutableStateOf(appearance.darkMode) }
     val dark = darkOverride ?: isSystemInDarkTheme()
-    var wallpaperColors by rememberSaveable { mutableStateOf(appearance.wallpaperColors) }
+    var theme by rememberSaveable { mutableStateOf(appearance.theme) }
+    var chatWallpaper by rememberSaveable { mutableStateOf(appearance.chatWallpaper) }
+    var increaseContrast by rememberSaveable { mutableStateOf(appearance.increaseContrast) }
+    var workspaceThemes by remember(appearance) { mutableStateOf(appearance.workspaceThemes) }
     var messageScale by rememberSaveable { mutableFloatStateOf(appearance.messageScale) }
     var server by rememberSaveable { mutableStateOf("") }
     var you by rememberSaveable { mutableStateOf(false) }
@@ -135,7 +139,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     }
     var restoreFailed by remember { mutableStateOf(false) }
     LaunchedEffect(state) { if ((state as? AccountState.Failed)?.canRetryRestore == true) restoreFailed = true }
-    SlatrixTheme(dark = dark, wallpaperColors = wallpaperColors, messageScale = messageScale) {
+    SlatrixTheme(dark = dark, theme = theme, chatWallpaper = chatWallpaper, increaseContrast = increaseContrast, messageScale = messageScale) {
         val failure = state as? AccountState.Failed
         val connecting = state as? AccountState.Connecting
         val options = when (val current = state) {
@@ -267,6 +271,10 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         onNotificationHandled(target)
                     }
                 }
+                val activeTheme = remember(selectedSpaceId, theme, workspaceThemes) {
+                    appearance.effectiveTheme(selectedSpaceId)
+                }
+                SlatrixTheme(dark = dark, theme = activeTheme, chatWallpaper = chatWallpaper, increaseContrast = increaseContrast, messageScale = messageScale) {
                 CompositionLocalProvider(LocalAvatarLoader provides avatars, LocalPictures provides pictures) { Box(Modifier.fillMaxSize()) {
                     ProvideConnection(rooms?.connection, rooms?.let { it::retry }) { ConnectedAccountScreen(identityState,
                         { identity?.requestVerification() }, { identity?.acceptVerification() },
@@ -317,10 +325,28 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             } },
                             WorkspaceCover("preferences") {
                                 val client = (state as AccountState.Connected).client
-                                LivePreferencesScreen(dark, darkOverride, wallpaperColors,
-                                    { darkOverride = it; appearance.darkMode = it },
-                                    { wallpaperColors = it; appearance.wallpaperColors = it }, { preferences = false },
-                                    messageScale, { messageScale = it; appearance.messageScale = it }) {
+                                val activeSpaceName = selectedSpaceId?.let { id -> roomList?.value?.spaces?.firstOrNull { it.id == id }?.name }
+                                LivePreferencesScreen(
+                                    dark = dark,
+                                    darkOverride = darkOverride,
+                                    theme = theme,
+                                    onColorMode = { appearance.darkMode = it; darkOverride = it },
+                                    onTheme = { appearance.theme = it; theme = it },
+                                    onBack = { preferences = false },
+                                    chatWallpaper = chatWallpaper,
+                                    onChatWallpaper = { appearance.chatWallpaper = it; chatWallpaper = it },
+                                    increaseContrast = increaseContrast,
+                                    onIncreaseContrast = { appearance.increaseContrast = it; increaseContrast = it },
+                                    activeWorkspaceId = selectedSpaceId,
+                                    activeWorkspaceName = activeSpaceName,
+                                    workspaceTheme = selectedSpaceId?.let { workspaceThemes[it] },
+                                    onWorkspaceTheme = { id, chosen ->
+                                        appearance.setWorkspaceTheme(id, chosen)
+                                        workspaceThemes = appearance.workspaceThemes
+                                    },
+                                    messageScale = messageScale,
+                                    onMessageScale = { messageScale = it; appearance.messageScale = it },
+                                ) {
                                     LiveNotificationSettings(userId) { client.getNotificationSettings() }
                                 }
                             }.takeIf { preferences },
@@ -351,6 +377,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(text) }
                     }
                 } }
+                }
             }
             state is AccountState.BrowserSignIn -> {
                 val browser = state as AccountState.BrowserSignIn

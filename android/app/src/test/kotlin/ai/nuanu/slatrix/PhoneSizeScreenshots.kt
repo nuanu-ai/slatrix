@@ -6,6 +6,7 @@ import ai.nuanu.slatrix.core.MessageSearchState
 import ai.nuanu.slatrix.core.NotifyAbout
 import ai.nuanu.slatrix.ui.account.AccountProviderScreen
 import ai.nuanu.slatrix.ui.account.ActivityScreen
+import ai.nuanu.slatrix.core.AndroidTheme
 import ai.nuanu.slatrix.ui.account.LivePreferencesScreen
 import ai.nuanu.slatrix.ui.account.LiveYouScreen
 import ai.nuanu.slatrix.ui.account.NotificationRows
@@ -126,7 +127,7 @@ class PhoneSizeScreenshots(private val screen: String, private val width: Int, p
                     "Can you look at the release notes before lunch?", now - 2 * hour, ActivityKind.Message, null).copy(unread = false),
             ), {}, {})
             "You" -> LiveYouScreen("@alexandra.rivera:harbor-collective.example.org", "Alexandra Rivera", {}, {}, onBack = {})
-            "Preferences" -> LivePreferencesScreen(dark, null, false, {}, {}, {}) { NotificationRows(NotifyAbout.DirectAndMentions, true, null, {}, {}) }
+            "Preferences" -> LivePreferencesScreen(dark, null, AndroidTheme.Neutral, {}, {}, {}) { NotificationRows(NotifyAbout.DirectAndMentions, true, null, {}, {}) }
             "SignIn" -> AccountProviderScreen("", {}, connecting = false, error = null, onContinue = {}, onCancel = {})
             "Channel", "Menu" -> LiveChannelScreen(room, ConversationState(conversation, loading = false, hasMore = false),
                 ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},

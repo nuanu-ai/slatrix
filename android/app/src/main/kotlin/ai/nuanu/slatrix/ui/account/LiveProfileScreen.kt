@@ -14,13 +14,19 @@ import androidx.compose.ui.res.painterResource
 import ai.nuanu.slatrix.BuildConfig
 import androidx.compose.ui.platform.LocalUriHandler
 
+import ai.nuanu.slatrix.core.AndroidTheme
 import ai.nuanu.slatrix.core.AppearancePreferences
 import ai.nuanu.slatrix.core.AvatarPlaceholder
 import ai.nuanu.slatrix.core.DisplayNames
+import ai.nuanu.slatrix.ui.designsystem.ThemeSwatch
 import ai.nuanu.slatrix.ui.designsystem.bubble
 import ai.nuanu.slatrix.ui.designsystem.bubbleShape
 import ai.nuanu.slatrix.ui.designsystem.message
 import ai.nuanu.slatrix.ui.designsystem.wallpaper
+import androidx.compose.foundation.border
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material.icons.outlined.Contrast
+import androidx.compose.material.icons.outlined.Wallpaper
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import kotlin.math.roundToInt
@@ -135,15 +141,31 @@ internal fun PushedPage(title: String, onBack: () -> Unit, action: @Composable (
 fun LivePreferencesScreen(
     dark: Boolean,
     darkOverride: Boolean?,
-    wallpaperColors: Boolean,
+    theme: AndroidTheme,
     onColorMode: (Boolean?) -> Unit,
-    onWallpaperColors: (Boolean) -> Unit,
+    onTheme: (AndroidTheme) -> Unit,
     onBack: () -> Unit,
+    chatWallpaper: Boolean = true,
+    onChatWallpaper: (Boolean) -> Unit = {},
+    increaseContrast: Boolean = false,
+    onIncreaseContrast: (Boolean) -> Unit = {},
+    activeWorkspaceId: String? = null,
+    activeWorkspaceName: String? = null,
+    workspaceTheme: AndroidTheme? = null,
+    onWorkspaceTheme: (String, AndroidTheme?) -> Unit = { _, _ -> },
     messageScale: Float = 1f,
     onMessageScale: (Float) -> Unit = {},
     notifications: @Composable () -> Unit = {},
 ) {
     var choosingMode by rememberSaveable { mutableStateOf(false) }
+    val hasWorkspace = activeWorkspaceId != null && activeWorkspaceName != null
+    var editingWorkspace by rememberSaveable(activeWorkspaceId) { mutableStateOf(hasWorkspace && workspaceTheme != null) }
+    val scopeWorkspace = hasWorkspace && editingWorkspace
+    val shownTheme = if (scopeWorkspace) (workspaceTheme ?: theme) else theme
+    val onPickTheme: (AndroidTheme) -> Unit = { choice ->
+        if (scopeWorkspace) onWorkspaceTheme(activeWorkspaceId, choice)
+        else onTheme(choice)
+    }
     val colors = SlatrixTheme.colors
     val colorMode = when (darkOverride) { null -> "System default"; false -> "Light"; true -> "Dark" }
 
@@ -168,28 +190,139 @@ fun LivePreferencesScreen(
         )
     }
     PushedPage("Preferences", onBack) {
-            item {
-                notifications()
-                PreferenceHeading("Appearance")
-                PreferenceRow(Icons.Outlined.Brush, "Color mode", Modifier.clickable(role = Role.Button) { choosingMode = true }) {
-                    Text(colorMode, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+        item {
+            notifications()
+            PreferenceHeading("Appearance")
+            PreferenceRow(Icons.Outlined.Brush, "Color mode", Modifier.clickable(role = Role.Button) { choosingMode = true }) {
+                Text(colorMode, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+            }
+            if (hasWorkspace) {
+                WorkspaceThemeScope(
+                    workspaceName = activeWorkspaceName,
+                    editingWorkspace = scopeWorkspace,
+                    workspaceTheme = workspaceTheme,
+                    onEditingWorkspace = { editingWorkspace = it },
+                    onReset = { onWorkspaceTheme(activeWorkspaceId, null) },
+                )
+            }
+            ThemePaletteGrid(
+                selected = shownTheme,
+                dark = dark,
+                increaseContrast = increaseContrast,
+                onSelect = onPickTheme,
+            )
+            PreferenceRow(
+                Icons.Outlined.Wallpaper,
+                "Chat wallpaper",
+                Modifier.toggleable(chatWallpaper, role = Role.Switch, onValueChange = onChatWallpaper),
+                trailing = { Switch(chatWallpaper, onCheckedChange = null) },
+            )
+            PreferenceRow(
+                Icons.Outlined.Contrast,
+                "Increase contrast",
+                Modifier.toggleable(increaseContrast, role = Role.Switch, onValueChange = onIncreaseContrast),
+                trailing = { Switch(increaseContrast, onCheckedChange = null) },
+            )
+            PreferenceHeading("Message text size")
+            MessageTextSize(messageScale, onMessageScale)
+            About()
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceThemeScope(
+    workspaceName: String,
+    editingWorkspace: Boolean,
+    workspaceTheme: AndroidTheme?,
+    onEditingWorkspace: (Boolean) -> Unit,
+    onReset: () -> Unit,
+) {
+    val colors = SlatrixTheme.colors
+    val segmentShape = MaterialTheme.shapes.small
+    Column(Modifier.padding(start = PreferenceInset, end = UiMetrics.GapLarge, top = UiMetrics.GapSmall)) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(MaterialTheme.shapes.medium)
+                .background(colors.raised)
+                .padding(UiMetrics.GapTiny)
+                .selectableGroup(),
+            horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny),
+        ) {
+            listOf("All workspaces" to false, workspaceName to true).forEach { (label, forWorkspace) ->
+                val selected = editingWorkspace == forWorkspace
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .heightIn(min = UiMetrics.Touch)
+                        .clip(segmentShape)
+                        .then(
+                            if (selected) Modifier.background(colors.canvas).border(UiMetrics.Divider, colors.borderStrong, segmentShape)
+                            else Modifier,
+                        )
+                        .selectable(selected = selected, role = Role.Tab) { onEditingWorkspace(forWorkspace) }
+                        .padding(horizontal = UiMetrics.GapSmall),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                        color = if (selected) colors.textPrimary else colors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
-                PreferenceHeading("Message text size")
-                MessageTextSize(messageScale, onMessageScale)
-                PreferenceHeading("Colors")
-                Column(Modifier.selectableGroup()) {
-                    listOf("Slatrix" to false, "From your wallpaper" to true).forEach { (label, choice) ->
-                        Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch)
-                            .selectable(selected = wallpaperColors == choice, role = Role.RadioButton, onClick = { onWallpaperColors(choice) })
-                            .padding(start = PreferenceInset, end = UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-                            Text(label, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
-                            RadioButton(selected = wallpaperColors == choice, onClick = null)
-                        }
-                    }
-                }
-                About()
             }
         }
+        if (workspaceTheme != null) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = UiMetrics.GapTiny),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                val note = if (editingWorkspace) "Custom theme for $workspaceName" else "$workspaceName uses ${workspaceTheme.label}"
+                Text(note, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = colors.textSecondary,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                TextButton(onClick = onReset, contentPadding = PaddingValues(horizontal = UiMetrics.GapSmall)) {
+                    Text("Use default")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemePaletteGrid(
+    selected: AndroidTheme,
+    dark: Boolean,
+    increaseContrast: Boolean,
+    onSelect: (AndroidTheme) -> Unit,
+) {
+    val colors = SlatrixTheme.colors
+    val neutral = remember { AndroidTheme.entries.filter { !it.colored } }
+    val colored = remember { AndroidTheme.entries.filter { it.colored } }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = PreferenceInset, end = UiMetrics.GapLarge, top = UiMetrics.GapSmall, bottom = UiMetrics.GapSmall)
+            .selectableGroup(),
+        verticalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall),
+    ) {
+        Text("Neutral", style = MaterialTheme.typography.labelLarge, color = colors.textSecondary)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+            neutral.forEach { choice ->
+                ThemeSwatch(choice, selected == choice, dark, increaseContrast, { onSelect(choice) }, Modifier.weight(1f))
+            }
+        }
+        Text("Colored", Modifier.padding(top = UiMetrics.GapTiny), style = MaterialTheme.typography.labelLarge, color = colors.textSecondary)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+            colored.forEach { choice ->
+                ThemeSwatch(choice, selected == choice, dark, increaseContrast, { onSelect(choice) }, Modifier.weight(1f))
+            }
+        }
+    }
 }
 
 /** About, a card set apart from the settings above it, as on the Mac: the app's icon beside its name, version and links. */

@@ -3,6 +3,7 @@ package ai.nuanu.slatrix.ui.designsystem
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -22,13 +23,18 @@ import androidx.compose.ui.graphics.vector.PathParser
 import kotlin.math.roundToInt
 
 /**
- * The chat wallpaper: a calm gray under faint doodles of the app's own icons. It stays put behind the messages, and its
- * tile is drawn once per theme, so scrolling only repeats it.
+ * The chat wallpaper: a calm tinted backdrop with optional faint doodles of the app's own icons. It stays put behind
+ * the messages, and its tile is drawn once per theme while doodles are on, so scrolling only repeats it.
  */
 @Composable
-fun Modifier.wallpaper(): Modifier {
+fun Modifier.wallpaper(showDoodles: Boolean = SlatrixTheme.chatWallpaper): Modifier {
     val colors = SlatrixTheme.colors
-    return this then remember(colors) { Modifier.drawWithCache {
+    if (!showDoodles) {
+        return this then remember(colors.wallpaper) {
+            Modifier.drawBehind { drawRect(colors.wallpaper) }
+        }
+    }
+    return this then remember(colors.wallpaper, colors.wallpaperDoodle) { Modifier.drawWithCache {
         val side = UiMetrics.WallpaperTile.toPx().roundToInt().coerceAtLeast(1)
         val tile = ImageBitmap(side, side)
         val unit = side / TileUnits

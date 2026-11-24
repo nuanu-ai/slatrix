@@ -1,10 +1,25 @@
 package ai.nuanu.slatrix.ui.designsystem
 
+import ai.nuanu.slatrix.core.AndroidTheme
 import androidx.compose.ui.graphics.Color
 
-/** The Android theme in `design/tokens.json`: its own colors and radii, and the file and avatar colors both apps share. */
+/** The Android themes in `design/tokens.json`: its own colors and radii, and the file and avatar colors both apps share. */
 object DesignTokens {
-    fun colors(dark: Boolean): Map<String, Color> = if (dark) {
+    fun colors(dark: Boolean): Map<String, Color> = colors(AndroidTheme.Neutral, dark)
+
+    fun colors(theme: AndroidTheme, dark: Boolean): Map<String, Color> {
+        val base = neutralColors(dark)
+        val overrides = when (theme) {
+            AndroidTheme.Neutral, AndroidTheme.MaterialYou -> emptyMap()
+            AndroidTheme.Sand -> sandOverrides(dark)
+            AndroidTheme.Aubergine -> aubergineOverrides(dark)
+            AndroidTheme.Jade -> jadeOverrides(dark)
+            AndroidTheme.Ocean -> oceanOverrides(dark)
+        }
+        return if (overrides.isEmpty()) base else base + overrides
+    }
+
+    private fun neutralColors(dark: Boolean): Map<String, Color> = if (dark) {
         mapOf(
             "textPrimary" to Color(0xfff1f2f4),
             "textBody" to Color(0xfff1f2f4),
@@ -99,6 +114,278 @@ object DesignTokens {
             "mediaBackdrop" to Color(0xff1a1b1e),
             "mediaShade" to Color(0xff000000).copy(alpha = 0.5f),
             "onMedia" to Color(0xffffffff),
+        )
+    }
+
+    private fun sandOverrides(dark: Boolean): Map<String, Color> = if (dark) {
+        mapOf(
+            "textPrimary" to Color(0xfff3eee7),
+            "textBody" to Color(0xfff3eee7),
+            "textSecondary" to Color(0xffb8afa3),
+            "textTertiary" to Color(0xffa69c90),
+            "canvas" to Color(0xff161411),
+            "raised" to Color(0xff23201b),
+            "sunken" to Color(0xff0d0b09),
+            "overlay" to Color(0xff2f2a24),
+            "tooltip" to Color(0xff363029),
+            "border" to Color(0xff363029),
+            "borderStrong" to Color(0xff50473d),
+            "accent" to Color(0xff7aa9ff),
+            "accentTint" to Color(0xff7aa9ff).copy(alpha = 0.14f),
+            "accentFill" to Color(0xff165bc4),
+            "destructive" to Color(0xffff6b70),
+            "warning" to Color(0xfff2a63b),
+            "presenceAway" to Color(0xffa69c90),
+            "mention" to Color(0xff165bc4),
+            "mentionText" to Color(0xff7aa9ff),
+            "mentionFill" to Color(0xff7aa9ff).copy(alpha = 0.14f),
+            "wallpaper" to Color(0xff12100d),
+            "wallpaperDoodle" to Color(0xffffffff).copy(alpha = 0.045f),
+            "bubbleIn" to Color(0xff2b2722),
+            "reaction" to Color(0xff3c3630),
+            "dateChip" to Color(0xff000000).copy(alpha = 0.38f),
+            "onDateChip" to Color(0xffebe5dc),
+            "glass" to Color(0xff28241f).copy(alpha = 0.58f),
+            "glassHeader" to Color(0xff181512).copy(alpha = 0.66f),
+            "glassEdge" to Color(0xfffff5e6).copy(alpha = 0.07f),
+            "glassShadow" to Color(0xff000000).copy(alpha = 0.5f),
+        )
+    } else {
+        mapOf(
+            "textPrimary" to Color(0xff231f1a),
+            "textBody" to Color(0xff231f1a),
+            "textSecondary" to Color(0xff5b5247),
+            "textTertiary" to Color(0xff685e53),
+            "canvas" to Color(0xfffdfbf7),
+            "raised" to Color(0xfff4efe6),
+            "sunken" to Color(0xffe7dfd2),
+            "overlay" to Color(0xfffffdfa),
+            "tooltip" to Color(0xff26211c),
+            "border" to Color(0xffe3dace),
+            "borderStrong" to Color(0xffc4b8a8),
+            "accent" to Color(0xff165bc4),
+            "accentTint" to Color(0xff165bc4).copy(alpha = 0.1f),
+            "accentFill" to Color(0xff165bc4),
+            "destructive" to Color(0xffbe1d28),
+            "warning" to Color(0xff8f4900),
+            "presenceAway" to Color(0xff685e53),
+            "mention" to Color(0xff165bc4),
+            "mentionText" to Color(0xff165bc4),
+            "mentionFill" to Color(0xff165bc4).copy(alpha = 0.1f),
+            "wallpaper" to Color(0xffeee6d8),
+            "wallpaperDoodle" to Color(0xff6e563a).copy(alpha = 0.07f),
+            "bubbleIn" to Color(0xfffffdfa),
+            "reaction" to Color(0xfff3ece0),
+            "dateChip" to Color(0xfffffdfa).copy(alpha = 0.8f),
+            "onDateChip" to Color(0xff423a31),
+            "glass" to Color(0xfffdfbf7).copy(alpha = 0.66f),
+            "glassHeader" to Color(0xfffdfbf7).copy(alpha = 0.76f),
+            "glassEdge" to Color(0xff231f1a).copy(alpha = 0.09f),
+            "glassShadow" to Color(0xff2b2114).copy(alpha = 0.15f),
+        )
+    }
+
+    private fun aubergineOverrides(dark: Boolean): Map<String, Color> = if (dark) {
+        mapOf(
+            "textPrimary" to Color(0xfff3eff5),
+            "textBody" to Color(0xfff3eff5),
+            "textSecondary" to Color(0xffb8adc0),
+            "textTertiary" to Color(0xffa699af),
+            "canvas" to Color(0xff120f15),
+            "raised" to Color(0xff1f1a24),
+            "sunken" to Color(0xff0b090d),
+            "overlay" to Color(0xff2a2330),
+            "tooltip" to Color(0xff342a3b),
+            "border" to Color(0xff332b3a),
+            "borderStrong" to Color(0xff4d4157),
+            "accent" to Color(0xffd494e8),
+            "accentTint" to Color(0xffd494e8).copy(alpha = 0.16f),
+            "accentFill" to Color(0xff732382),
+            "destructive" to Color(0xffff6970),
+            "warning" to Color(0xfff0a030),
+            "presenceAway" to Color(0xffa699af),
+            "mention" to Color(0xff732382),
+            "mentionText" to Color(0xffd494e8),
+            "mentionFill" to Color(0xffd494e8).copy(alpha = 0.16f),
+            "wallpaper" to Color(0xff140f18),
+            "wallpaperDoodle" to Color(0xffffffff).copy(alpha = 0.045f),
+            "bubbleIn" to Color(0xff2c2433),
+            "reaction" to Color(0xff3d3347),
+            "dateChip" to Color(0xff000000).copy(alpha = 0.38f),
+            "onDateChip" to Color(0xffebe4ef),
+            "glass" to Color(0xff28202e).copy(alpha = 0.58f),
+            "glassHeader" to Color(0xff18131d).copy(alpha = 0.66f),
+            "glassEdge" to Color(0xfff2dcff).copy(alpha = 0.07f),
+            "glassShadow" to Color(0xff000000).copy(alpha = 0.5f),
+        )
+    } else {
+        mapOf(
+            "textPrimary" to Color(0xff1a111d),
+            "textBody" to Color(0xff1a111d),
+            "textSecondary" to Color(0xff594b5f),
+            "textTertiary" to Color(0xff695a70),
+            "canvas" to Color(0xfffdfbfe),
+            "raised" to Color(0xfff4eff6),
+            "sunken" to Color(0xffeae2ee),
+            "overlay" to Color(0xffffffff),
+            "tooltip" to Color(0xff241928),
+            "border" to Color(0xffe4dbe8),
+            "borderStrong" to Color(0xffc8b8d0),
+            "accent" to Color(0xff732382),
+            "accentTint" to Color(0xff732382).copy(alpha = 0.11f),
+            "accentFill" to Color(0xff732382),
+            "destructive" to Color(0xffc41e2a),
+            "warning" to Color(0xff934b00),
+            "presenceAway" to Color(0xff695a70),
+            "mention" to Color(0xff732382),
+            "mentionText" to Color(0xff732382),
+            "mentionFill" to Color(0xff732382).copy(alpha = 0.11f),
+            "wallpaper" to Color(0xffefe7f3),
+            "wallpaperDoodle" to Color(0xff732382).copy(alpha = 0.07f),
+            "bubbleIn" to Color(0xffffffff),
+            "reaction" to Color(0xfff2eaf6),
+            "dateChip" to Color(0xffffffff).copy(alpha = 0.78f),
+            "onDateChip" to Color(0xff44364a),
+            "glass" to Color(0xfffbf7fd).copy(alpha = 0.66f),
+            "glassHeader" to Color(0xfffbf7fd).copy(alpha = 0.76f),
+            "glassEdge" to Color(0xff4a1f4f).copy(alpha = 0.09f),
+            "glassShadow" to Color(0xff2a1030).copy(alpha = 0.15f),
+        )
+    }
+
+    private fun jadeOverrides(dark: Boolean): Map<String, Color> = if (dark) {
+        mapOf(
+            "textPrimary" to Color(0xffeef4f1),
+            "textBody" to Color(0xffeef4f1),
+            "textSecondary" to Color(0xffa9bcb5),
+            "textTertiary" to Color(0xff96aba3),
+            "canvas" to Color(0xff0e1412),
+            "raised" to Color(0xff192320),
+            "sunken" to Color(0xff080c0b),
+            "overlay" to Color(0xff23302c),
+            "tooltip" to Color(0xff2b3a35),
+            "border" to Color(0xff2a3a35),
+            "borderStrong" to Color(0xff415750),
+            "accent" to Color(0xff5cd4b2),
+            "accentTint" to Color(0xff5cd4b2).copy(alpha = 0.15f),
+            "accentFill" to Color(0xff126651),
+            "destructive" to Color(0xffff6970),
+            "warning" to Color(0xfff0a030),
+            "presenceAway" to Color(0xff96aba3),
+            "mention" to Color(0xff126651),
+            "mentionText" to Color(0xff5cd4b2),
+            "mentionFill" to Color(0xff5cd4b2).copy(alpha = 0.15f),
+            "wallpaper" to Color(0xff0e1614),
+            "wallpaperDoodle" to Color(0xffffffff).copy(alpha = 0.045f),
+            "bubbleIn" to Color(0xff24322d),
+            "reaction" to Color(0xff32443e),
+            "dateChip" to Color(0xff000000).copy(alpha = 0.38f),
+            "onDateChip" to Color(0xffe2ece8),
+            "glass" to Color(0xff1e2a26).copy(alpha = 0.58f),
+            "glassHeader" to Color(0xff121a17).copy(alpha = 0.66f),
+            "glassEdge" to Color(0xffd4fff2).copy(alpha = 0.07f),
+            "glassShadow" to Color(0xff000000).copy(alpha = 0.5f),
+        )
+    } else {
+        mapOf(
+            "textPrimary" to Color(0xff0f1916),
+            "textBody" to Color(0xff0f1916),
+            "textSecondary" to Color(0xff475c54),
+            "textTertiary" to Color(0xff556b63),
+            "canvas" to Color(0xfffcfefd),
+            "raised" to Color(0xffedf4f1),
+            "sunken" to Color(0xffe1ece7),
+            "overlay" to Color(0xffffffff),
+            "tooltip" to Color(0xff162420),
+            "border" to Color(0xffd7e4de),
+            "borderStrong" to Color(0xffb4c9c0),
+            "accent" to Color(0xff126651),
+            "accentTint" to Color(0xff126651).copy(alpha = 0.11f),
+            "accentFill" to Color(0xff126651),
+            "destructive" to Color(0xffc21e2a),
+            "warning" to Color(0xff934b00),
+            "presenceAway" to Color(0xff556b63),
+            "mention" to Color(0xff126651),
+            "mentionText" to Color(0xff126651),
+            "mentionFill" to Color(0xff126651).copy(alpha = 0.11f),
+            "wallpaper" to Color(0xffe4efe9),
+            "wallpaperDoodle" to Color(0xff126651).copy(alpha = 0.07f),
+            "bubbleIn" to Color(0xffffffff),
+            "reaction" to Color(0xffeaf3ee),
+            "dateChip" to Color(0xffffffff).copy(alpha = 0.78f),
+            "onDateChip" to Color(0xff31453e),
+            "glass" to Color(0xfff6fbf9).copy(alpha = 0.66f),
+            "glassHeader" to Color(0xfff6fbf9).copy(alpha = 0.76f),
+            "glassEdge" to Color(0xff0f3b2e).copy(alpha = 0.09f),
+            "glassShadow" to Color(0xff0c261e).copy(alpha = 0.15f),
+        )
+    }
+
+    private fun oceanOverrides(dark: Boolean): Map<String, Color> = if (dark) {
+        mapOf(
+            "textPrimary" to Color(0xffedf3f9),
+            "textBody" to Color(0xffedf3f9),
+            "textSecondary" to Color(0xffa8b9cc),
+            "textTertiary" to Color(0xff95a9bf),
+            "canvas" to Color(0xff0d131b),
+            "raised" to Color(0xff17212e),
+            "sunken" to Color(0xff070b10),
+            "overlay" to Color(0xff202e40),
+            "tooltip" to Color(0xff29394d),
+            "border" to Color(0xff28384c),
+            "borderStrong" to Color(0xff3e5570),
+            "accent" to Color(0xff63c2f5),
+            "accentTint" to Color(0xff63c2f5).copy(alpha = 0.15f),
+            "accentFill" to Color(0xff0c5c8a),
+            "destructive" to Color(0xffff6970),
+            "warning" to Color(0xfff0a030),
+            "presenceAway" to Color(0xff95a9bf),
+            "mention" to Color(0xff0c5c8a),
+            "mentionText" to Color(0xff63c2f5),
+            "mentionFill" to Color(0xff63c2f5).copy(alpha = 0.15f),
+            "wallpaper" to Color(0xff0d1520),
+            "wallpaperDoodle" to Color(0xffffffff).copy(alpha = 0.045f),
+            "bubbleIn" to Color(0xff213043),
+            "reaction" to Color(0xff2f4259),
+            "dateChip" to Color(0xff000000).copy(alpha = 0.38f),
+            "onDateChip" to Color(0xffe1ebf5),
+            "glass" to Color(0xff1b2838).copy(alpha = 0.58f),
+            "glassHeader" to Color(0xff101822).copy(alpha = 0.66f),
+            "glassEdge" to Color(0xffd4ecff).copy(alpha = 0.07f),
+            "glassShadow" to Color(0xff000000).copy(alpha = 0.5f),
+        )
+    } else {
+        mapOf(
+            "textPrimary" to Color(0xff0d1621),
+            "textBody" to Color(0xff0d1621),
+            "textSecondary" to Color(0xff47596b),
+            "textTertiary" to Color(0xff54687c),
+            "canvas" to Color(0xfffbfdff),
+            "raised" to Color(0xffebf2f8),
+            "sunken" to Color(0xffdfeaf3),
+            "overlay" to Color(0xffffffff),
+            "tooltip" to Color(0xff14212f),
+            "border" to Color(0xffd5e2ee),
+            "borderStrong" to Color(0xffb2c7db),
+            "accent" to Color(0xff0c5c8a),
+            "accentTint" to Color(0xff0c5c8a).copy(alpha = 0.11f),
+            "accentFill" to Color(0xff0c5c8a),
+            "destructive" to Color(0xffc21e2a),
+            "warning" to Color(0xff934b00),
+            "presenceAway" to Color(0xff54687c),
+            "mention" to Color(0xff0c5c8a),
+            "mentionText" to Color(0xff0c5c8a),
+            "mentionFill" to Color(0xff0c5c8a).copy(alpha = 0.11f),
+            "wallpaper" to Color(0xffe1edf6),
+            "wallpaperDoodle" to Color(0xff0c5c8a).copy(alpha = 0.07f),
+            "bubbleIn" to Color(0xffffffff),
+            "reaction" to Color(0xffe8f1f8),
+            "dateChip" to Color(0xffffffff).copy(alpha = 0.78f),
+            "onDateChip" to Color(0xff2f4255),
+            "glass" to Color(0xfff5fafe).copy(alpha = 0.66f),
+            "glassHeader" to Color(0xfff5fafe).copy(alpha = 0.76f),
+            "glassEdge" to Color(0xff0c3554).copy(alpha = 0.09f),
+            "glassShadow" to Color(0xff0a2036).copy(alpha = 0.15f),
         )
     }
 

@@ -12,6 +12,7 @@ import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.ChannelDetailsActions
 import ai.nuanu.slatrix.ui.account.ChannelDetailsScreen
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
+import ai.nuanu.slatrix.core.AndroidTheme
 import ai.nuanu.slatrix.ui.account.LivePreferencesScreen
 import ai.nuanu.slatrix.ui.account.MessageActions
 import ai.nuanu.slatrix.ui.account.MessageActionsHost
@@ -107,7 +108,7 @@ class MotionTest {
         var shown by mutableStateOf(false)
         compose.setContent {
             SlatrixTheme {
-                LiveWorkspace(listOfNotNull(WorkspaceCover("preferences") { LivePreferencesScreen(false, null, false, {}, {}, {}) }.takeIf { shown })) {
+                LiveWorkspace(listOfNotNull(WorkspaceCover("preferences") { LivePreferencesScreen(false, null, AndroidTheme.Neutral, {}, {}, {}) }.takeIf { shown })) {
                     Text("You")
                 }
             }
@@ -203,7 +204,7 @@ class MotionTest {
         lateinit var dispatcher: OnBackPressedDispatcher
         compose.setContent {
             dispatcher = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
-            SlatrixTheme { LivePreferencesScreen(false, null, false, {}, {}, { went = true }) }
+            SlatrixTheme { LivePreferencesScreen(false, null, AndroidTheme.Neutral, {}, {}, { went = true }) }
         }
         compose.waitForIdle()
         val rest = bounds("Color mode")
@@ -231,7 +232,7 @@ class MotionTest {
         lateinit var dispatcher: OnBackPressedDispatcher
         compose.setContent {
             dispatcher = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
-            SlatrixTheme { LivePreferencesScreen(false, null, false, {}, {}, {}) }
+            SlatrixTheme { LivePreferencesScreen(false, null, AndroidTheme.Neutral, {}, {}, {}) }
         }
         compose.waitForIdle()
         val rest = bounds("Color mode")
@@ -252,7 +253,7 @@ class MotionTest {
             dispatcher = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
             SlatrixTheme {
                 LiveWorkspace(listOfNotNull(
-                    WorkspaceCover("preferences") { LivePreferencesScreen(false, null, false, {}, {}, { open = false }) }.takeIf { open },
+                    WorkspaceCover("preferences") { LivePreferencesScreen(false, null, AndroidTheme.Neutral, {}, {}, { open = false }) }.takeIf { open },
                 )) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Home") }
                 }

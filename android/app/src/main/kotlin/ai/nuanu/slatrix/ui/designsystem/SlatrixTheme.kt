@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix.ui.designsystem
 
+import ai.nuanu.slatrix.core.AndroidTheme
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -19,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
@@ -131,35 +133,159 @@ fun OnAccentFill(content: @Composable () -> Unit) {
 }
 
 private val LocalColors = staticCompositionLocalOf { AppColors(DesignTokens.colors(false), false) }
+private val LocalChatWallpaper = staticCompositionLocalOf { true }
 
-/** Material You: the theme's surfaces and accent from the wallpaper, with the chat's gray washed in that accent. */
+/** Material You: the theme's surfaces and accent from the phone's wallpaper, washed into the chat backdrop. */
 private fun wallpaperRoles(dark: Boolean, scheme: ColorScheme): Map<String, Color> {
-    return DesignTokens.colors(dark) + mapOf(
-        "textPrimary" to scheme.onSurface, "textBody" to scheme.onSurface, "textSecondary" to scheme.onSurfaceVariant,
-        "canvas" to scheme.surface, "raised" to scheme.surfaceContainerHigh, "sunken" to scheme.surfaceContainerLow,
-        "overlay" to scheme.surfaceContainerHighest, "border" to scheme.outlineVariant, "borderStrong" to scheme.outline,
-        "accent" to scheme.primary, "accentTint" to scheme.primary.copy(alpha = 0.12f), "accentFill" to scheme.primary,
-        "onAccent" to scheme.onPrimary, "mention" to scheme.primary, "mentionText" to scheme.primary,
-        "mentionFill" to scheme.primary.copy(alpha = 0.12f), "wallpaper" to lerp(scheme.surfaceContainer, scheme.primary, WashAccent),
+    val wallpaperBase = if (dark) scheme.surfaceContainerLowest else scheme.surfaceContainer
+    val wash = if (dark) WashAccentDark else WashAccentLight
+    return DesignTokens.colors(AndroidTheme.Neutral, dark) + mapOf(
+        "textPrimary" to scheme.onSurface,
+        "textBody" to scheme.onSurface,
+        "textSecondary" to scheme.onSurfaceVariant,
+        "textTertiary" to scheme.onSurfaceVariant,
+        "presenceAway" to scheme.onSurfaceVariant,
+        "canvas" to scheme.surface,
+        "raised" to scheme.surfaceContainerHigh,
+        "sunken" to if (dark) scheme.surfaceContainerLowest else scheme.surfaceContainerLow,
+        "overlay" to if (dark) scheme.surfaceContainerHighest else scheme.surfaceContainerLowest,
+        "border" to scheme.outlineVariant,
+        "borderStrong" to scheme.outline,
+        "accent" to scheme.primary,
+        "accentTint" to scheme.primary.copy(alpha = 0.12f),
+        "accentFill" to scheme.primary,
+        "onAccent" to scheme.onPrimary,
+        "destructive" to scheme.error,
+        "destructiveFill" to scheme.error,
+        "mention" to scheme.primary,
+        "mentionText" to scheme.primary,
+        "mentionFill" to scheme.primary.copy(alpha = 0.12f),
+        "wallpaper" to lerp(wallpaperBase, scheme.primary, wash),
         "wallpaperDoodle" to if (dark) scheme.onSurface.copy(alpha = 0.045f) else scheme.primary.copy(alpha = 0.07f),
-        "bubbleOutMeta" to scheme.onPrimary.copy(alpha = 0.8f), "bubbleOutRule" to scheme.onPrimary.copy(alpha = 0.22f),
+        "bubbleOutMeta" to scheme.onPrimary.copy(alpha = 0.9f),
+        "bubbleOutRule" to scheme.onPrimary.copy(alpha = 0.22f),
         "bubbleIn" to if (dark) scheme.surfaceContainerHigh else scheme.surfaceContainerLowest,
         "reaction" to scheme.surfaceContainerHighest,
+        "onDateChip" to if (dark) scheme.onSurface else scheme.onSurfaceVariant,
+        "glass" to (if (dark) scheme.surfaceContainerHigh else scheme.surfaceContainerLowest).copy(alpha = if (dark) 0.58f else 0.66f),
+        "glassHeader" to (if (dark) scheme.surface else scheme.surfaceContainerLowest).copy(alpha = if (dark) 0.66f else 0.76f),
+        "glassEdge" to scheme.onSurface.copy(alpha = if (dark) 0.07f else 0.09f),
     )
 }
 
-private const val WashAccent = 0.05f
+/** Boosts borders, text, and surface separation for any theme while keeping borderless bubbles and WCAG AA contrast. */
+private fun applyHighContrast(base: Map<String, Color>, dark: Boolean): Map<String, Color> {
+    val accentFillBase = base.getValue("accentFill")
+    val onAccentBase = base.getValue("onAccent")
+    val destructiveFillBase = base.getValue("destructiveFill")
+    val lightOnFill = onAccentBase.luminance() >= accentFillBase.luminance()
+    val accentFill = if (lightOnFill) lerp(accentFillBase, Color.Black, if (dark) 0.16f else 0.22f) else lerp(accentFillBase, Color.White, 0.25f)
+    val onAccent = if (lightOnFill) Color.White else lerp(onAccentBase, Color.Black, 0.5f)
+    val destructiveFill = if (lightOnFill) lerp(destructiveFillBase, Color.Black, if (dark) 0.16f else 0.22f) else lerp(destructiveFillBase, Color.White, 0.22f)
+
+    val adjustments = if (dark) {
+        val boostedAccent = lerp(base.getValue("accent"), Color.White, 0.32f)
+        mapOf(
+            "sunken" to Color.Black,
+            "canvas" to Color.Black,
+            "raised" to lerp(base.getValue("raised"), Color.Black, 0.14f),
+            "overlay" to lerp(base.getValue("overlay"), Color.Black, 0.08f),
+            "textPrimary" to Color.White,
+            "textBody" to Color.White,
+            "textSecondary" to lerp(base.getValue("textSecondary"), Color.White, 0.45f),
+            "textTertiary" to lerp(base.getValue("textTertiary"), Color.White, 0.45f),
+            "presenceAway" to lerp(base.getValue("presenceAway"), Color.White, 0.45f),
+            "border" to lerp(base.getValue("border"), Color.White, 0.38f),
+            "borderStrong" to lerp(base.getValue("borderStrong"), Color.White, 0.52f),
+            "glassEdge" to Color.White.copy(alpha = 0.3f),
+            "glass" to base.getValue("glass").copy(alpha = maxOf(base.getValue("glass").alpha, 0.8f)),
+            "glassHeader" to base.getValue("glassHeader").copy(alpha = maxOf(base.getValue("glassHeader").alpha, 0.86f)),
+            "wallpaper" to lerp(base.getValue("wallpaper"), Color.Black, 0.75f),
+            "bubbleIn" to lerp(base.getValue("bubbleIn"), Color.Black, 0.1f),
+            "reaction" to lerp(base.getValue("reaction"), Color.White, 0.06f),
+            "dateChip" to Color.Black.copy(alpha = 0.75f),
+            "onDateChip" to Color.White,
+            "accent" to boostedAccent,
+            "mentionText" to boostedAccent,
+            "accentTint" to base.getValue("accent").copy(alpha = 0.22f),
+            "mentionFill" to base.getValue("accent").copy(alpha = 0.18f),
+            "destructive" to lerp(base.getValue("destructive"), Color.White, 0.22f),
+            "warning" to lerp(base.getValue("warning"), Color.White, 0.22f),
+            "mentionYouText" to lerp(base.getValue("mentionYouText"), Color.White, 0.28f),
+            "mentionYouFill" to base.getValue("mentionYouFill").copy(alpha = 0.2f),
+        )
+    } else {
+        val boostedAccent = lerp(base.getValue("accent"), Color.Black, 0.24f)
+        mapOf(
+            "canvas" to Color.White,
+            "overlay" to Color.White,
+            "raised" to lerp(base.getValue("raised"), Color.Black, 0.03f),
+            "sunken" to lerp(base.getValue("sunken"), Color.Black, 0.06f),
+            "textPrimary" to Color.Black,
+            "textBody" to Color.Black,
+            "textSecondary" to lerp(base.getValue("textSecondary"), Color.Black, 0.45f),
+            "textTertiary" to lerp(base.getValue("textTertiary"), Color.Black, 0.45f),
+            "presenceAway" to lerp(base.getValue("presenceAway"), Color.Black, 0.45f),
+            "border" to lerp(base.getValue("border"), Color.Black, 0.38f),
+            "borderStrong" to lerp(base.getValue("borderStrong"), Color.Black, 0.52f),
+            "glassEdge" to Color.Black.copy(alpha = 0.28f),
+            "glass" to base.getValue("glass").copy(alpha = maxOf(base.getValue("glass").alpha, 0.86f)),
+            "glassHeader" to base.getValue("glassHeader").copy(alpha = maxOf(base.getValue("glassHeader").alpha, 0.9f)),
+            "wallpaper" to lerp(base.getValue("wallpaper"), Color.Black, 0.07f),
+            "bubbleIn" to Color.White,
+            "reaction" to lerp(base.getValue("reaction"), Color.Black, 0.05f),
+            "dateChip" to Color.White.copy(alpha = 0.92f),
+            "onDateChip" to Color.Black,
+            "accent" to boostedAccent,
+            "mentionText" to boostedAccent,
+            "accentTint" to boostedAccent.copy(alpha = 0.15f),
+            "mentionFill" to boostedAccent.copy(alpha = 0.15f),
+            "destructive" to lerp(base.getValue("destructive"), Color.Black, 0.24f),
+            "warning" to lerp(base.getValue("warning"), Color.Black, 0.25f),
+            "mentionYouText" to lerp(base.getValue("mentionYouText"), Color.Black, 0.3f),
+            "mentionYouFill" to base.getValue("mentionYouFill").copy(alpha = 0.4f),
+        )
+    }
+    return base + adjustments + mapOf(
+        "accentFill" to accentFill,
+        "mention" to accentFill,
+        "onAccent" to onAccent,
+        "destructiveFill" to destructiveFill,
+        "bubbleOutMeta" to onAccent.copy(alpha = 0.96f),
+        "bubbleOutRule" to onAccent.copy(alpha = 0.36f),
+    )
+}
+
+internal fun themeRoles(
+    theme: AndroidTheme,
+    dark: Boolean,
+    increaseContrast: Boolean = false,
+    dynamicScheme: ColorScheme? = null,
+): Map<String, Color> {
+    val base = if (theme == AndroidTheme.MaterialYou && dynamicScheme != null) {
+        wallpaperRoles(dark, dynamicScheme)
+    } else {
+        DesignTokens.colors(theme, dark)
+    }
+    return if (increaseContrast) applyHighContrast(base, dark) else base
+}
+
+private const val WashAccentLight = 0.05f
+private const val WashAccentDark = 0.03f
 
 object SlatrixTheme {
     val topPanelShape @Composable get() = MaterialTheme.shapes.extraLarge.copy(bottomStart = ZeroCornerSize, bottomEnd = ZeroCornerSize)
     val colors: AppColors @Composable get() = LocalColors.current
+    val chatWallpaper: Boolean @Composable get() = LocalChatWallpaper.current
 }
 
-/** Slatrix's own theme, or with [wallpaperColors] Material You's colors from the phone's wallpaper. */
+/** Slatrix's theme system: 6 curated palettes (including Material You), independent chat wallpaper, and high contrast. */
 @Composable
 fun SlatrixTheme(
     dark: Boolean = isSystemInDarkTheme(),
-    wallpaperColors: Boolean = false,
+    theme: AndroidTheme = AndroidTheme.Neutral,
+    chatWallpaper: Boolean = true,
+    increaseContrast: Boolean = false,
     messageScale: Float = 1f,
     content: @Composable () -> Unit,
 ) {
@@ -173,9 +299,11 @@ fun SlatrixTheme(
         }
     }
     val context = LocalContext.current
-    val colors = remember(dark, wallpaperColors, context) {
-        AppColors(if (wallpaperColors) wallpaperRoles(dark, if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context))
-            else DesignTokens.colors(dark), dark)
+    val colors = remember(dark, theme, increaseContrast, context) {
+        val dynamic = if (theme == AndroidTheme.MaterialYou) {
+            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        } else null
+        AppColors(themeRoles(theme, dark, increaseContrast, dynamic), dark)
     }
     val scheme = remember(colors, dark) {
         val base = if (dark) darkColorScheme() else lightColorScheme()
@@ -227,7 +355,12 @@ fun SlatrixTheme(
             extraLarge = RoundedCornerShape(DesignTokens.radii.getValue("extraLarge").dp),
         )
     }
-    CompositionLocalProvider(LocalColors provides colors, LocalContentColor provides colors.textPrimary, LocalMessageScale provides messageScale) {
+    CompositionLocalProvider(
+        LocalColors provides colors,
+        LocalContentColor provides colors.textPrimary,
+        LocalMessageScale provides messageScale,
+        LocalChatWallpaper provides chatWallpaper,
+    ) {
         MaterialTheme(colorScheme = scheme, typography = SlatrixTypography, shapes = shapes, content = content)
     }
 }
