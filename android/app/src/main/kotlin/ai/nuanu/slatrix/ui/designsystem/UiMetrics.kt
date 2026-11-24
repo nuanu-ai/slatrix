@@ -1,9 +1,13 @@
 package ai.nuanu.slatrix.ui.designsystem
 
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 
 object UiMetrics {
     val GapTiny = 4.dp
+    val LineGap = 2.dp
     val GapSmall = 8.dp
     val GapMedium = 12.dp
     val GapLarge = 16.dp
@@ -55,6 +59,10 @@ object UiMetrics {
     /** A bubble's inset around its text, a little tighter than a card's, as a messenger's is. */
     val BubbleInset = 10.dp
     val BubbleInsetVertical = 6.dp
+    /** Vertical rhythm between bubbles: grouped text, grouped after a file/media attachment, and a new sender. */
+    val BubbleGroupedGap = 3.dp
+    val BubbleAfterAttachmentGap = 6.dp
+    val BubbleSenderGap = 12.dp
     /** The share of the width your bubble leaves on its far side, so a long one reaches about 85%, as in Telegram. */
     const val BubbleGutter = 0.12f
     /** Theirs leave a gutter that grows with the phone, from narrow at 320 dp to wide at 412 dp, past their picture's room. */
@@ -62,6 +70,10 @@ object UiMetrics {
     val IncomingGutterWide = 56.dp
     /** How far a row is swiped to act on it: a message to reply, a Later card to remove it. */
     val Swipe = 64.dp
+    /** Circular pill badge behind the swipe-to-reply icon. */
+    val SwipeBadge = 32.dp
+    /** Vertical drag distance before releasing the full-screen media viewer dismisses it. */
+    val ViewerDismiss = 120.dp
     val NarrowPhone = 320.dp
     val WidePhone = 412.dp
     val GlassBlur = 24.dp
@@ -113,3 +125,12 @@ object UiMetrics {
     /** Code reads a little smaller than the text around it, as on the Mac. */
     const val CodeTextScale = 0.9f
 }
+
+/** Defers reading [PaddingValues] until layout so animated bars never recompose the content behind them. */
+fun PaddingValues.deferred(topExtra: Dp = 0.dp, bottomExtra: Dp = 0.dp, useTop: Boolean = true, useBottom: Boolean = true): PaddingValues =
+    object : PaddingValues {
+        override fun calculateLeftPadding(layoutDirection: LayoutDirection) = 0.dp
+        override fun calculateRightPadding(layoutDirection: LayoutDirection) = 0.dp
+        override fun calculateTopPadding() = if (useTop) this@deferred.calculateTopPadding() + topExtra else topExtra
+        override fun calculateBottomPadding() = if (useBottom) this@deferred.calculateBottomPadding() + bottomExtra else bottomExtra
+    }

@@ -64,7 +64,7 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
     /** The chat wallpaper: a calm cool gray under faint doodles of the app's own icons. */
     val wallpaper = roles.getValue("wallpaper")
     val wallpaperDoodle = roles.getValue("wallpaperDoodle")
-    /** Others' bubbles, lifted off the wallpaper by a hairline [bubbleEdge]; your own are [accentFill] under [onAccent]. */
+    /** Others' bubbles on the wallpaper, borderless ([bubbleEdge] is transparent); your own are [accentFill] under [onAccent]. */
     val bubbleIn = roles.getValue("bubbleIn")
     val bubbleEdge = roles.getValue("bubbleEdge")
     val bubbleOutMeta = roles.getValue("bubbleOutMeta")
@@ -89,6 +89,16 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
     /** A person's color, from the shared avatar colors; in dark it is lightened so their name reads on a dark bubble. */
     fun person(colorIndex: Int): Color = DesignTokens.avatarColors[colorIndex].let { if (dark) lerp(it, Color.White, PersonLift) else it }
 
+    /** Soft tinted container behind a file-type icon; on your own bubble uses the translucent bubble rule for contrast. */
+    fun fileTileFill(color: Color): Color = if (underlineLinks) accentTint else color.copy(alpha = FileTileTintAlpha)
+
+    /** Crisp file-type icon tint lifted in dark and shaded in light for WCAG contrast; uses [textPrimary] on your own bubble. */
+    fun fileTileIcon(color: Color): Color = when {
+        underlineLinks -> textPrimary
+        dark -> lerp(color, Color.White, FileIconDarkLift)
+        else -> lerp(color, Color.Black, FileIconLightShade)
+    }
+
     /** The roles inside your own bubble, on [accentFill]: text, links and marks in [onAccent] and its quieter tints. */
     internal val onFill: AppColors by lazy {
         val on = roles.getValue("onAccent")
@@ -101,7 +111,12 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
         ), dark, underlineLinks = true)
     }
 
-    private companion object { const val PersonLift = 0.45f }
+    private companion object {
+        const val PersonLift = 0.45f
+        const val FileTileTintAlpha = 0.14f
+        const val FileIconDarkLift = 0.38f
+        const val FileIconLightShade = 0.18f
+    }
 }
 
 /** Draws [content] on the accent's fill, as your own bubbles are, with every role it reads turned to suit. */
@@ -126,7 +141,7 @@ private fun wallpaperRoles(dark: Boolean, scheme: ColorScheme): Map<String, Colo
         "accent" to scheme.primary, "accentTint" to scheme.primary.copy(alpha = 0.12f), "accentFill" to scheme.primary,
         "onAccent" to scheme.onPrimary, "mention" to scheme.primary, "mentionText" to scheme.primary,
         "mentionFill" to scheme.primary.copy(alpha = 0.12f), "wallpaper" to lerp(scheme.surfaceContainer, scheme.primary, WashAccent),
-        "wallpaperDoodle" to if (dark) scheme.onSurface.copy(alpha = 0.06f) else scheme.primary.copy(alpha = 0.1f),
+        "wallpaperDoodle" to if (dark) scheme.onSurface.copy(alpha = 0.045f) else scheme.primary.copy(alpha = 0.07f),
         "bubbleOutMeta" to scheme.onPrimary.copy(alpha = 0.8f), "bubbleOutRule" to scheme.onPrimary.copy(alpha = 0.22f),
         "bubbleIn" to if (dark) scheme.surfaceContainerHigh else scheme.surfaceContainerLowest,
         "reaction" to scheme.surfaceContainerHighest,

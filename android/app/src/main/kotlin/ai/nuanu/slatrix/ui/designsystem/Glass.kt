@@ -57,7 +57,7 @@ fun Modifier.glassBar(state: HazeState, atFoot: Boolean = false): Modifier {
     }
 }
 
-/** A bubble's fill in [shape], over a hairline of [edge] a little below it, which lifts it off the wallpaper. */
+/** A bubble's fill in [shape], skipping the edge pass when [edge] is transparent. */
 fun Modifier.bubble(shape: Shape, fill: Color, edge: Color): Modifier = this then BubbleElement(shape, fill, edge)
 
 // An element compared by value, so recomposing a bubble's row, or the composer on every keystroke, leaves it alone.
@@ -82,7 +82,7 @@ private class BubbleNode(var shape: Shape, var fill: Color, var edge: Color) : M
             outlineSize = size
         }
         val outline = outline!!
-        translate(top = UiMetrics.Hairline.toPx() * 2) { drawOutline(outline, edge) }
+        if (edge.alpha > 0f) translate(top = UiMetrics.Hairline.toPx() * 2) { drawOutline(outline, edge) }
         drawOutline(outline, fill)
         drawContent()
     }

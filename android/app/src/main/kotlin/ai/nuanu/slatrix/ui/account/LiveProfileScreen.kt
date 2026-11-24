@@ -20,6 +20,7 @@ import ai.nuanu.slatrix.core.DisplayNames
 import ai.nuanu.slatrix.ui.designsystem.bubble
 import ai.nuanu.slatrix.ui.designsystem.bubbleShape
 import ai.nuanu.slatrix.ui.designsystem.message
+import ai.nuanu.slatrix.ui.designsystem.wallpaper
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import kotlin.math.roundToInt
@@ -87,18 +88,18 @@ fun LiveYouScreen(userId: String, name: String?, onPreferences: () -> Unit, onSi
             onViewProfile?.let { view ->
                 Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.CompactRow).clickable(role = Role.Button) { view(name) }
                     .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(SlackIcons.Person, null, Modifier.size(UiMetrics.Icon))
+                    Icon(SlackIcons.Person, null, Modifier.size(UiMetrics.LargeIcon), tint = colors.textSecondary)
                     Text("View profile", style = MaterialTheme.typography.bodyLarge)
                 }
             }
             Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.CompactRow).clickable(role = Role.Button, onClick = onPreferences)
                 .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-                Icon(SlackIcons.Preferences, null, Modifier.size(UiMetrics.Icon))
+                Icon(SlackIcons.Preferences, null, Modifier.size(UiMetrics.LargeIcon), tint = colors.textSecondary)
                 Text("Preferences", style = MaterialTheme.typography.bodyLarge)
             }
             Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.CompactRow).clickable(role = Role.Button) { confirming = true }
                 .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge), verticalAlignment = Alignment.CenterVertically) {
-                Icon(SlackIcons.SignOut, null, Modifier.size(UiMetrics.Icon))
+                Icon(SlackIcons.SignOut, null, Modifier.size(UiMetrics.LargeIcon), tint = colors.textSecondary)
                 Text("Sign out", style = MaterialTheme.typography.bodyLarge)
             }
         }
@@ -225,10 +226,14 @@ private fun MessageTextSize(scale: Float, onScale: (Float) -> Unit) {
     val colors = SlatrixTheme.colors
     val scales = AppearancePreferences.MessageScales
     val shape = remember { bubbleShape(own = false, grouped = false, last = true) }
-    // Laid out as an incoming message is, keeping its gutter on the far side.
-    Text(MessagePreview, Modifier.padding(start = PreferenceInset, end = UiMetrics.GapLarge + UiMetrics.IncomingGutterNarrow)
-        .wrapContentWidth(Alignment.Start).bubble(shape, colors.bubbleIn, colors.bubbleEdge).padding(horizontal = UiMetrics.GapMedium, vertical = UiMetrics.GapSmall),
-        style = MaterialTheme.typography.message, color = colors.textBody)
+    // Set over a chat-wallpaper preview card so the borderless light-mode bubble reads clearly against the canvas.
+    Box(Modifier.padding(start = PreferenceInset, end = UiMetrics.GapLarge).fillMaxWidth()
+        .clip(MaterialTheme.shapes.large).wallpaper().padding(UiMetrics.GapMedium)) {
+        Text(MessagePreview, Modifier.padding(end = UiMetrics.IncomingGutterNarrow)
+            .wrapContentWidth(Alignment.Start).bubble(shape, colors.bubbleIn, colors.bubbleEdge)
+            .padding(horizontal = UiMetrics.BubbleInset, vertical = UiMetrics.BubbleInsetVertical),
+            style = MaterialTheme.typography.message, color = colors.textBody)
+    }
     Row(Modifier.fillMaxWidth().padding(start = PreferenceInset, end = UiMetrics.GapLarge, top = UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
         Text("A", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)

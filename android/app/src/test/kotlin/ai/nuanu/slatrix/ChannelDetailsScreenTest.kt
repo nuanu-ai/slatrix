@@ -77,6 +77,11 @@ class ChannelDetailsScreenTest {
         compose.runOnIdle { assertTrue(opened) }
     }
 
+    @Test fun descriptionSectionUsesSharedListHeadingSemantics() {
+        details(room)
+        compose.onNode(hasText("Description") and androidx.compose.ui.test.isHeading()).assertIsDisplayed()
+    }
+
     // capability: channel.details
     @Test fun editingSavesOnlyTheNameOrDescriptionThatChanged() {
         val saved = mutableListOf<Pair<String?, String?>>()

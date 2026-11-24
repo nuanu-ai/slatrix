@@ -13,6 +13,7 @@ import ai.nuanu.slatrix.ui.designsystem.Motion
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
+import ai.nuanu.slatrix.ui.designsystem.isMotionReduced
 import android.text.format.DateUtils
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -71,6 +72,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.CustomAccessibilityAction
@@ -152,9 +154,11 @@ fun LaterScreen(saved: SavedList, rooms: List<RoomSummary>, load: suspend (Saved
                         LaterState.ARCHIVED -> Triple(SlackIcons.Undo, "Move to In progress", LaterState.IN_PROGRESS)
                         LaterState.COMPLETED -> Triple(SlackIcons.Undo, "Mark incomplete", LaterState.IN_PROGRESS)
                     }
-                    SavedCard(item, rooms.firstOrNull { it.id == item.roomId }, previews, load, clock, primary.first, primary.second,
-                        swipes = item.state == LaterState.IN_PROGRESS, onOpen = { actions.open(item) },
-                        onPrimary = { act(item, primary.third) }, onMore = { sheet = item })
+                    Box(Modifier.animateItem(fadeInSpec = Motion.gentle(), placementSpec = Motion.snappy(), fadeOutSpec = Motion.gentle())) {
+                        SavedCard(item, rooms.firstOrNull { it.id == item.roomId }, previews, load, clock, primary.first, primary.second,
+                            swipes = item.state == LaterState.IN_PROGRESS, onOpen = { actions.open(item) },
+                            onPrimary = { act(item, primary.third) }, onMore = { sheet = item })
+                    }
                 }
             }
         }
@@ -291,6 +295,7 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: Mutable
     // A swipe left marks the card complete, as Slack's Later does: the card follows the finger and the check fades in
     // behind it.
     val drag = remember { Animatable(0f) }
+    val context = LocalContext.current
     val reach = with(LocalDensity.current) { UiMetrics.Swipe.toPx() }
     val swipeScope = rememberCoroutineScope()
     Box(Modifier.fillMaxWidth().then(if (!swipes) Modifier else Modifier.pointerInput(saved) {
@@ -308,10 +313,13 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: Mutable
             }
             swipeScope.launch {
                 if (past) {
-                    drag.animateTo(-size.width.toFloat(), Motion.pane())
+                    if (!coroutineContext.isMotionReduced(context)) drag.animateTo(-size.width.toFloat(), Motion.gentle(Motion.PixelThreshold))
                     onPrimary()
+                    drag.snapTo(0f)
+                } else {
+                    if (coroutineContext.isMotionReduced(context)) drag.snapTo(0f)
+                    else drag.animateTo(0f, Motion.snappy(Motion.PixelThreshold))
                 }
-                drag.snapTo(0f)
             }
         }
     })) {
@@ -337,7 +345,7 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: Mutable
         Box(Modifier.padding(top = UiMetrics.GapTiny).size(UiMetrics.Avatar)) {
             preview?.let { LiveAvatar(it.senderName, url = it.avatarUrl) }
         }
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.Hairline * 4)) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.LineGap)) {
             // The reminder shares the conversation's line, so setting one never changes the card's height.
             Row(horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
                 Text(when {
@@ -358,7 +366,7 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: Mutable
                 Text(shown?.senderName ?: "", style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 if (shown != null) Text("${dayLabel(shown.timestamp)} at ${timeLabel(shown.timestamp)}", Modifier.weight(1f, fill = false),
-                    style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    style = MaterialTheme.typography.labelSmall, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Text(when {
                 shown != null -> shown.body

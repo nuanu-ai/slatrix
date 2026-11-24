@@ -9,6 +9,7 @@ import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.listed
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.BottomSheet
+import ai.nuanu.slatrix.ui.designsystem.MenuItem
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.Motion
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -58,7 +59,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
@@ -189,13 +189,13 @@ fun CreateChannelScreen(workspace: String?, creating: Boolean, error: String?, o
         translationX = back.value * size.width
     }.background(colors.canvas)) {
         Column(Modifier.fillMaxSize().navigationBarsPadding().imePadding()) {
-            Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.ComposerMinHeight),
+            Row(Modifier.fillMaxWidth().statusBarsPadding().heightIn(min = UiMetrics.HeaderRow).padding(horizontal = UiMetrics.GapTiny),
                 verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack, modifier = Modifier.size(UiMetrics.Touch)) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back")
                 }
                 Text("Create a channel", Modifier.weight(1f).padding(start = UiMetrics.GapSmall),
-                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Box(Modifier.padding(end = UiMetrics.GapSmall), contentAlignment = Alignment.Center) {
                     TextButton({ onCreate(name.trim(), topic.trim()) }, enabled = name.isNotBlank() && !creating) {
                         Text("Create", fontWeight = FontWeight.Bold)
@@ -206,9 +206,9 @@ fun CreateChannelScreen(workspace: String?, creating: Boolean, error: String?, o
             HorizontalDivider(color = colors.border)
             Column(Modifier.fillMaxWidth().padding(UiMetrics.GapLarge), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
                 OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), enabled = !creating, singleLine = true,
-                    label = { Text("Name") }, prefix = { Text("#") }, shape = MaterialTheme.shapes.small)
+                    label = { Text("Name") }, prefix = { Text("#") }, shape = MaterialTheme.shapes.medium)
                 OutlinedTextField(topic, { topic = it }, Modifier.fillMaxWidth(), enabled = !creating,
-                    label = { Text("Topic (optional)") }, shape = MaterialTheme.shapes.small)
+                    label = { Text("Topic (optional)") }, shape = MaterialTheme.shapes.medium)
                 Text(listOfNotNull(workspace?.let { "In $it." }, "Only people you invite can join.").joinToString(" "),
                     style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
             }
@@ -222,18 +222,8 @@ fun CreateChannelScreen(workspace: String?, creating: Boolean, error: String?, o
 internal fun AddChannelSheet(onBrowse: (() -> Unit)?, onCreate: (() -> Unit)?, onDismiss: () -> Unit) {
     BottomSheet(onDismissRequest = onDismiss, containerColor = SlatrixTheme.colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
-            @Composable
-            fun choice(icon: ImageVector, label: String, action: () -> Unit) {
-                Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button) {
-                    onDismiss(); action()
-                }.padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Icon(icon, null, Modifier.size(UiMetrics.Icon))
-                    Text(label, style = MaterialTheme.typography.bodyLarge)
-                }
-            }
-            onBrowse?.let { choice(SlackIcons.Hash, "Browse channels", it) }
-            onCreate?.let { choice(SlackIcons.Plus, "Create a channel", it) }
+            onBrowse?.let { MenuItem(SlackIcons.Hash, "Browse channels") { onDismiss(); it() } }
+            onCreate?.let { MenuItem(SlackIcons.Plus, "Create a channel") { onDismiss(); it() } }
         }
     }
 }

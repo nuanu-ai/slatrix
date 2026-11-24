@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix.ui.designsystem
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import com.google.gson.JsonElement
@@ -23,6 +24,41 @@ class DesignTokensTest {
         assertEquals(spec["fileColors"].asJsonObject.entrySet().associate { it.key to color(it.value).toArgb() }, DesignTokens.fileColors.mapValues { it.value.toArgb() })
         assertEquals(spec["avatarColors"].asJsonArray.map { color(it).toArgb() }, DesignTokens.avatarColors.map { it.toArgb() })
         assertEquals(android["radius"].asJsonObject.entrySet().associate { it.key to it.value.asInt }, DesignTokens.radii)
+    }
+
+    @Test fun `incoming bubbles are borderless and wallpaper doodles stay visible yet calm`() {
+        val light = DesignTokens.colors(false)
+        val dark = DesignTokens.colors(true)
+        assertEquals(0f, light.getValue("bubbleEdge").alpha, 0.0001f)
+        assertEquals(0f, dark.getValue("bubbleEdge").alpha, 0.0001f)
+        assertEquals(Color(0xff1a64d6).copy(alpha = 0.07f).toArgb(), light.getValue("wallpaperDoodle").toArgb())
+        assertEquals(Color(0xffffffff).copy(alpha = 0.045f).toArgb(), dark.getValue("wallpaperDoodle").toArgb())
+    }
+
+    @Test fun `file tiles use soft 14 percent tint and meet WCAG icon contrast across light, dark, and outgoing bubbles`() {
+        fun contrast(first: Color, second: Color): Float {
+            val (dark, light) = listOf(first.luminance(), second.luminance()).sorted()
+            return (light + 0.05f) / (dark + 0.05f)
+        }
+        for (dark in listOf(false, true)) {
+            val colors = AppColors(DesignTokens.colors(dark), dark)
+            val onFill = colors.onFill
+            for ((kind, base) in DesignTokens.fileColors) {
+                val fill = colors.fileTileFill(base)
+                val icon = colors.fileTileIcon(base)
+                assertEquals("dark=$dark $kind alpha", 0.14f, fill.alpha, 0.005f)
+                val onBubble = fill.compositeOver(colors.bubbleIn)
+                val ratio = contrast(icon, onBubble)
+                assertTrue("dark=$dark $kind contrast on incoming bubble was $ratio", ratio >= 3.0f)
+                val onCanvas = fill.compositeOver(colors.canvas)
+                val canvasRatio = contrast(icon, onCanvas)
+                assertTrue("dark=$dark $kind contrast on canvas was $canvasRatio", canvasRatio >= 3.0f)
+
+                val outBg = onFill.fileTileFill(base).compositeOver(colors.accentFill)
+                val outRatio = contrast(onFill.fileTileIcon(base), outBg)
+                assertTrue("dark=$dark $kind contrast on outgoing bubble was $outRatio", outRatio >= 3.0f)
+            }
+        }
     }
 
     @Test fun `in dark theirs stand off every stop of the wallpaper`() {

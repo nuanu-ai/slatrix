@@ -29,16 +29,21 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -47,6 +52,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
@@ -54,9 +61,11 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlurEffect
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Velocity
@@ -64,19 +73,46 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
 
+/** Triggers the enclosing [BottomSheet]'s animated slide-down exit before calling `onDismissRequest`. */
+val LocalSheetDismiss = compositionLocalOf<(() -> Unit)?> { null }
+
 /**
- * Slack's bottom sheet: it eases in from the bottom over the pane time, over a scrim that fades in with it, and closes at
- * once on a tap outside, Back, or a swipe or flick down, including one that starts on its scrolled-up content. Material's
- * sheet takes its motion from a scheme this Material version keeps internal, so the sheet is the design system's own.
- * With [onTop] it draws no scrim and says where its top comes to rest in the window, so the screen behind can recede
- * itself and bring something forward above it.
+ * Slack's bottom sheet: springs in from the bottom on [Motion.spatial] over a scrim that tracks its position 1:1,
+ * preserves fling velocity when settling, and smoothly slides down with its scrim fading out before invoking
+ * [onDismissRequest]. With [onTop] it draws no scrim and reports its resting top so the screen behind can recede and
+ * bring a message forward; [onDismissing] fires the instant a dismiss starts so that recede can unwind in lockstep.
  */
 @Composable
 fun BottomSheet(onDismissRequest: () -> Unit, containerColor: Color, onTop: ((Float) -> Unit)? = null,
-    content: @Composable ColumnScope.() -> Unit) {
-    Dialog(onDismissRequest, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+    onDismissing: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val currentDismiss by rememberUpdatedState(onDismissRequest)
+    val currentDismissing by rememberUpdatedState(onDismissing)
+    val shown = remember { Animatable(0f) }
+    var height by remember { mutableIntStateOf(0) }
+    val dragged = remember { Animatable(0f) }
+    var dismissing by remember { mutableStateOf(false) }
+    fun dismiss(velocity: Float = 0f) {
+        if (dismissing) return
+        dismissing = true
+        currentDismissing?.invoke()
+        scope.launch {
+            val target = height.toFloat()
+            if (target > 0f && !coroutineContext.isMotionReduced(context)) {
+                // Fold entrance progress and drag into one continuous exit path, carrying release velocity.
+                val start = ((1f - shown.value) * target + dragged.value).coerceIn(0f, target)
+                shown.snapTo(1f)
+                dragged.snapTo(start)
+                dragged.animateTo(target, Motion.gentle(Motion.PixelThreshold), initialVelocity = velocity.coerceAtLeast(0f))
+            }
+            currentDismiss()
+        }
+    }
+    Dialog({ dismiss() }, DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         // The scrim below fades in with the sheet, in place of the window's own dim and animation.
         val view = LocalView.current
         val window = (view.parent as? DialogWindowProvider)?.window
@@ -87,44 +123,65 @@ fun BottomSheet(onDismissRequest: () -> Unit, containerColor: Color, onTop: ((Fl
                 WindowCompat.getInsetsController(this, view).isAppearanceLightNavigationBars = containerColor.luminance() > 0.5f
             }
         }
-        val shown = remember { Animatable(0f) }
-        LaunchedEffect(shown) { shown.animateTo(1f, Motion.pane()) }
-        val scope = rememberCoroutineScope()
-        var height by remember { mutableIntStateOf(0) }
-        val dragged = remember { Animatable(0f) }
+        LaunchedEffect(shown) {
+            if (coroutineContext.isMotionReduced(context)) shown.snapTo(1f)
+            else shown.animateTo(1f, Motion.spatial(Motion.UnitThreshold))
+        }
         val flick = with(LocalDensity.current) { UiMetrics.SheetDismissVelocity.toPx() }
-        fun drag(delta: Float) { scope.launch { dragged.snapTo((dragged.value + delta).coerceAtLeast(0f)) } }
+        fun drag(delta: Float) {
+            if (dismissing) return
+            val next = (dragged.value + delta).coerceAtLeast(0f)
+            scope.launch(start = CoroutineStart.UNDISPATCHED) { dragged.snapTo(next) }
+        }
         fun settle(velocity: Float) {
-            if (dragged.value > height * UiMetrics.SheetDismissShare || (dragged.value > 0f && velocity > flick)) onDismissRequest()
-            else scope.launch { dragged.animateTo(0f, Motion.pane()) }
+            if (dismissing) return
+            if (dragged.value > height * UiMetrics.SheetDismissShare || (dragged.value > 0f && velocity > flick)) dismiss(velocity)
+            else scope.launch {
+                if (coroutineContext.isMotionReduced(context)) dragged.snapTo(0f)
+                else dragged.animateTo(0f, Motion.spatial(Motion.PixelThreshold), initialVelocity = velocity)
+            }
         }
         // Content that can't scroll further up hands the rest of a downward drag to the sheet, as Material's sheet does.
         val handOff = remember {
             object : NestedScrollConnection {
-                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset =
-                    if (available.y < 0 && dragged.value > 0f) Offset(0f, available.y).also { drag(available.y) } else Offset.Zero
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    if (dismissing || available.y >= 0f || dragged.value <= 0f) return Offset.Zero
+                    val consumed = available.y.coerceAtLeast(-dragged.value)
+                    drag(consumed)
+                    return Offset(0f, consumed)
+                }
                 override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset =
-                    if (available.y > 0 && source == NestedScrollSource.UserInput) Offset(0f, available.y).also { drag(available.y) }
+                    if (!dismissing && available.y > 0 && source == NestedScrollSource.UserInput) Offset(0f, available.y).also { drag(available.y) }
                     else Offset.Zero
                 override suspend fun onPreFling(available: Velocity): Velocity =
-                    if (dragged.value > 0f) available.also { settle(it.y) } else Velocity.Zero
+                    if (!dismissing && dragged.value > 0f) available.also { settle(it.y) } else Velocity.Zero
             }
         }
         Box(Modifier.fillMaxSize()) {
             // A sibling of the sheet, so a tap in the sheet never reaches it.
             Box(Modifier.fillMaxSize().then(if (onTop != null) Modifier
-                else Modifier.graphicsLayer { alpha = shown.value }.background(SlatrixTheme.colors.scrim))
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismissRequest)
-                .semantics { contentDescription = "Close" })
+                else Modifier.graphicsLayer {
+                    val visible = if (height > 0) (shown.value - dragged.value / height).coerceIn(0f, 1f) else shown.value
+                    alpha = visible
+                }.background(SlatrixTheme.colors.scrim))
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = !dismissing, onClick = { dismiss() })
+                .then(if (dismissing) Modifier.clearAndSetSemantics {} else Modifier.semantics { contentDescription = "Close" }))
             // Never under the status bar; the space above the sheet is the scrim's, and takes no touches of its own.
             Box(Modifier.fillMaxSize().statusBarsPadding().padding(top = UiMetrics.GapSection)) {
                 Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
                     .onSizeChanged { height = it.height }
                     // Before the slide, so it is where the sheet rests.
-                    .then(if (onTop != null) Modifier.onGloballyPositioned { onTop(it.positionInWindow().y) } else Modifier)
+                    .then(if (onTop != null) Modifier.onGloballyPositioned { if (!dismissing) onTop(it.positionInWindow().y) } else Modifier)
                     .graphicsLayer { translationY = (1 - shown.value) * size.height + dragged.value }
+                    .then(if (dismissing) Modifier.clearAndSetSemantics {}.focusProperties { canFocus = false } else Modifier)
+                    .pointerInput(dismissing) {
+                        if (!dismissing) return@pointerInput
+                        awaitPointerEventScope {
+                            while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                        }
+                    }
                     .nestedScroll(handOff)
-                    .draggable(rememberDraggableState(::drag), Orientation.Vertical, onDragStopped = { settle(it) })
+                    .draggable(rememberDraggableState(::drag), Orientation.Vertical, enabled = !dismissing, onDragStopped = { settle(it) })
                     .clip(SlatrixTheme.topPanelShape).background(containerColor)
                     // The keyboard pushes the sheet up, so a field in it stays above the keyboard.
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))) {
@@ -132,7 +189,9 @@ fun BottomSheet(onDismissRequest: () -> Unit, containerColor: Color, onTop: ((Fl
                         Box(Modifier.size(UiMetrics.SheetHandleWidth, UiMetrics.SheetHandleHeight)
                             .background(SlatrixTheme.colors.borderStrong, CircleShape))
                     }
-                    content()
+                    CompositionLocalProvider(LocalSheetDismiss provides { dismiss() }) {
+                        content()
+                    }
                 }
             }
         }

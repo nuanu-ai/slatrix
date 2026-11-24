@@ -7,7 +7,9 @@ import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
-import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -70,7 +72,9 @@ fun OfflineBanner() {
     val onRetry = LocalConnectionRetry.current
     val shown = connectionLost()
     Box(Modifier.fillMaxWidth().padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall), contentAlignment = Alignment.TopCenter) {
-        AnimatedVisibility(shown, enter = fadeIn(Motion.pane()), exit = ExitTransition.None) {
+        AnimatedVisibility(shown,
+            enter = fadeIn(Motion.spatial()) + scaleIn(Motion.spatial(), initialScale = 0.92f),
+            exit = fadeOut(Motion.gentle()) + scaleOut(Motion.gentle(), targetScale = 0.92f)) {
             val colors = SlatrixTheme.colors
             Surface(Modifier.semantics { liveRegion = LiveRegionMode.Polite }, shape = MaterialTheme.shapes.extraLarge,
                 color = colors.tooltip, contentColor = colors.onTooltip) {

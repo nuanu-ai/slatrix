@@ -19,6 +19,7 @@ import ai.nuanu.slatrix.ui.designsystem.AvatarStyle
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.BottomSheet
+import ai.nuanu.slatrix.ui.designsystem.MenuItem
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.glass
 import ai.nuanu.slatrix.ui.designsystem.tabFit
@@ -42,13 +43,21 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.material3.*
 import androidx.compose.animation.core.Animatable
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import ai.nuanu.slatrix.ui.designsystem.BackProgressCoordinator
+import ai.nuanu.slatrix.ui.designsystem.LocalBackProgress
 import ai.nuanu.slatrix.ui.designsystem.Motion
+import ai.nuanu.slatrix.ui.designsystem.isMotionReduced
+import ai.nuanu.slatrix.ui.designsystem.isSystemMotionReduced
+import ai.nuanu.slatrix.ui.designsystem.pageEdgeShadow
+import ai.nuanu.slatrix.ui.designsystem.pageScrim
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.draw.clip
@@ -73,6 +82,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.DisposableEffect
@@ -107,48 +118,174 @@ class WorkspaceCover(val key: Any, val content: @Composable () -> Unit)
 
 private const val Home = "home"
 
+private class ExitingCover(val page: WorkspaceCover, val generation: Int, val stateKey: String, val start: Float)
+
+private class WorkspaceHistory(var top: Any, var keys: Set<Any>, var topPage: WorkspaceCover?, var topGeneration: Int)
+
+private val GenerationsSaver = listSaver<MutableMap<String, Int>, Any>(
+    save = { map -> map.flatMap { (k, v) -> listOf(k, v) } },
+    restore = { list ->
+        mutableMapOf<String, Int>().apply {
+            for (i in list.indices step 2) put(list[i] as String, list[i + 1] as Int)
+        }
+    },
+)
+
 /**
- * Home with [covers] over it, bottom to top. A page pushed over the one on top slides in over 140 ms with that page
- * drawn under it, so nothing blank shows; one that leaves goes at once, since predictive back has already played the
- * way out under the finger. Pages under the top stay composed, so going back finds one as it was, Home's tab, search
- * and scroll included, and the one right under the top draws, for a back swipe to show. Covered pages stop at
- * CREATED, as a backgrounded app's do, so they read no messages and take no Back. A page that leaves loses its state,
- * so a conversation opened again starts at its New line or its newest message, as Slack's does.
+ * Home with [covers] over it, bottom to top. Pushing slides the new page in from the right on [Motion.spatial] with a
+ * subtle left edge shadow while the page directly underneath parallaxes left under a soft scrim. Predictive back tracks
+ * the finger 1:1 with matching reverse parallax; tapping Back retains the popped page briefly for a smooth interruptible
+ * slide-out while the underlying page glides home. Covered pages cap their lifecycle at CREATED and popped pages discard
+ * saved state once dismissed (or immediately if interrupted by a push).
  */
 @Composable
 fun LiveWorkspace(covers: List<WorkspaceCover>, home: @Composable () -> Unit) {
     val saved = rememberSaveableStateHolder()
+    val context = LocalContext.current
     val pages = listOf(WorkspaceCover(Home, home)) + covers
     val top = pages.last().key
-    val shown = remember { object { var top: Any = Home; var keys = setOf<Any>(Home) } }
-    // Pushed when the page that was on top stays, under it.
-    val pushed = shown.top != top && pages.any { it.key == shown.top }
     val keys = pages.map { it.key }.toSet()
+    val coordinator = remember { BackProgressCoordinator() }
+    val shown = remember { WorkspaceHistory(top, keys, pages.last(), 0) }
+    val generations = rememberSaveable(saver = GenerationsSaver) { mutableMapOf() }
+    var exiting by remember { mutableStateOf<ExitingCover?>(null) }
+    val exitSlide = remember { Animatable(0f) }
+    var exitStarted by remember { mutableStateOf<ExitingCover?>(null) }
+    // Pushed when the previous top stays in the stack; popped when the previous top left and the new top was already under it.
+    val pushed = shown.top != top && pages.any { it.key == shown.top }
+    val popped = shown.top != top && pages.none { it.key == shown.top } && shown.keys.contains(top)
+    val slide = remember(top) { Animatable(if (pushed && !isSystemMotionReduced(context)) 0f else 1f) }
+    val topSlide = remember { object { var value = 1f } }
+    val activeExit: ExitingCover? = when {
+        pushed -> null
+        popped -> {
+            val start = maxOf(1f - topSlide.value, coordinator.committedProgress, coordinator.progress.floatValue).coerceIn(0f, 1f)
+            val leaving = shown.topPage
+            if (leaving != null && start < 1f && !isSystemMotionReduced(context)) {
+                val base = leaving.key.toString()
+                val stateKey = if (shown.topGeneration == 0) base else "$base#${shown.topGeneration}"
+                ExitingCover(leaving, shown.topGeneration, stateKey, start)
+            } else null
+        }
+        // A new predictive-back gesture on the revealed top page takes over immediately instead of waiting on a lingering exit.
+        coordinator.active.value -> null
+        else -> exiting?.takeUnless { candidate -> pages.any { it.key == candidate.page.key } }
+    }
+    val replacedExit = exiting?.takeIf { it !== activeExit }
+    // If a key re-enters before its previous exit finished, bump its generation so it mounts fresh state.
+    if (replacedExit != null && pages.any { it.key == replacedExit.page.key }) {
+        val base = replacedExit.page.key.toString()
+        val current = generations[base] ?: 0
+        if (current <= replacedExit.generation) generations[base] = replacedExit.generation + 1
+    }
     val removed = shown.keys - keys
+    val topGeneration = generations[top.toString()] ?: 0
     SideEffect {
-        removed.forEach { saved.removeState(it.toString()) }
+        removed.forEach { key ->
+            if (key != activeExit?.page?.key) {
+                val base = key.toString()
+                val gen = generations.remove(base) ?: 0
+                saved.removeState(if (gen == 0) base else "$base#$gen")
+            }
+        }
+        if (replacedExit != null) {
+            saved.removeState(replacedExit.stateKey)
+            if (pages.none { it.key == replacedExit.page.key }) generations.remove(replacedExit.page.key.toString())
+        }
+        if (exiting !== activeExit) exiting = activeExit
+        if (shown.top != top) coordinator.clear()
         shown.top = top
         shown.keys = keys
+        shown.topPage = pages.last()
+        shown.topGeneration = topGeneration
+        topSlide.value = slide.value
     }
-    val slide = remember(top) { Animatable(if (pushed) 0f else 1f) }
-    val settled by remember(slide) { derivedStateOf { slide.value == 1f } }
-    LaunchedEffect(slide) { slide.animateTo(1f, Motion.pane()) }
+    LaunchedEffect(slide) {
+        if (slide.value < 1f) {
+            if (coroutineContext.isMotionReduced(context)) slide.snapTo(1f)
+            else slide.animateTo(1f, Motion.spatial(Motion.UnitThreshold)) { topSlide.value = value }
+        }
+        topSlide.value = slide.value
+    }
+    LaunchedEffect(activeExit) {
+        val target = activeExit ?: return@LaunchedEffect
+        exitSlide.snapTo(target.start)
+        exitStarted = target
+        if (coroutineContext.isMotionReduced(context)) exitSlide.snapTo(1f)
+        else exitSlide.animateTo(1f, Motion.spatial(Motion.UnitThreshold))
+        if (exiting === target) {
+            exiting = null
+            saved.removeState(target.stateKey)
+            if (target.page.key !in shown.keys) generations.remove(target.page.key.toString())
+        }
+    }
+    fun exitProgress(cover: ExitingCover): Float = (if (exitStarted === cover) exitSlide.value else cover.start).coerceIn(0f, 1f)
+    val backingVisible by remember(slide, coordinator) { derivedStateOf { slide.value < 1f || coordinator.progress.floatValue > 0f } }
+    // Render active pages and any sliding-out cover in one unified list so the exiting page keeps its exact Compose subtree
+    // (scroll position, loaded images, transient UI) without disposing and flashing during the exit slide.
+    val rendered = if (activeExit != null) pages + activeExit.page else pages
     Box(Modifier.fillMaxSize()) {
-        pages.forEachIndexed { index, page -> key(page.key) {
-            val depth = pages.lastIndex - index
-            Box(Modifier.fillMaxSize().then(when {
-                depth == 0 -> Modifier.graphicsLayer {
-                    alpha = slide.value
-                    translationX = (1 - slide.value) * Motion.PushDistance * size.width
+        rendered.forEachIndexed { index, page ->
+            val leaving = activeExit?.takeIf { index == pages.size }
+            val base = page.key.toString()
+            val gen = leaving?.generation ?: (generations[base] ?: 0)
+            val stateKey = leaving?.stateKey ?: if (gen == 0) base else "$base#$gen"
+            key(page.key, gen) {
+                val depth = if (leaving != null) -1 else pages.lastIndex - index
+                val modifier = when {
+                    leaving != null -> Modifier
+                        // Translate before consuming touches so the uncovered left area hits the page underneath while the
+                        // still-visible exiting pixels remain completely inert to taps, focus, and accessibility.
+                        .graphicsLayer { translationX = exitProgress(leaving) * size.width }
+                        .pageEdgeShadow {
+                            val shift = exitProgress(leaving)
+                            if (shift < 1f) 1f - shift * 0.5f else 0f
+                        }
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
+                            }
+                        }
+                        .focusProperties { canFocus = false }
+                        .clearAndSetSemantics {}
+                    depth == 0 && activeExit != null -> Modifier
+                        .graphicsLayer {
+                            val cover = (1f - exitProgress(activeExit)).coerceIn(0f, 1f)
+                            translationX = -Motion.PushParallax * cover * size.width
+                        }
+                        .pageScrim { (1f - exitProgress(activeExit)).coerceIn(0f, 1f) }
+                        .pointerInput(Unit) {}
+                    depth == 0 -> Modifier
+                        .graphicsLayer {
+                            val shift = ((1f - slide.value) + coordinator.progress.floatValue).coerceIn(0f, 1f)
+                            translationX = shift * size.width
+                        }
+                        .pageEdgeShadow {
+                            val shift = ((1f - slide.value) + coordinator.progress.floatValue).coerceIn(0f, 1f)
+                            if (shift > 0f && shift < 1f) 1f - shift * 0.5f else 0f
+                        }
+                        .pointerInput(Unit) {}
+                    depth == 1 -> Modifier
+                        .then(if (backingVisible) Modifier else Modifier.clearAndSetSemantics {})
+                        .graphicsLayer {
+                            val cover = (slide.value * (1f - coordinator.progress.floatValue)).coerceIn(0f, 1f)
+                            translationX = -Motion.PushParallax * cover * size.width
+                        }
+                        .pageScrim { (slide.value * (1f - coordinator.progress.floatValue)).coerceIn(0f, 1f) }
+                        .pointerInput(Unit) {}
+                    else -> Modifier.clearAndSetSemantics {}.graphicsLayer { alpha = 0f }.pointerInput(Unit) {}
                 }
-                depth == 1 && !settled -> Modifier
-                // Out of the accessibility tree, and drawn only right under the top.
-                else -> Modifier.clearAndSetSemantics {}.graphicsLayer { if (depth > 1) alpha = 0f }
-            // The top takes every touch, so none reaches a page under it.
-            }).pointerInput(Unit) {}) {
-                Covered(depth > 0) { saved.SaveableStateProvider(page.key.toString(), page.content) }
+                Box(Modifier.fillMaxSize().then(modifier)) {
+                    // Single composition branch keeps subtrees alive across depth and exit transitions; Home inherits outer coordinator.
+                    val backCoordinator = if (index == 0) LocalBackProgress.current else coordinator.takeIf { depth == 0 }
+                    Covered(leaving != null || depth > 0) {
+                        CompositionLocalProvider(LocalBackProgress provides backCoordinator) {
+                            saved.SaveableStateProvider(stateKey, page.content)
+                        }
+                    }
+                }
             }
-        } }
+        }
     }
 }
 
@@ -425,8 +562,7 @@ private fun WorkspaceSwitcher(state: RoomListState, selectedSpaceId: String?, on
     val entries = remember(state.spaces, state.rooms) { WorkspaceRail.entries(state.spaces, state.rooms) }
     BottomSheet(onDismissRequest = onDismiss, containerColor = SlatrixTheme.colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
-            Text("Workspaces", Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
-                style = MaterialTheme.typography.titleMedium)
+            ListHeading("Workspaces", Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall))
             for (space in entries) {
                 val selected = space?.id == selectedSpaceId
                 Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.WorkspaceRow)
@@ -665,8 +801,7 @@ private fun ConversationNotifications(read: suspend () -> NotificationSetting, s
     }
     BottomSheet(onDismissRequest = onDismiss, containerColor = SlatrixTheme.colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
-            Text("Notify me about", Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
-                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            ListHeading("Notify me about", Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall))
             // Saves through Home's scope, so closing the sheet doesn't cancel a change on its way.
             NotificationChoices(setting, save, scope, { setting = Result.success(it) }) { loads++ }
         }
@@ -682,29 +817,18 @@ private fun ConversationActions(room: RoomSummary, anyUnread: Boolean, onStar: (
     fun afterHiding(action: () -> Unit) { action(); onDismiss() }
     BottomSheet(onDismissRequest = onDismiss, containerColor = SlatrixTheme.colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
-            Text(room.name, Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
-                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            ListHeading(room.name, Modifier.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall))
             val starred = room.starred
-            SheetRow(if (starred) SlackIcons.StarFilled else SlackIcons.Star, if (starred) "Unstar $noun" else "Star $noun") {
+            MenuItem(if (starred) SlackIcons.StarFilled else SlackIcons.Star, if (starred) "Unstar $noun" else "Star $noun") {
                 afterHiding { onStar(!starred) }
             }
             val unread = room.unread != UnreadBadge.None
-            SheetRow(if (unread) SlackIcons.MarkRead else SlackIcons.MarkUnread, if (unread) "Mark as read" else "Mark unread") {
+            MenuItem(if (unread) SlackIcons.MarkRead else SlackIcons.MarkUnread, if (unread) "Mark as read" else "Mark unread") {
                 afterHiding { onMarkUnread(!unread) }
             }
-            if (anyUnread) SheetRow(SlackIcons.MarkAllRead, "Mark all as read") { afterHiding(onMarkAllRead) }
-            SheetRow(SlackIcons.Bell, "Notifications") { afterHiding(onNotifications) }
+            if (anyUnread) MenuItem(SlackIcons.MarkAllRead, "Mark all as read") { afterHiding(onMarkAllRead) }
+            MenuItem(SlackIcons.Bell, "Notifications") { afterHiding(onNotifications) }
         }
-    }
-}
-
-@Composable
-private fun SheetRow(icon: ImageVector, label: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(role = Role.Button, onClick = onClick)
-        .padding(horizontal = UiMetrics.GapLarge), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge),
-        verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, Modifier.size(UiMetrics.Icon))
-        Text(label, style = MaterialTheme.typography.bodyLarge)
     }
 }
 

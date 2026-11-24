@@ -9,13 +9,23 @@ import ai.nuanu.slatrix.core.MentionCandidate
 import ai.nuanu.slatrix.core.MentionPeople
 import ai.nuanu.slatrix.core.MentionSearch
 import ai.nuanu.slatrix.ui.designsystem.BottomSheet
+import ai.nuanu.slatrix.ui.designsystem.MenuItem
+import ai.nuanu.slatrix.ui.designsystem.Motion
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -41,7 +51,6 @@ import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.PhotoLibrary
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.EmojiEmotions
@@ -170,8 +179,11 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
         }) { linking = null }
     }
     var height by remember { mutableIntStateOf(0) }
-    // The field is a capsule on the glass panel under it.
-    Column(Modifier.fillMaxWidth().onSizeChanged { height = it.height }.padding(horizontal = UiMetrics.GapTiny, vertical = UiMetrics.GapSmall)) {
+    var shownTarget by remember { mutableStateOf(composer.target) }
+    if (composer.target != null) shownTarget = composer.target
+    // The field is a capsule on the glass panel under it; banners expand upward from the bottom so the field never clips.
+    Column(Modifier.fillMaxWidth().onSizeChanged { height = it.height }
+        .padding(horizontal = UiMetrics.GapTiny, vertical = UiMetrics.GapSmall)) {
         if (suggestions != null && !editing) Popup(Alignment.BottomStart, IntOffset(0, -height),
             properties = PopupProperties(focusable = false)) {
             MentionList(suggestions.candidates) { candidate ->
@@ -185,7 +197,11 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
                 actions.onMention(suggestions.start, suggestions.end, candidate)
             }
         }
-        composer.target?.let { TargetBar(it, actions.onCancelTarget) }
+        AnimatedVisibility(visible = composer.target != null,
+            enter = expandVertically(Motion.spatial(), expandFrom = Alignment.Bottom) + fadeIn(Motion.gentle()),
+            exit = shrinkVertically(Motion.gentle(), shrinkTowards = Alignment.Bottom) + fadeOut(Motion.gentle())) {
+            shownTarget?.let { TargetBar(it, actions.onCancelTarget) }
+        }
         val attach = actions.onAttach?.takeIf { !editing }
         var attaching by remember { mutableStateOf(false) }
         // Its launchers stay registered whichever "+" opened it, so a pick always comes back.
@@ -200,7 +216,11 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
             if (keyboardShown && !keyboard && !picking && linking == null) { focus.clearFocus(); formatting = false }
             keyboardShown = keyboard
         }
-        if (expanded) aboveField?.invoke()
+        AnimatedVisibility(visible = expanded && aboveField != null,
+            enter = expandVertically(Motion.spatial(), expandFrom = Alignment.Bottom) + fadeIn(Motion.gentle()),
+            exit = shrinkVertically(Motion.gentle(), shrinkTowards = Alignment.Bottom) + fadeOut(Motion.gentle())) {
+            aboveField?.invoke()
+        }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             if (!expanded) attach?.let { Box(Modifier.padding(start = UiMetrics.GapTiny)) { AttachButton { attaching = true } } }
             Box(Modifier.weight(1f).padding(horizontal = UiMetrics.GapTiny)
@@ -260,10 +280,31 @@ fun MessageComposer(placeholder: String, composer: ComposerState, onDraft: (Stri
                 }
                 Spacer(Modifier.weight(1f))
             }
-            IconButton(onClick = onSend, enabled = !composer.loading && !composer.sending && composer.text.isNotBlank()) {
-                Icon(if (editing) Icons.Outlined.Check else Icons.AutoMirrored.Filled.Send,
-                    if (editing) "Save changes" else "Send message",
-                    tint = if (composer.text.isNotBlank()) colors.accent else colors.textTertiary)
+            ComposerSendButton(canSend = !composer.loading && !composer.sending && composer.text.isNotBlank(),
+                editing = editing, onSend = onSend)
+        }
+    }
+}
+
+@Composable
+private fun ComposerSendButton(canSend: Boolean, editing: Boolean, onSend: () -> Unit) {
+    val colors = SlatrixTheme.colors
+    val sendLabel = if (editing) "Save changes" else "Send message"
+    val icon = if (editing) Icons.Outlined.Check else Icons.AutoMirrored.Filled.Send
+    IconButton(onClick = onSend, enabled = canSend, modifier = Modifier.semantics { contentDescription = sendLabel }) {
+        Box(Modifier.size(UiMetrics.SwipeBadge), contentAlignment = Alignment.Center) {
+            AnimatedVisibility(!canSend,
+                enter = fadeIn(Motion.gentle()) + scaleIn(Motion.gentle(), initialScale = 0.8f),
+                exit = fadeOut(Motion.gentle()) + scaleOut(Motion.gentle(), targetScale = 0.8f)) {
+                Icon(icon, null, Modifier.size(UiMetrics.Icon), tint = colors.textTertiary)
+            }
+            AnimatedVisibility(canSend,
+                enter = fadeIn(Motion.snappy()) + scaleIn(Motion.snappy(), initialScale = 0.72f),
+                exit = fadeOut(Motion.gentle()) + scaleOut(Motion.gentle(), targetScale = 0.72f)) {
+                Box(Modifier.size(UiMetrics.SwipeBadge).background(colors.accentFill, CircleShape),
+                    contentAlignment = Alignment.Center) {
+                    Icon(icon, null, Modifier.size(UiMetrics.Icon), tint = colors.onAccent)
+                }
             }
         }
     }
@@ -284,25 +325,15 @@ private fun AttachSheet(open: Boolean, onAttach: (List<Uri>) -> Unit, onClose: (
     val media = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { if (it.isNotEmpty()) onAttach(it) }
     val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { if (it.isNotEmpty()) onAttach(it) }
     val camera = rememberCamera { onAttach(listOf(it)) }
-    if (open) BottomSheet(onDismissRequest = onClose, containerColor = colors.canvas) {
+    if (open) BottomSheet(onDismissRequest = onClose, containerColor = colors.overlay) {
         Column(Modifier.fillMaxWidth().padding(bottom = UiMetrics.GapLarge)) {
-            AttachChoice(Icons.Outlined.PhotoLibrary, "Photos & videos") {
+            MenuItem(Icons.Outlined.PhotoLibrary, "Photos & videos") {
                 onClose()
                 media.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
             }
-            camera?.let { AttachChoice(Icons.Outlined.PhotoCamera, "Camera") { onClose(); it() } }
-            AttachChoice(Icons.Outlined.Description, "Files") { onClose(); files.launch(arrayOf("*/*")) }
+            camera?.let { MenuItem(Icons.Outlined.PhotoCamera, "Camera") { onClose(); it() } }
+            MenuItem(Icons.Outlined.Description, "Files") { onClose(); files.launch(arrayOf("*/*")) }
         }
-    }
-}
-
-@Composable
-private fun AttachChoice(icon: ImageVector, label: String, onClick: () -> Unit) {
-    val colors = SlatrixTheme.colors
-    Row(Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch).clickable(onClick = onClick).padding(horizontal = UiMetrics.GapLarge),
-        horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, Modifier.size(UiMetrics.SheetIcon), tint = colors.textPrimary)
-        Text(label, style = MaterialTheme.typography.bodyLarge, color = colors.textPrimary)
     }
 }
 
@@ -310,7 +341,7 @@ private fun AttachChoice(icon: ImageVector, label: String, onClick: () -> Unit) 
 @Composable
 private fun MentionList(candidates: List<MentionCandidate>, onPick: (MentionCandidate) -> Unit) {
     val colors = SlatrixTheme.colors
-    Column(Modifier.fillMaxWidth().background(colors.canvas)) {
+    Column(Modifier.fillMaxWidth().background(colors.overlay)) {
         HorizontalDivider(color = colors.border)
         LazyColumn(Modifier.heightIn(max = UiMetrics.MentionListHeight)) {
             items(candidates, key = { (it as? MentionCandidate.Member)?.person?.id ?: "@room" }) { candidate ->
@@ -346,7 +377,7 @@ private fun TargetBar(target: ComposerTarget, onCancel: () -> Unit) {
     val reply = target as? ComposerTarget.Reply
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).padding(start = UiMetrics.GapLarge, top = UiMetrics.GapSmall),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.width(UiMetrics.QuoteBar).fillMaxHeight().background(colors.accent, MaterialTheme.shapes.small))
+        Box(Modifier.width(UiMetrics.QuoteBar).fillMaxHeight().background(colors.accent, MaterialTheme.shapes.extraSmall))
         Column(Modifier.weight(1f)) {
             Text(if (reply != null) "Replying to ${reply.senderName}" else "Editing message",
                 style = MaterialTheme.typography.labelLarge, color = colors.accent, maxLines = 1, overflow = TextOverflow.Ellipsis)

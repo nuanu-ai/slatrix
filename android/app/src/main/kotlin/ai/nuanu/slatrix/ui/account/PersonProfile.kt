@@ -5,6 +5,7 @@ import ai.nuanu.slatrix.core.MatrixPeople
 import ai.nuanu.slatrix.core.Person
 import ai.nuanu.slatrix.core.RoomListState
 import ai.nuanu.slatrix.core.RoomSummary
+import ai.nuanu.slatrix.ui.designsystem.ListHeading
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
@@ -64,32 +65,31 @@ fun PersonProfileScreen(person: Person, own: Boolean, opening: Boolean, error: S
                     Text(person.name, style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Black, color = colors.textPrimary)
                     if (!own) OutlinedButton(onMessage, Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch), enabled = !opening,
-                        shape = MaterialTheme.shapes.small) {
+                        shape = MaterialTheme.shapes.medium) {
                         // After a moment, a spinner takes the icon's place, so the label never moves.
                         var waited by remember { mutableStateOf(false) }
                         LaunchedEffect(opening) { waited = false; if (opening) { delay(UiMetrics.ProgressDelayMillis); waited = true } }
                         if (opening && waited) CircularProgressIndicator(Modifier.size(UiMetrics.Icon))
                         else Icon(SlackIcons.Messages, null, Modifier.size(UiMetrics.Icon))
                         Text("Message", Modifier.padding(start = UiMetrics.GapSmall), style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.Bold, color = colors.textPrimary)
+                            fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
                     }
                     // Slack's Edit Profile, where Message is for anyone else.
                     if (own && onEdit != null) OutlinedButton(onEdit, Modifier.fillMaxWidth().heightIn(min = UiMetrics.Touch),
-                        shape = MaterialTheme.shapes.small) {
-                        Text("Edit profile", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = colors.textPrimary)
+                        shape = MaterialTheme.shapes.medium) {
+                        Text("Edit profile", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
                     }
                 }
                 HorizontalDivider(color = colors.border)
                 Column(Modifier.fillMaxWidth().padding(UiMetrics.GapLarge), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapLarge)) {
-                    Text("Contact information", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold,
-                        color = colors.textPrimary)
+                    ListHeading("Contact information")
                     Row(horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(UiMetrics.ListAvatar).clip(MaterialTheme.shapes.large).background(colors.sunken),
+                        Box(Modifier.size(UiMetrics.ListAvatar).clip(MaterialTheme.shapes.medium).background(colors.sunken),
                             contentAlignment = Alignment.Center) {
                             Icon(Icons.Outlined.AlternateEmail, null, Modifier.size(UiMetrics.Icon), tint = colors.textSecondary)
                         }
                         Column {
-                            Text("Matrix ID", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold,
+                            Text("Matrix ID", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
                                 color = colors.textSecondary)
                             Text(person.id, style = MaterialTheme.typography.bodyLarge, color = colors.accent, maxLines = 1,
                                 overflow = TextOverflow.MiddleEllipsis)

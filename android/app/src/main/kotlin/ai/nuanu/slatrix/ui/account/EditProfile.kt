@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -99,9 +100,9 @@ fun EditProfileScreen(userId: String, name: String, photo: ImageBitmap?, hasPhot
                     verticalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
                     val shown = text.ifBlank { name }.ifBlank { userId }
                     // The new photo shows as it will look; until then, the photo you have, or your initials.
-                    if (photo != null) Image(photo, null, Modifier.size(UiMetrics.ProfilePhoto).clip(MaterialTheme.shapes.large))
+                    if (photo != null) Image(photo, null, Modifier.size(UiMetrics.ProfilePhoto).clip(CircleShape))
                     else LiveAvatar(shown, UiMetrics.ProfilePhoto, photoUrl)
-                    OutlinedButton(onPickPhoto, Modifier.heightIn(min = UiMetrics.Touch), enabled = !saving, shape = MaterialTheme.shapes.small) {
+                    OutlinedButton(onPickPhoto, Modifier.heightIn(min = UiMetrics.Touch), enabled = !saving, shape = MaterialTheme.shapes.medium) {
                         Text("Upload photo", color = colors.textPrimary)
                     }
                     // Hidden, not removed, so the field below never moves, as on the Mac.
@@ -110,7 +111,7 @@ fun EditProfileScreen(userId: String, name: String, photo: ImageBitmap?, hasPhot
                         Text("Remove photo", color = colors.destructive)
                     }
                     OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), enabled = !saving, singleLine = true,
-                        label = { Text("Display name") }, shape = MaterialTheme.shapes.small)
+                        label = { Text("Display name") }, shape = MaterialTheme.shapes.medium)
                 }
             }
         }

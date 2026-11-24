@@ -161,7 +161,7 @@ private fun Suggestions(text: String, rooms: List<RoomSummary>, recents: List<St
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = UiMetrics.GapSmall)) {
         item {
             SearchRow(onSubmit) {
-                Icon(SlackIcons.Search, null, Modifier.size(UiMetrics.Icon))
+                Icon(SlackIcons.Search, null, Modifier.size(UiMetrics.Icon), tint = SlatrixTheme.colors.textSecondary)
                 Spacer(Modifier.width(UiMetrics.GapLarge))
                 Text("Search for “${text.trim()}”", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -232,8 +232,8 @@ private fun MessageHit(hit: SearchHit, room: RoomSummary?, query: MessageSearchQ
                 color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                 Text(hit.senderName, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(latestTime(hit.timestamp), style = MaterialTheme.typography.bodySmall, color = colors.textBody)
+                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(latestTime(hit.timestamp), style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
             }
             Text(body, style = MaterialTheme.typography.bodyLarge, color = colors.textBody, maxLines = 3, overflow = TextOverflow.Ellipsis)
         }
@@ -243,7 +243,7 @@ private fun MessageHit(hit: SearchHit, room: RoomSummary?, query: MessageSearchQ
 @Composable
 private fun RecentRow(recent: String, onRecent: (String) -> Unit) {
     SearchRow({ onRecent(recent) }) {
-        Icon(SlackIcons.History, null, Modifier.size(UiMetrics.Icon))
+        Icon(SlackIcons.History, null, Modifier.size(UiMetrics.Icon), tint = SlatrixTheme.colors.textSecondary)
         Spacer(Modifier.width(UiMetrics.GapLarge))
         RowTitle(recent)
     }
