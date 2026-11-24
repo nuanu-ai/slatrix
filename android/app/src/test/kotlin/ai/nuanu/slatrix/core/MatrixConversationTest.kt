@@ -181,6 +181,24 @@ class MatrixConversationTest {
         conversation.close()
     }
 
+    // capability: conversation.read
+    @Test fun anUndecryptedLatestMessageIsNotMarkedReadUntilItDecrypts() = runTest {
+        val undecrypted = TimelineItemContent.MsgLike(MsgLikeContent(
+            MsgLikeKind.UnableToDecrypt(EncryptedMessage.Unknown), null, null, null))
+        val timeline = ConversationTimeline(listOf(conversationItem("enc", "\$enc", "Waiting", content = undecrypted)))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        conversation.state.first { it.rows.messages.singleOrNull()?.kind == MessageKind.Encrypted }
+
+        assertFalse(conversation.markRead("\$enc"))
+        assertTrue(timeline.receipts.tryReceive().isFailure)
+
+        timeline.emit(listOf(TimelineDiff.Set(0u, conversationItem("enc", "\$enc", "Secret"))))
+        conversation.state.first { it.rows.messages.singleOrNull()?.kind == MessageKind.Text }
+        assertTrue(conversation.markRead("\$enc"))
+        assertEquals(ReceiptType.READ to "\$enc", timeline.receipts.receive())
+        conversation.close()
+    }
+
     @Test fun retryLoadsFailedHistoryAgainWithoutLosingMessages() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         timeline.pageFailure = IllegalStateException("Offline")

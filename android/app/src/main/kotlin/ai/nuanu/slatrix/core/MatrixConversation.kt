@@ -958,9 +958,12 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         return try { task.await() } finally { task.cancel() }
     }
 
-    /** A timeline opened at an older message isn't the newest, so reading it waits until it turns live. */
-    private fun isLatestRemote(eventId: String): Boolean =
-        lifetime.isActive && shown?.focused != true && newestEvent() == eventId
+    /** A timeline opened at an older message isn't the newest, and an undecrypted message isn't readable yet. */
+    private fun isLatestRemote(eventId: String): Boolean {
+        if (!lifetime.isActive || shown?.focused == true) return false
+        val newest = mutableState.value.rows.asReversed().firstOrNull { (it as? ConversationMessage)?.eventId != null } as? ConversationMessage
+        return newest?.eventId == eventId && newest.kind != MessageKind.Encrypted
+    }
 
     /** True only when an existing message gained a reaction from someone else or a non-own edit. */
     private fun hasNewReactionOrEdit(previous: List<ConversationRow>, next: List<ConversationRow>): Boolean {

@@ -195,6 +195,57 @@ class LiveWorkspaceTest {
         assertEquals(listOf("\$First", "\$First"), reads)
     }
 
+    // capability: conversation.read
+    @Test fun anUndecryptedLatestMessageIsNotMarkedReadUntilItDecrypts() {
+        val room = RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)
+        fun message(id: String, kind: MessageKind) = ConversationMessage(id, "\$$id", "@sam:example.org", "Sam", id, null,
+            0, kind, MessageSendState.Sent, false, "S", 0)
+        val timeline = mutableStateOf(ConversationState(listOf(message("First", MessageKind.Encrypted)), loading = false, hasMore = false))
+        val reads = mutableListOf<String>()
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, timeline.value, ComposerState(loading = false), {}, {}, {}, {}, { reads += it }, {}, {}, {})
+            }
+        }
+        compose.waitForIdle()
+        assertEquals(emptyList<String>(), reads)
+
+        compose.runOnIdle { timeline.value = timeline.value.copy(rows = listOf(message("First", MessageKind.Text))) }
+        compose.waitForIdle()
+        assertEquals(listOf("\$First"), reads)
+    }
+
+    // capability: conversation.read
+    @Test fun reconnectingRetriesMarkingTheLatestVisibleMessageRead() {
+        val room = RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.None, "T", 0)
+        val msg = ConversationMessage("First", "\$First", "@sam:example.org", "Sam", "Hello", null,
+            0, MessageKind.Text, MessageSendState.Sent, false, "S", 0)
+        val connection = kotlinx.coroutines.flow.MutableStateFlow(ai.nuanu.slatrix.core.ConnectionState.Offline)
+        val reads = mutableListOf<String>()
+        compose.setContent {
+            SlatrixTheme {
+                ai.nuanu.slatrix.ui.account.ProvideConnection(connection) {
+                    LiveChannelScreen(room, ConversationState(listOf(msg), loading = false, hasMore = false),
+                        ComposerState(loading = false), {}, {}, {}, {}, { reads += it }, {}, {}, {})
+                }
+            }
+        }
+        compose.waitForIdle()
+        assertEquals(1, reads.size)
+
+        connection.value = ai.nuanu.slatrix.core.ConnectionState.Connected
+        compose.waitForIdle()
+        assertEquals(2, reads.size)
+
+        connection.value = ai.nuanu.slatrix.core.ConnectionState.Offline
+        compose.waitForIdle()
+        assertEquals("Going offline must not fire a wasted read", 2, reads.size)
+
+        connection.value = ai.nuanu.slatrix.core.ConnectionState.Connected
+        compose.waitForIdle()
+        assertEquals(3, reads.size)
+    }
+
     @Test fun leavingAPageDiscardsItsSavedStateSoReopeningStartsFresh() {
         val open = mutableStateOf(true)
         var mutate: (() -> Unit)? = null
