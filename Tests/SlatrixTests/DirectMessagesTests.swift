@@ -82,4 +82,69 @@ struct DirectMessagesTests {
         room.latest = LatestMessage(body: "See you at noon", timestamp: Date(), isOwn: false)
         #expect(height(room) == waiting)
     }
+
+    // capability: home.dms
+    @MainActor
+    @Test("Direct Messages sidebar offers a clickable Back to channels button that returns to the channels sidebar")
+    func directMessagesBackButtonReturnsToChannels() async throws {
+        _ = NSApplication.shared
+        VoiceOver.listen()
+        defer { VoiceOver.done() }
+
+        let matrix = MatrixService.scratch()
+        matrix.rooms = [
+            ChatRoom(id: "!general:example.org", name: "general"),
+            ChatRoom(id: "!avery:example.org", name: "Avery", isDirect: true),
+        ]
+        var currentRoute = AppRoute.directMessages
+        let m = Metrics(zoom: 1)
+        let appearance = AppearanceStore()
+
+        struct Host: View {
+            let matrix: MatrixService
+            @State var route: AppRoute = .directMessages
+            let onChange: (AppRoute) -> Void
+            var body: some View {
+                SidebarView(
+                    matrix: matrix,
+                    route: Binding(
+                        get: { route },
+                        set: {
+                            route = $0
+                            onChange($0)
+                        }),
+                    workspaceID: .constant(nil), directMessageSearch: .constant(""),
+                    unreadDirectMessagesOnly: .constant(false), draftRoomIDs: [],
+                    onSelect: { _ in }, onCreate: { _ in }, onPreferences: {}, onProfile: {}, onSignOut: {},
+                    onMarkUnread: { _ in }, onMarkRead: { _ in }, onInviteWorkspace: { _ in },
+                    onEditWorkspace: { _ in }, onNotifications: { _ in }, onHide: {}, onBrowseChannels: {},
+                    collapsed: .constant([])
+                )
+            }
+        }
+
+        let hosting = NSHostingView(
+            rootView: Host(matrix: matrix, onChange: { currentRoute = $0 })
+                .frame(width: SidebarLayout.minimumWidth, height: 600)
+                .environmentObject(appearance).environment(\.metrics, m))
+        let window = offscreenWindow(NSSize(width: SidebarLayout.minimumWidth, height: 600))
+        window.contentView = hosting
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+
+        try #require(await eventually(timeout: .seconds(5)) { !accessible("Back to channels", in: hosting).isEmpty })
+        let back = try #require(accessible("Back to channels", in: hosting).first)
+        let compose = try #require(accessible("New message", in: hosting).first)
+        let composeFrame = compose.accessibilityFrame?() ?? .zero
+        #expect(composeFrame.maxX <= window.frame.maxX - m.sp4, "New message clipped at minimum sidebar width")
+
+        #expect(back.accessibilityPerformPress?() == true)
+        #expect(
+            await eventually(timeout: .seconds(5)) {
+                currentRoute == .home && !accessible("Channels", in: hosting).isEmpty
+            })
+        #expect(accessible("Back to channels", in: hosting).isEmpty)
+    }
 }

@@ -64,7 +64,7 @@ struct SidebarView: View {
                 if route == .directMessages {
                     DirectMessagesColumn(
                         matrix: matrix, search: $directMessageSearch, unreadOnly: $unreadDirectMessagesOnly,
-                        onSelect: onSelect, onCompose: { onCreate(.directMessage) })
+                        onBack: { route = .home }, onSelect: onSelect, onCompose: { onCreate(.directMessage) })
                 } else {
                     header
                     list
