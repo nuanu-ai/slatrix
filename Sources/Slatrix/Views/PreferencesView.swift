@@ -6,6 +6,7 @@ struct PreferencesView: View {
     private static let navWidth: CGFloat = 188
     private static let miniatureHeight: CGFloat = 72
     private static let aboutIcon: CGFloat = 64
+    private static let maxScopeTitleLength = 28
     @Environment(\.metrics) private var m
     @EnvironmentObject var appearance: AppearanceStore
     let matrix: MatrixService
@@ -14,6 +15,8 @@ struct PreferencesView: View {
     var onRecovery: () -> Void
     var onEditProfile: () -> Void
     @State var tab = Tab.appearance
+    var workspaceID: String? = nil
+    @State private var themeScope = ThemeScope.all
     @State private var requestingNotifications = false
     @State private var notificationStatus: DesktopNotificationStatus?
     @State private var notificationStatusError: String?
@@ -24,6 +27,46 @@ struct PreferencesView: View {
     @State private var openAtLogin = false
     @State private var error: String?
     private var colors: AppColors { appearance.colors }
+
+    private enum ThemeScope: Hashable {
+        case all
+        case workspace(String)
+    }
+
+    /// Resolves the open workspace against `matrix.workspaces` when present so leaving a space during sync cannot
+    /// redirect edits to another workspace or silently write globally.
+    private var activeWorkspace: (id: String, name: String)? {
+        guard let workspaceID else { return nil }
+        if let space = matrix.workspaces.first(where: { $0.id == workspaceID }) {
+            return (space.id, space.name)
+        }
+        return nil
+    }
+
+    private var editedTheme: ColorTheme {
+        if case .workspace(let boundID) = themeScope, activeWorkspace?.id == boundID {
+            return appearance.effectiveTheme(for: boundID)
+        }
+        return appearance.theme
+    }
+
+    private func selectTheme(_ theme: ColorTheme) {
+        switch themeScope {
+        case .all:
+            appearance.theme = theme
+        case .workspace(let boundID):
+            guard activeWorkspace?.id == boundID else {
+                themeScope = .all
+                return
+            }
+            appearance.setTheme(theme, for: boundID)
+        }
+    }
+
+    private func truncatedTitle(_ name: String) -> String {
+        if name.count <= Self.maxScopeTitleLength { return name }
+        return String(name.prefix(Self.maxScopeTitleLength - 1)) + "…"
+    }
 
     enum Tab: String, CaseIterable, Identifiable, Hashable {
         case appearance, notifications, account, advanced
@@ -90,6 +133,14 @@ struct PreferencesView: View {
         .onAppear {
             isPresented = true
             openAtLogin = PlatformIntegration.shared.openAtLogin
+            if let space = activeWorkspace, appearance.workspaceThemes[space.id] != nil {
+                themeScope = .workspace(space.id)
+            }
+        }
+        .onChange(of: activeWorkspace?.id) { _, currentID in
+            if case .workspace(let boundID) = themeScope, currentID != boundID {
+                themeScope = .all
+            }
         }
         .task(id: notificationStatusContext) {
             notificationStatusRequest = UUID()
@@ -113,40 +164,54 @@ struct PreferencesView: View {
     }
 
     private var appearancePane: some View {
-        VStack(alignment: .leading, spacing: m.sp24) {
+        let highContrast = appearance.effectiveIncreaseContrast
+        return VStack(alignment: .leading, spacing: m.sp24) {
             VStack(alignment: .leading, spacing: m.sp12) {
                 sectionTitle("Color mode")
-                HStack(spacing: m.sp12) {
+                ChoiceGrid(minColumnWidth: m(142), spacing: m.sp12) {
                     ForEach([AppTheme.dark, .light, .system]) { mode in
+                        let dark = mode == .dark || (mode == .system && appearance.systemIsDark)
                         choiceTile(label: mode.name, selected: appearance.mode == mode) {
                             appearance.mode = mode
                         } preview: {
                             AppMiniature(
                                 colors: AppColors(
-                                    dark: mode == .dark || (mode == .system && appearance.systemIsDark),
-                                    theme: appearance.theme),
-                                gradient: appearance.windowGradient, split: mode == .system)
+                                    dark: dark, accent: appearance.accent(dark: dark), theme: editedTheme,
+                                    highContrast: highContrast),
+                                split: mode == .system)
                         }
                     }
                 }
             }
-            VStack(alignment: .leading, spacing: m.sp12) {
-                sectionTitle("Theme")
-                LazyVGrid(
-                    columns: Array(repeating: GridItem(.flexible(), spacing: m.sp12), count: 3), spacing: m.sp16
-                ) {
-                    ForEach(ColorTheme.allCases) { theme in
-                        choiceTile(label: theme.name, selected: appearance.theme == theme) {
-                            appearance.theme = theme
-                        } preview: {
-                            AppMiniature(
-                                colors: AppColors(dark: appearance.isDark, theme: theme),
-                                gradient: appearance.windowGradient)
+            VStack(alignment: .leading, spacing: m.sp16) {
+                VStack(alignment: .leading, spacing: m.sp8) {
+                    sectionTitle("Theme")
+                    if let space = activeWorkspace {
+                        workspaceScopeBar(space: space)
+                    }
+                }
+                ForEach(ColorTheme.Group.allCases) { group in
+                    VStack(alignment: .leading, spacing: m.sp8) {
+                        Text(group.title).font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary)
+                        ChoiceGrid(minColumnWidth: m(142), spacing: m.sp12) {
+                            ForEach(group.themes) { theme in
+                                choiceTile(label: theme.name, selected: editedTheme == theme) {
+                                    selectTheme(theme)
+                                } preview: {
+                                    AppMiniature(
+                                        colors: AppColors(
+                                            dark: appearance.isDark, accent: appearance.accent(dark: appearance.isDark),
+                                            theme: theme, highContrast: highContrast))
+                                }
+                            }
                         }
                     }
                 }
-                Toggle("Window gradient", isOn: $appearance.windowGradient).toggleStyle(.switch).font(m.font(.body))
-                    .disabled(!appearance.theme.framed || colors.translucentFrame)
+                VStack(alignment: .leading, spacing: m.sp12) {
+                    Toggle("Chat wallpaper", isOn: $appearance.chatWallpaper).toggleStyle(.switch).font(m.font(.body))
+                    Toggle("Increase contrast", isOn: $appearance.increaseContrast).toggleStyle(.switch).font(
+                        m.font(.body))
+                }
             }
             Divider().overlay(colors.border)
             VStack(alignment: .leading, spacing: m.sp12) {
@@ -159,6 +224,62 @@ struct PreferencesView: View {
             Toggle("Show profile photos in conversations", isOn: $appearance.showAvatars).toggleStyle(.switch).font(
                 m.font(.body))
         }
+    }
+
+    @ViewBuilder private func workspaceScopeBar(space: (id: String, name: String)) -> some View {
+        let canReset = themeScope == .workspace(space.id) && appearance.workspaceThemes[space.id] != nil
+        let resetButton = Group {
+            if canReset {
+                Button("Use default") {
+                    appearance.clearTheme(for: space.id)
+                }.buttonStyle(.textLink).font(m.font(.subheadline)).fixedSize()
+            }
+        }
+        VStack(alignment: .leading, spacing: 0) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: m.sp12) {
+                    TabBar(
+                        tabs: [
+                            .init(value: ThemeScope.all, title: "All workspaces"),
+                            .init(
+                                value: ThemeScope.workspace(space.id), title: truncatedTitle(space.name),
+                                accessibilityLabel: space.name),
+                        ], selection: $themeScope)
+                    Spacer(minLength: 0)
+                    resetButton
+                }
+                VStack(alignment: .leading, spacing: m.sp4) {
+                    scopeRow(title: "All workspaces", accessibleName: "All workspaces", scope: .all)
+                    scopeRow(
+                        title: space.name, accessibleName: space.name, scope: .workspace(space.id))
+                    if canReset {
+                        resetButton.padding(.top, m.sp4)
+                    }
+                }.padding(.bottom, m.sp8)
+            }
+            Divider().overlay(colors.border)
+        }
+    }
+
+    private func scopeRow(title: String, accessibleName: String, scope: ThemeScope) -> some View {
+        let selected = themeScope == scope
+        return Button {
+            themeScope = scope
+        } label: {
+            HStack(spacing: m.sp8) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(selected ? colors.accent : colors.textSecondary)
+                Text(title).lineLimit(1).truncationMode(.tail)
+                    .foregroundStyle(selected ? colors.textPrimary : colors.textSecondary)
+                Spacer(minLength: 0)
+            }
+            .font(m.font(.body, selected ? .semibold : .regular))
+            .padding(.horizontal, m.sp8).frame(height: m.row)
+            .modifier(SidebarRowFill(selected: selected))
+        }
+        .buttonStyle(.row)
+        .accessibilityLabel(accessibleName)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private var notificationsPane: some View {
@@ -359,6 +480,62 @@ struct PreferencesView: View {
     }
 }
 
+/// Lays out preference choice tiles in 3, 2, or 1 equal-width columns based on available width, never overflowing or
+/// collapsing to zero columns in narrow windows.
+private struct ChoiceGrid: Layout {
+    let minColumnWidth: CGFloat
+    let spacing: CGFloat
+
+    private func columnCount(for width: CGFloat) -> Int {
+        guard width.isFinite, width > 0 else { return 3 }
+        let fitting = Int(((width + spacing) / (minColumnWidth + spacing)).rounded(.down))
+        return max(1, min(3, fitting))
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard !subviews.isEmpty else { return .zero }
+        let width = proposal.width ?? (3 * minColumnWidth + 2 * spacing)
+        let columns = columnCount(for: width)
+        let columnWidth = max(0, (width - spacing * CGFloat(columns - 1)) / CGFloat(columns))
+        let rows = (subviews.count + columns - 1) / columns
+        var totalHeight: CGFloat = 0
+        for row in 0..<rows {
+            let start = row * columns
+            let end = min(start + columns, subviews.count)
+            let rowHeight =
+                subviews[start..<end].map {
+                    $0.sizeThatFits(ProposedViewSize(width: columnWidth, height: nil)).height
+                }.max() ?? 0
+            totalHeight += rowHeight
+            if row > 0 { totalHeight += spacing }
+        }
+        return CGSize(width: width, height: totalHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard !subviews.isEmpty else { return }
+        let columns = columnCount(for: bounds.width)
+        let columnWidth = max(0, (bounds.width - spacing * CGFloat(columns - 1)) / CGFloat(columns))
+        let rows = (subviews.count + columns - 1) / columns
+        var y = bounds.minY
+        for row in 0..<rows {
+            let start = row * columns
+            let end = min(start + columns, subviews.count)
+            let rowHeight =
+                subviews[start..<end].map {
+                    $0.sizeThatFits(ProposedViewSize(width: columnWidth, height: nil)).height
+                }.max() ?? 0
+            for column in 0..<(end - start) {
+                let x = bounds.minX + CGFloat(column) * (columnWidth + spacing)
+                subviews[start + column].place(
+                    at: CGPoint(x: x, y: y), anchor: .topLeading,
+                    proposal: ProposedViewSize(width: columnWidth, height: rowHeight))
+            }
+            y += rowHeight + spacing
+        }
+    }
+}
+
 /// A Preferences mode or theme choice card with hover feedback.
 private struct PreferenceChoiceTile<Preview: View>: View {
     let label: String
@@ -395,51 +572,85 @@ private struct PreferenceChoiceTile<Preview: View>: View {
     }
 }
 
-/// A drawn thumbnail of the app; its inner sizes are illustration proportions, scaled as a whole.
+/// A drawn thumbnail of the unified floating-sidebar window; its inner sizes are illustration proportions, scaled as a
+/// whole.
 private struct AppMiniature: View {
     @Environment(\.metrics) private var m
     let colors: AppColors
-    var gradient = false
     var split = false
+
     var body: some View {
-        let framed = colors.theme.framed
-        let side = colors.onFrame
-        VStack(spacing: 0) {
-            HStack(spacing: m.sp4) {
-                ForEach(0..<3) { _ in Circle().fill(side.textSecondary.opacity(0.45)).frame(width: m(4), height: m(4))
+        let sidebarColors =
+            split
+            ? AppColors(dark: true, theme: colors.theme, highContrast: colors.highContrast)
+            : colors
+        let conversationColors =
+            split
+            ? AppColors(dark: false, theme: colors.theme, highContrast: colors.highContrast)
+            : colors
+        let side = sidebarColors.onSidebar
+        let panelRadius = m(5)
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: m.sp4) {
+                HStack(spacing: m(3)) {
+                    ForEach(0..<3) { _ in
+                        Circle().fill(side.textSecondary.opacity(0.45)).frame(width: m(3.5), height: m(3.5))
+                    }
+                }.padding(.bottom, m.sp2)
+                Capsule().fill(side.textSecondary.opacity(0.55)).frame(width: m(26), height: m(3.5))
+                RoundedRectangle(cornerRadius: m(2)).fill(
+                    sidebarColors.coloredSidebar ? side.selection : sidebarColors.accentFill
+                ).frame(height: m(7))
+                Capsule().fill(side.textSecondary.opacity(0.28)).frame(width: m(22), height: m(3))
+                Capsule().fill(side.textSecondary.opacity(0.28)).frame(width: m(28), height: m(3))
+                Spacer(minLength: 0)
+            }
+            .padding(m(6))
+            .frame(width: m(44), alignment: .leading)
+            .background { miniatureSidebarFill(sidebarColors) }
+            .clipShape(RoundedRectangle(cornerRadius: panelRadius))
+            .overlay(
+                RoundedRectangle(cornerRadius: panelRadius).strokeBorder(
+                    side.border, lineWidth: colors.highContrast ? 1 : 0.5)
+            )
+            .padding(.leading, m(3)).padding(.vertical, m(3))
+
+            VStack(alignment: .leading, spacing: m.sp8) {
+                HStack(spacing: m.sp4) {
+                    Capsule().fill(conversationColors.textBody.opacity(0.5)).frame(width: m(28), height: m(4))
+                    Spacer()
+                    Capsule().fill(conversationColors.textSecondary.opacity(0.16)).frame(width: m(24), height: m(4))
                 }
-                Spacer()
-                Capsule().fill(side.textSecondary.opacity(0.13)).frame(width: m(42), height: m(5))
-                Spacer()
-            }.padding(.horizontal, m.sp8).frame(height: m(15)).background(framed ? .clear : colors.canvas)
-            HStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: m.sp4) {
-                    Capsule().fill(side.textSecondary.opacity(0.55)).frame(width: m(29), height: m(4))
-                    RoundedRectangle(cornerRadius: m(2)).fill(framed ? side.selection : colors.accentFill)
-                        .frame(height: m(8))
-                    Capsule().fill(side.textSecondary.opacity(0.25)).frame(width: m(25), height: m(3))
-                    Capsule().fill(side.textSecondary.opacity(0.25)).frame(width: m(31), height: m(3))
-                    Spacer(minLength: 0)
-                }.padding(m.sp8).frame(width: m(47)).background(framed ? .clear : colors.sidebar)
-                VStack(alignment: .leading, spacing: m.sp8) {
-                    Capsule().fill(colors.textBody.opacity(0.5)).frame(width: m(29), height: m(4))
-                    ForEach(0..<2) { index in
-                        HStack(alignment: .top, spacing: m.sp4) {
-                            Circle().fill(avatarColor(index == 0 ? "Alex" : "Julia"))
-                                .frame(width: m(9), height: m(9))
-                            VStack(alignment: .leading, spacing: m.sp4) {
-                                Capsule().fill(colors.textBody.opacity(0.3)).frame(width: m(23), height: m(3))
-                                Capsule().fill(colors.textSecondary.opacity(0.17)).frame(height: m(3))
-                            }
+                ForEach(0..<2) { index in
+                    HStack(alignment: .top, spacing: m.sp4) {
+                        Circle().fill(avatarColor(index == 0 ? "Alex" : "Julia"))
+                            .frame(width: m(9), height: m(9))
+                        VStack(alignment: .leading, spacing: m.sp4) {
+                            Capsule().fill(conversationColors.textBody.opacity(0.3)).frame(width: m(23), height: m(3))
+                            Capsule().fill(conversationColors.textSecondary.opacity(0.18)).frame(height: m(3))
                         }
                     }
-                    Spacer(minLength: 0)
-                }.padding(m.sp8).frame(maxWidth: .infinity).background(
-                    split ? AppColors(dark: false, theme: colors.theme).canvas : colors.canvas
-                )
-                .clipShape(RoundedRectangle(cornerRadius: framed ? m(3) : 0))
-                .padding([.trailing, .bottom], framed ? m(3) : 0)
+                }
+                Spacer(minLength: 0)
             }
-        }.background(FrameBackground(colors: colors, gradient: gradient)).accessibilityHidden(true)
+            .padding(m.sp8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(conversationColors.canvas)
+        }
+        .background(sidebarColors.canvas)
+        .accessibilityHidden(true)
+    }
+
+    /// Deterministic preview fill for thumbnails so Light/Dark/System Glass tiles do not inherit the host window's
+    /// live behind-window desktop vibrancy.
+    @ViewBuilder private func miniatureSidebarFill(_ sidebarColors: AppColors) -> some View {
+        if sidebarColors.translucentSidebar {
+            LinearGradient(
+                colors: [sidebarColors.raised, sidebarColors.overlay],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            ).overlay(sidebarColors.sidebar)
+        } else {
+            SidebarBackground(colors: sidebarColors)
+        }
     }
 }

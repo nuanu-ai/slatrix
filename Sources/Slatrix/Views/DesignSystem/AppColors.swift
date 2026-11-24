@@ -2,23 +2,32 @@ import AppKit
 import SwiftUI
 
 extension AppearanceStore {
-    var colors: AppColors { AppColors(dark: isDark, accent: accent(dark: isDark), theme: theme) }
+    var colors: AppColors { colors(for: activeWorkspaceID) }
+
+    func colors(for workspaceID: String?) -> AppColors {
+        AppColors(
+            dark: isDark, accent: accent(dark: isDark), theme: effectiveTheme(for: workspaceID),
+            highContrast: effectiveIncreaseContrast)
+    }
 }
 
-/// Every color in the UI, by role. Views pick a role, never a value. A theme's neutral base and one accent, the one
-/// picked in System Settings.
+/// Every color in the UI, by role. Views pick a role, never a value. A theme's neutral base and floating sidebar
+/// surface, with one accent: the one picked in System Settings.
 struct AppColors {
     private(set) var dark: Bool
     /// The system accent in this theme, in sRGB.
     private(set) var accentBase: NSColor
     let theme: ColorTheme
+    let highContrast: Bool
     private var neutrals: Neutrals
+    private var isSidebarContext = false
 
-    init(dark: Bool, accent: NSColor? = nil, theme: ColorTheme = .standard) {
+    init(dark: Bool, accent: NSColor? = nil, theme: ColorTheme = .glass, highContrast: Bool = false) {
         self.dark = dark
         accentBase = accent ?? Self.resolve(.controlAccentColor, dark: dark)
         self.theme = theme
-        neutrals = Neutrals(theme, dark: dark)
+        self.highContrast = highContrast
+        neutrals = Neutrals(theme, dark: dark, highContrast: highContrast)
     }
 
     /// A dynamic system color as it draws in one theme.
@@ -37,118 +46,151 @@ struct AppColors {
         /// How much stronger lines and the selection are than the default theme's.
         var lines = 1.0
         var onAccent: UInt32 = 0xffffff
-        /// A frame theme's window frame; the others leave the canvas there.
-        var frame: Frame?
+        /// A theme's floating sidebar surface when it diverges from the opaque neutral sidebar (glass or colored).
+        var sidebarSurface: SidebarSurface?
 
-        init(_ theme: ColorTheme, dark: Bool) {
-            if theme.framed {
-                self = Neutrals(.standard, dark: dark)
-                frame = Frame(theme, dark: dark)
-                return
-            }
-            switch (theme, dark) {
-            case (.standard, false):
-                (text, secondary, tertiary) = (0x1d1d1f, 0x58585e, 0x6c6c72)
-                (canvas, rowHover, raised, surfaceCard) = (0xffffff, 0xf6f6f8, 0xf2f2f5, 0xffffff)
-                (sidebar, overlay, control, ink) = (0xf3f3f5, 0xfbfbfd, 0xffffff, 0x000000)
-            case (.standard, true):
-                (text, secondary, tertiary) = (0xf5f5f7, 0x9e9ea5, 0x8e8e94)
-                (canvas, rowHover, raised, surfaceCard) = (0x141416, 0x1b1b1f, 0x222227, 0x222227)
-                (sidebar, overlay, control, ink) = (0x1d1d20, 0x27272d, 0x1f1f22, 0xffffff)
-            // Cool blue-gray, like a slate.
-            case (.slate, false):
-                (text, secondary, tertiary) = (0x111827, 0x556070, 0x616b7f)
-                (canvas, rowHover, raised, surfaceCard) = (0xffffff, 0xf4f6fa, 0xeef1f7, 0xffffff)
-                (sidebar, overlay, control, ink) = (0xeef1f7, 0xfafbfd, 0xffffff, 0x101828)
-            case (.slate, true):
-                (text, secondary, tertiary) = (0xe8ecf4, 0x9aa3b5, 0x8b94a7)
-                (canvas, rowHover, raised, surfaceCard) = (0x0d1017, 0x131823, 0x1b2231, 0x1b2231)
-                (sidebar, overlay, control, ink) = (0x151a26, 0x222a3c, 0x1a2030, 0xffffff)
+        init(_ theme: ColorTheme, dark: Bool, highContrast: Bool) {
+            switch (theme == .sand, dark, highContrast) {
             // Warm paper.
-            case (.sand, false):
+            case (true, false, false):
                 (text, secondary, tertiary) = (0x231f1a, 0x60574c, 0x6e655a)
                 (canvas, rowHover, raised, surfaceCard) = (0xfdfbf7, 0xf7f3eb, 0xf2ece2, 0xfffdfa)
                 (sidebar, overlay, control, ink) = (0xf2ece2, 0xfffdfa, 0xffffff, 0x3c2814)
-            case (.sand, true):
+            case (true, false, true):
+                (text, secondary, tertiary) = (0x000000, 0x3e372f, 0x574f45)
+                (canvas, rowHover, raised, surfaceCard) = (0xfdfbf7, 0xf7f3eb, 0xf2ece2, 0xfffdfa)
+                (sidebar, overlay, control, ink) = (0xf2ece2, 0xfffdfa, 0xffffff, 0x3c2814)
+                lines = 2
+            case (true, true, false):
                 (text, secondary, tertiary) = (0xf2ede6, 0xaaa195, 0x9b9286)
                 (canvas, rowHover, raised, surfaceCard) = (0x171512, 0x1f1c18, 0x27231e, 0x27231e)
                 (sidebar, overlay, control, ink) = (0x221f1a, 0x2e2a24, 0x26221d, 0xfff0dc)
-            // Black and white text, and lines twice as strong.
-            case (.contrast, false):
+            case (true, true, true):
+                (text, secondary, tertiary) = (0xffffff, 0xccc5bc, 0xb5ada2)
+                (canvas, rowHover, raised, surfaceCard) = (0x050403, 0x13110e, 0x1e1a16, 0x1e1a16)
+                (sidebar, overlay, control, ink) = (0x161310, 0x27231d, 0x181512, 0xfff0dc)
+                lines = 2
+            // Neutral graphite base shared by Glass, Neutral, Aubergine, Jade and Ocean.
+            case (false, false, false):
+                (text, secondary, tertiary) = (0x1d1d1f, 0x58585e, 0x6c6c72)
+                (canvas, rowHover, raised, surfaceCard) = (0xffffff, 0xf6f6f8, 0xf2f2f5, 0xffffff)
+                (sidebar, overlay, control, ink) = (0xf3f3f5, 0xfbfbfd, 0xffffff, 0x000000)
+            case (false, false, true):
                 (text, secondary, tertiary) = (0x000000, 0x3d3d42, 0x55555b)
                 (canvas, rowHover, raised, surfaceCard) = (0xffffff, 0xf5f5f7, 0xf0f0f2, 0xffffff)
                 (sidebar, overlay, control, ink) = (0xf0f0f2, 0xffffff, 0xffffff, 0x000000)
                 lines = 2
-            case (.contrast, true):
+            case (false, true, false):
+                (text, secondary, tertiary) = (0xf5f5f7, 0x9e9ea5, 0x8e8e94)
+                (canvas, rowHover, raised, surfaceCard) = (0x141416, 0x1b1b1f, 0x222227, 0x222227)
+                (sidebar, overlay, control, ink) = (0x1d1d20, 0x27272d, 0x1f1f22, 0xffffff)
+            case (false, true, true):
                 (text, secondary, tertiary) = (0xffffff, 0xc7c7cc, 0xaeaeb2)
                 (canvas, rowHover, raised, surfaceCard) = (0x000000, 0x101012, 0x19191d, 0x19191d)
                 (sidebar, overlay, control, ink) = (0x141416, 0x222226, 0x161618, 0xffffff)
                 lines = 2
-            default: preconditionFailure("\(theme) draws a frame")
+            }
+            if theme.isTranslucent || theme.isColored {
+                sidebarSurface = SidebarSurface(theme, dark: dark, highContrast: highContrast)
             }
         }
     }
 
-    /// A frame theme's frame and the sidebar's text on it, light on the colored ones.
-    private struct Frame {
-        /// The frame at the top, and where the window gradient takes it by the bottom.
+    /// A translucent glass or colored floating sidebar's fill, gradient end, and text contrast tuning.
+    private struct SidebarSurface {
+        /// The sidebar at the top, and where its built-in vertical gradient takes it by the bottom.
         var start, end, secondary, tertiary: UInt32
-        /// Glass lets the desktop through the system's sidebar material, under a tint that keeps text readable on any
+        /// Glass lets the desktop through the system's sidebar material under a tint that keeps text readable on any
         /// desktop.
         var opacity = 1.0
+        var colored = true
         var translucent: Bool { opacity < 1 }
 
-        init(_ theme: ColorTheme, dark: Bool) {
+        init(_ theme: ColorTheme, dark: Bool, highContrast: Bool) {
             switch (theme, dark) {
-            case (.aubergine, false): (start, end, secondary, tertiary) = (0x4a1f4f, 0x231b6f, 0xd4c9d5, 0xae99b1)
-            case (.aubergine, true): (start, end, secondary, tertiary) = (0x2b1530, 0x0f1252, 0xc8c2c9, 0x958a98)
-            case (.jade, false): (start, end, secondary, tertiary) = (0x1c4a3e, 0x17394f, 0xd6dedc, 0x9eb4ae)
-            case (.jade, true): (start, end, secondary, tertiary) = (0x122e28, 0x081e3a, 0xc1c9c7, 0x889694)
-            case (.lagoon, false): (start, end, secondary, tertiary) = (0x1c3d61, 0x054040, 0xd6dce3, 0x9eb0c2)
-            case (.lagoon, true): (start, end, secondary, tertiary) = (0x13263c, 0x003b33, 0xc2c7cc, 0x9aa4b0)
-            case (.midnight, false): (start, end, secondary, tertiary) = (0x141c3a, 0x401656, 0xc2c4cc, 0x989caa)
-            case (.midnight, true): (start, end, secondary, tertiary) = (0x0c1126, 0x2d083f, 0xc0c1c7, 0x868892)
-            case (_, false): (start, end, secondary, tertiary, opacity) = (0xf3f3f5, 0xf3f3f5, 0x46464b, 0x58585d, 0.85)
-            case (_, true): (start, end, secondary, tertiary, opacity) = (0x1d1d20, 0x1d1d20, 0xc4c4ca, 0xa8a8ae, 0.88)
+            case (.aubergine, false):
+                (start, end, secondary, tertiary) = (0x4a1f4f, 0x231b6f, 0xd4c9d5, 0xae99b1)
+            case (.aubergine, true):
+                (start, end, secondary, tertiary) = (0x2b1530, 0x0f1252, 0xc8c2c9, 0x958a98)
+            case (.jade, false):
+                (start, end, secondary, tertiary) = (0x1c4a3e, 0x17394f, 0xd6dedc, 0x9eb4ae)
+            case (.jade, true):
+                (start, end, secondary, tertiary) = (0x122e28, 0x081e3a, 0xc1c9c7, 0x889694)
+            case (.ocean, false):
+                (start, end, secondary, tertiary) = (0x1c3d61, 0x054040, 0xd6dce3, 0x9eb0c2)
+            case (.ocean, true):
+                (start, end, secondary, tertiary) = (0x13263c, 0x003b33, 0xc2c7cc, 0x9aa4b0)
+            case (_, false):
+                colored = false
+                if highContrast {
+                    (start, end, secondary, tertiary, opacity) = (0xf0f0f2, 0xf0f0f2, 0x3d3d42, 0x55555b, 0.94)
+                } else {
+                    (start, end, secondary, tertiary, opacity) = (0xf3f3f5, 0xf3f3f5, 0x46464b, 0x58585d, 0.85)
+                }
+            case (_, true):
+                colored = false
+                if highContrast {
+                    (start, end, secondary, tertiary, opacity) = (0x141416, 0x141416, 0xc7c7cc, 0xaeaeb2, 0.94)
+                } else {
+                    (start, end, secondary, tertiary, opacity) = (0x1d1d20, 0x1d1d20, 0xc4c4ca, 0xa8a8ae, 0.88)
+                }
+            }
+            if colored && highContrast {
+                secondary = AppColors.mix(0xffffff, 0.45, over: secondary)
+                tertiary = AppColors.mix(0xffffff, 0.45, over: tertiary)
             }
         }
     }
     private var ink: Color { Color(hex: neutrals.ink) }
 
-    // MARK: Frame
+    // MARK: Floating Sidebar & Wallpaper
 
-    /// The window around the sidebar and the conversation: the canvas, unless the theme colors it.
-    var frame: Color { neutrals.frame.map { Color(hex: $0.start).opacity($0.opacity) } ?? canvas }
-    /// Where the window gradient takes the frame, at the bottom.
-    var frameEnd: Color { neutrals.frame.map { Color(hex: $0.end).opacity($0.opacity) } ?? canvas }
-    /// Glass: the desktop shows through the frame.
-    var translucentFrame: Bool { neutrals.frame?.translucent == true }
-    /// The doodles behind the messages in a frame theme: a texture under the text, faint enough that it reads as the
-    /// theme's and never as marks among the words.
-    var wallpaperDoodle: Color {
-        guard let frame = neutrals.frame else { return .clear }
-        if dark { return .white.opacity(0.025) }
-        return frame.translucent ? .black.opacity(0.025) : Color(hex: frame.start).opacity(0.025)
+    /// The floating sidebar panel's fill (or top stop for colored themes).
+    var sidebar: Color {
+        neutrals.sidebarSurface.map { Color(hex: $0.start).opacity($0.opacity) } ?? Color(hex: neutrals.sidebar)
     }
-    /// The colors of what sits on the frame, such as the sidebar: on a colored frame its text, lines and fills are
-    /// light, and the accent is white, as in Slack's sidebar.
-    var onFrame: AppColors {
-        guard let frame = neutrals.frame else { return self }
+    /// Bottom stop of a colored floating sidebar's built-in gradient; equals `sidebar` on neutral themes.
+    var sidebarEnd: Color {
+        neutrals.sidebarSurface.map { Color(hex: $0.end).opacity($0.opacity) } ?? Color(hex: neutrals.sidebar)
+    }
+    /// Glass: the desktop shows through the floating sidebar panel.
+    var translucentSidebar: Bool { neutrals.sidebarSurface?.translucent == true }
+    /// Aubergine, Jade, Ocean: a dark colored floating sidebar island with light text.
+    var coloredSidebar: Bool { neutrals.sidebarSurface?.colored == true }
+    /// Faint repeating doodles behind messages when Chat wallpaper is enabled: subtle theme-tinted ink in light mode
+    /// and soft white in dark mode.
+    var wallpaperDoodle: Color {
+        if dark { return .white.opacity(0.025) }
+        if let surface = neutrals.sidebarSurface, surface.colored {
+            return Color(hex: surface.start).opacity(0.025)
+        }
+        return Color(hex: neutrals.ink).opacity(0.025)
+    }
+    /// The colors of what sits inside the floating sidebar: deeper text over translucent glass, and crisp light text
+    /// with a white accent over colored sidebar islands.
+    var onSidebar: AppColors {
         var colors = self
-        (colors.neutrals.secondary, colors.neutrals.tertiary) = (frame.secondary, frame.tertiary)
-        guard !frame.translucent else { return colors }
+        colors.isSidebarContext = true
+        guard let surface = neutrals.sidebarSurface else { return colors }
+        (colors.neutrals.secondary, colors.neutrals.tertiary) = (surface.secondary, surface.tertiary)
+        guard surface.colored else {
+            if surface.translucent && !dark {
+                colors.accentBase = accentBase.blended(withFraction: 0.25, of: .black) ?? accentBase
+            }
+            return colors
+        }
         colors.dark = true
         colors.accentBase = .white
         colors.neutrals.text = 0xffffff
         colors.neutrals.ink = 0xffffff
-        (colors.neutrals.canvas, colors.neutrals.sidebar) = (frame.start, frame.start)
-        colors.neutrals.rowHover = Self.mix(0xffffff, 0.08, over: frame.start)
-        colors.neutrals.control = Self.mix(0xffffff, 0.12, over: frame.start)
-        colors.neutrals.raised = Self.mix(0xffffff, 0.15, over: frame.start)
+        colors.neutrals.canvas = surface.start
+        colors.neutrals.rowHover = Self.mix(0xffffff, 0.08, over: surface.start)
+        colors.neutrals.control = Self.mix(0xffffff, 0.12, over: surface.start)
+        colors.neutrals.raised = Self.mix(0xffffff, 0.15, over: surface.start)
         colors.neutrals.surfaceCard = colors.neutrals.raised
-        colors.neutrals.overlay = Self.mix(0xffffff, 0.2, over: frame.start)
-        colors.neutrals.onAccent = frame.start
-        colors.neutrals.lines = 1.6
+        colors.neutrals.overlay = Self.mix(0xffffff, 0.2, over: surface.start)
+        colors.neutrals.onAccent = surface.start
+        colors.neutrals.lines = highContrast ? 2.0 : 1.6
         return colors
     }
 
@@ -157,6 +199,56 @@ struct AppColors {
             let (a, b) = (Double(top >> shift & 255), Double(bottom >> shift & 255))
             return mixed | UInt32((a * amount + b * (1 - amount)).rounded()) << shift
         }
+    }
+
+    private static func nsColor(hex: UInt32, alpha: CGFloat = 1) -> NSColor {
+        NSColor(
+            srgbRed: CGFloat((hex >> 16) & 255) / 255, green: CGFloat((hex >> 8) & 255) / 255,
+            blue: CGFloat(hex & 255) / 255, alpha: alpha)
+    }
+
+    private static func composite(_ top: NSColor, over bottom: NSColor) -> NSColor {
+        let top = top.usingColorSpace(.sRGB) ?? top
+        let bottom = bottom.usingColorSpace(.sRGB) ?? bottom
+        let a = top.alphaComponent
+        return NSColor(
+            srgbRed: top.redComponent * a + bottom.redComponent * (1 - a),
+            green: top.greenComponent * a + bottom.greenComponent * (1 - a),
+            blue: top.blueComponent * a + bottom.blueComponent * (1 - a), alpha: 1)
+    }
+
+    private static func relativeLuminance(_ color: NSColor) -> Double {
+        let rgb = color.usingColorSpace(.sRGB) ?? color
+        func linear(_ value: CGFloat) -> Double {
+            let v = Double(value)
+            return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * linear(rgb.redComponent) + 0.7152 * linear(rgb.greenComponent) + 0.0722
+            * linear(rgb.blueComponent)
+    }
+
+    private static func contrastRatio(_ first: NSColor, _ second: NSColor) -> Double {
+        let l1 = relativeLuminance(first)
+        let l2 = relativeLuminance(second)
+        return (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
+    }
+
+    /// Leaves `candidate` untouched when it already clears `minimum` contrast against `background`, and otherwise
+    /// steps minimally toward `target` so bright macOS accents (such as Yellow) remain WCAG AA legible.
+    private static func ensuringContrast(
+        _ candidate: NSColor, against background: NSColor, toward target: NSColor, minimum: Double = 4.5
+    ) -> NSColor {
+        let base = candidate.usingColorSpace(.sRGB) ?? candidate
+        let bg = background.usingColorSpace(.sRGB) ?? background
+        if contrastRatio(base, bg) >= minimum { return base }
+        var low: CGFloat = 0
+        var high: CGFloat = 1
+        for _ in 0..<14 {
+            let mid = (low + high) / 2
+            let stepped = base.blended(withFraction: mid, of: target) ?? target
+            if contrastRatio(stepped, bg) >= minimum { high = mid } else { low = mid }
+        }
+        return base.blended(withFraction: high, of: target) ?? target
     }
 
     // MARK: Text
@@ -191,8 +283,6 @@ struct AppColors {
     var onTooltip: Color { Color(hex: 0xffffff) }
     /// Dims the window under a modal.
     var scrim: Color { Color.black.opacity(dark ? 0.48 : 0.32) }
-    /// The sidebar, a panel inset in the window.
-    var sidebar: Color { Color(hex: neutrals.sidebar) }
 
     // MARK: Lines
 
@@ -209,23 +299,54 @@ struct AppColors {
     var selection: Color { ink.opacity((dark ? 0.1 : 0.07) * neutrals.lines) }
     /// Words a search matched, in a result.
     var highlight: Color { Color(hex: 0xffcc00).opacity(dark ? 0.3 : 0.4) }
-    /// The keyboard focus ring around buttons, rows and fields: the system's, in the accent.
+    /// The keyboard focus ring around buttons, rows and fields: the system's in normal mode, or a contrast-checked
+    /// ring on colored sidebars and under Increase contrast so keyboard focus never fades into the surface.
     static var focusRing: Color { Color(nsColor: .keyboardFocusIndicatorColor) }
-    var focusRing: Color { Self.focusRing }
+    var focusRing: Color {
+        if isSidebarContext && coloredSidebar { return .white }
+        if highContrast { return accent }
+        let surface = Self.nsColor(hex: isSidebarContext ? neutrals.sidebar : neutrals.canvas)
+        let resolved = Self.resolve(.keyboardFocusIndicatorColor, dark: dark)
+        if Self.contrastRatio(Self.composite(resolved, over: surface), surface) >= 3.0 {
+            return Self.focusRing
+        }
+        return accent
+    }
 
     // MARK: Accent and status
 
     /// The system accent as a fill: the one main button, the send button, badges, the highlighted menu row. Deepened
-    /// slightly under white text so filled buttons meet WCAG AA contrast.
-    var accentFill: Color {
-        guard neutrals.onAccent == 0xffffff else { return Color(nsColor: accentBase) }
-        return Color(nsColor: accentBase.blended(withFraction: dark ? 0.24 : 0.16, of: .black) ?? accentBase)
+    /// under white text so filled buttons meet WCAG AA contrast for every macOS accent color, including Yellow.
+    var accentFill: Color { Color(nsColor: resolvedAccentFill) }
+    private var resolvedAccentFill: NSColor {
+        guard neutrals.onAccent == 0xffffff else { return accentBase }
+        let stepped = accentBase.blended(withFraction: dark ? 0.24 : 0.16, of: .black) ?? accentBase
+        return Self.ensuringContrast(stepped, against: Self.nsColor(hex: neutrals.onAccent), toward: .black)
     }
-    /// The accent as text and icons: links, the open conversation's icon, a mention. Deepened in light mode, more so
-    /// over a frame theme's doodles, and lifted in dark mode, so it reads as text on the canvas.
+    /// The accent as text and icons: links, the open conversation's icon, a mention. Deepened in light mode so links
+    /// stay readable over chat wallpaper doodles, and lifted in dark mode so it reads as text on the canvas.
     var accent: Color {
-        let depth = dark || neutrals.frame == nil ? 0.2 : 0.3
-        return Color(nsColor: accentBase.blended(withFraction: depth, of: dark ? .white : .black) ?? accentBase)
+        if isSidebarContext && coloredSidebar { return .white }
+        let depth: CGFloat = dark ? (highContrast ? 0.3 : 0.2) : (highContrast ? 0.4 : 0.3)
+        let stepped = accentBase.blended(withFraction: depth, of: dark ? .white : .black) ?? accentBase
+        let background: NSColor
+        if isSidebarContext, let surface = neutrals.sidebarSurface, surface.translucent {
+            let tint = Self.nsColor(hex: surface.start, alpha: surface.opacity)
+            background = Self.composite(tint, over: dark ? .white : .black)
+        } else if isSidebarContext {
+            background = Self.nsColor(hex: neutrals.sidebar)
+        } else {
+            let canvasColor = Self.nsColor(hex: neutrals.canvas)
+            let doodleColor =
+                dark
+                ? NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.025)
+                : Self.nsColor(
+                    hex: neutrals.sidebarSurface?.colored == true ? neutrals.sidebarSurface!.start : neutrals.ink,
+                    alpha: 0.025)
+            background = Self.composite(doodleColor, over: canvasColor)
+        }
+        return Color(
+            nsColor: Self.ensuringContrast(stepped, against: background, toward: dark ? .white : .black))
     }
     /// The fill behind something of yours, such as your reaction or a mention of you.
     var accentTint: Color { accentFill.opacity(dark ? 0.18 : 0.1) }
@@ -234,21 +355,46 @@ struct AppColors {
     /// Text and icons on an accent fill.
     var onAccent: Color { Color(hex: neutrals.onAccent) }
     /// Done and verified marks.
-    var success: Color { Color(hex: dark ? 0x30d158 : 0x1e7a34) }
-    /// Destructive text, icons and inline errors, bright enough to read on dark canvas and overlay surfaces.
-    var destructive: Color { Color(hex: dark ? 0xff6961 : 0xd70015) }
+    var success: Color {
+        Color(hex: dark ? (highContrast ? 0x4ae06d : 0x30d158) : (highContrast ? 0x146326 : 0x1e7a34))
+    }
+    /// Destructive text, icons and inline errors, bright enough to read on dark canvas, overlay, and selected colored
+    /// sidebar rows.
+    var destructive: Color {
+        let baseHex: UInt32 = dark ? (highContrast ? 0xff8078 : 0xff6961) : (highContrast ? 0xb50012 : 0xd70015)
+        guard isSidebarContext, let surface = neutrals.sidebarSurface, surface.colored else {
+            return Color(hex: baseHex)
+        }
+        let selectionAlpha = 0.1 * neutrals.lines
+        let selStart = Self.composite(
+            NSColor(srgbRed: 1, green: 1, blue: 1, alpha: selectionAlpha), over: Self.nsColor(hex: surface.start))
+        let selEnd = Self.composite(
+            NSColor(srgbRed: 1, green: 1, blue: 1, alpha: selectionAlpha), over: Self.nsColor(hex: surface.end))
+        let adjustedStart = Self.ensuringContrast(Self.nsColor(hex: baseHex), against: selStart, toward: .white)
+        let adjusted = Self.ensuringContrast(adjustedStart, against: selEnd, toward: .white)
+        return Color(nsColor: adjusted)
+    }
     /// Destructive button fill under white `onAccent` text.
-    var destructiveFill: Color { Color(hex: dark ? 0xde2c2c : 0xd70015) }
+    var destructiveFill: Color {
+        Color(hex: dark ? 0xde2c2c : (highContrast ? 0xb50012 : 0xd70015))
+    }
     /// Connection trouble and recoverable failures.
-    var warning: Color { Color(hex: dark ? 0xff9f0a : 0x9a4f00) }
+    var warning: Color {
+        Color(hex: dark ? (highContrast ? 0xffb340 : 0xff9f0a) : (highContrast ? 0x7d3f00 : 0x9a4f00))
+    }
     /// An @Name pill in a message or the composer. Deeper than the accent in light mode, so it reads on its tint.
-    var mentionText: Color { dark ? accent : deepAccent }
+    var mentionText: Color {
+        if dark { return accent }
+        let pill = Self.composite(
+            resolvedAccentFill.withAlphaComponent(0.1), over: Self.nsColor(hex: neutrals.canvas))
+        let stepped = accentBase.blended(withFraction: 0.5, of: .black) ?? accentBase
+        return Color(nsColor: Self.ensuringContrast(stepped, against: pill, toward: .black))
+    }
     var mentionFill: Color { accentTint }
     /// The pill of a mention that notifies you, or everyone: warm amber so it stands apart from links and other
     /// mentions, matching Slack desktop and Slatrix Android.
-    var mentionYouText: Color { Color(hex: dark ? 0xffe58f : 0x7a4d00) }
+    var mentionYouText: Color { Color(hex: dark ? 0xffe58f : (highContrast ? 0x5c3900 : 0x7a4d00)) }
     var mentionYouFill: Color { Color(hex: dark ? 0xcc8e14 : 0xf2c744).opacity(dark ? 0.22 : 0.3) }
-    private var deepAccent: Color { Color(nsColor: accentBase.blended(withFraction: 0.5, of: .black) ?? accentBase) }
     /// Inline code in a message.
     var code: Color { sunken }
     var presenceActive: Color { Color(hex: dark ? 0x30d158 : 0x34c759) }
@@ -326,19 +472,19 @@ func avatarColor(_ name: String) -> Color {
     return Color(hex: avatarColors[Int(hash % UInt64(avatarColors.count))])
 }
 
-private struct OnFrameKey: EnvironmentKey { static let defaultValue = false }
+private struct OnSidebarKey: EnvironmentKey { static let defaultValue = false }
 
 extension EnvironmentValues {
-    /// Set on what sits on a frame theme's frame, such as the sidebar, so it draws in `AppColors.onFrame`.
-    var onFrame: Bool {
-        get { self[OnFrameKey.self] }
-        set { self[OnFrameKey.self] = newValue }
+    /// Set on what sits inside the floating sidebar panel so it draws in `AppColors.onSidebar`.
+    var onSidebar: Bool {
+        get { self[OnSidebarKey.self] }
+        set { self[OnSidebarKey.self] = newValue }
     }
 }
 
-/// The theme's colors where a view sits: on the window, or on a frame theme's frame.
+/// The theme's colors where a view sits: on the window canvas, or inside the floating sidebar panel.
 @MainActor @propertyWrapper struct ThemeColors: DynamicProperty {
     @EnvironmentObject private var appearance: AppearanceStore
-    @Environment(\.onFrame) private var onFrame
-    var wrappedValue: AppColors { onFrame ? appearance.colors.onFrame : appearance.colors }
+    @Environment(\.onSidebar) private var onSidebar
+    var wrappedValue: AppColors { onSidebar ? appearance.colors.onSidebar : appearance.colors }
 }

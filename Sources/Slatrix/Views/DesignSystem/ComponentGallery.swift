@@ -32,7 +32,13 @@ struct ComponentGallery: View {
                     section("Section header") {
                         SectionHeader(title: "Channels", collapsed: false, onToggle: {}, addLabel: "Add channels") {
                             EmptyView()
-                        }.frame(width: m(280)).background(appearance.colors.sidebar)
+                        }.frame(width: m(280))
+                            .background { SidebarBackground(colors: appearance.colors, cornerRadius: m.radius) }
+                            .clipShape(RoundedRectangle(cornerRadius: m.radius))
+                            .environment(\.onSidebar, true)
+                            .transformEnvironment(\.colorScheme) {
+                                if appearance.colors.coloredSidebar { $0 = .dark }
+                            }
                     }
                     section("Loading") { loading }
                     section("Tooltip") { tooltips }
@@ -386,6 +392,28 @@ struct ComponentGallery: View {
             .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).strokeBorder(appearance.colors.border))
             .clipShape(RoundedRectangle(cornerRadius: m.radiusLarge))
         }
+    }
+}
+/// Keeps the debug Component Gallery window synced to global appearance and its own system color scheme, isolated
+/// from whichever per-workspace theme override the main window happens to display.
+struct ComponentGalleryHost: View {
+    @ObservedObject var source: AppearanceStore
+    @StateObject private var galleryAppearance = AppearanceStore(
+        defaults: UserDefaults(suiteName: "SlatrixComponentGallery") ?? .standard)
+    @Environment(\.colorScheme) private var systemScheme
+
+    var body: some View {
+        ScrollView([.vertical, .horizontal]) { ComponentGallery() }
+            .environmentObject(galleryAppearance)
+            .environment(\.metrics, Metrics())
+            .preferredColorScheme(galleryAppearance.preferredColorScheme)
+            .onChange(of: systemScheme, initial: true) { _, scheme in galleryAppearance.systemIsDark = scheme == .dark }
+            .onChange(of: source.mode, initial: true) { _, mode in galleryAppearance.mode = mode }
+            .onChange(of: source.theme, initial: true) { _, theme in galleryAppearance.theme = theme }
+            .onChange(of: source.increaseContrast, initial: true) { _, value in
+                galleryAppearance.increaseContrast = value
+            }
+            .onChange(of: source.chatWallpaper, initial: true) { _, value in galleryAppearance.chatWallpaper = value }
     }
 }
 #endif

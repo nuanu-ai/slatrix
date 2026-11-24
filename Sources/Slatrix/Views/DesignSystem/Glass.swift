@@ -34,11 +34,6 @@ extension View {
         }
     }
 
-    /// In a frame theme, the conversation and its panes as a card on the frame, inset as the sidebar is; `leading`
-    /// insets that edge too while no sidebar sits beside it. Elsewhere it changes nothing, and switching keeps the
-    /// conversation as it is.
-    func frameCard(_ framed: Bool, leading: Bool) -> some View { modifier(FrameCard(framed: framed, leading: leading)) }
-
     /// Fades this view out over `height` at its bottom edge, into whatever lies behind it.
     func fadeOut(bottom height: CGFloat) -> some View {
         mask {
@@ -50,46 +45,71 @@ extension View {
     }
 }
 
-/// The window behind the sidebar and the conversation: the canvas, or a frame theme's frame, fading into a
-/// neighboring hue with the window gradient. Glass is the system's sidebar material under the theme's tint.
-struct FrameBackground: View {
+/// The floating sidebar panel's surface: native macOS sidebar vibrancy under a tint for Glass, a built-in vertical
+/// gradient for colored themes, or a flat opaque fill for Neutral and Sand.
+struct SidebarBackground: View {
     let colors: AppColors
-    let gradient: Bool
+    var cornerRadius: CGFloat = 0
+    /// In the narrow-window drawer over a dimmed conversation, blur within the window instead of punching through to
+    /// the desktop behind it.
+    var inDrawer = false
 
     var body: some View {
-        if colors.translucentFrame {
-            SidebarMaterial().overlay(colors.frame)
-        } else {
-            // Mostly downward, so the sidebar carries the drift.
+        if colors.translucentSidebar {
+            SidebarMaterial(cornerRadius: cornerRadius, blendingMode: inDrawer ? .withinWindow : .behindWindow)
+                .overlay(colors.sidebar)
+        } else if colors.coloredSidebar {
+            // Mostly downward, so the floating sidebar island carries a subtle vertical drift.
             LinearGradient(
                 stops: [
-                    .init(color: colors.frame, location: 0.1),
-                    .init(color: gradient ? colors.frameEnd : colors.frame, location: 0.9),
+                    .init(color: colors.sidebar, location: 0.1),
+                    .init(color: colors.sidebarEnd, location: 0.9),
                 ],
                 startPoint: UnitPoint(x: 0.4, y: 0), endPoint: UnitPoint(x: 0.6, y: 1))
+        } else {
+            colors.sidebar
         }
     }
 }
 
-/// Apple's sidebar material, which lets the desktop through and dims while the window is inactive.
+/// Apple's sidebar material, letting the desktop (or in-window backdrop in the drawer) show through and dimming while
+/// the window is inactive, masked to `cornerRadius` so vibrancy never bleeds outside the floating panel's corners.
 private struct SidebarMaterial: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let view = NSVisualEffectView()
-        (view.material, view.blendingMode, view.state) = (.sidebar, .behindWindow, .followsWindowActiveState)
+    var cornerRadius: CGFloat = 0
+    var blendingMode: NSVisualEffectView.BlendingMode = .behindWindow
+
+    final class MaskedVisualEffectView: NSVisualEffectView {
+        var appliedCornerRadius: CGFloat = -1
+    }
+
+    func makeNSView(context: Context) -> MaskedVisualEffectView {
+        let view = MaskedVisualEffectView()
+        (view.material, view.blendingMode, view.state) = (.sidebar, blendingMode, .followsWindowActiveState)
+        applyMask(to: view)
         return view
     }
-    func updateNSView(_ view: NSVisualEffectView, context: Context) {}
-}
 
-private struct FrameCard: ViewModifier {
-    let framed: Bool
-    let leading: Bool
-    @ThemeColors private var colors
-    @Environment(\.metrics) private var m
+    func updateNSView(_ view: MaskedVisualEffectView, context: Context) {
+        if view.blendingMode != blendingMode { view.blendingMode = blendingMode }
+        applyMask(to: view)
+    }
 
-    func body(content: Content) -> some View {
-        let inset = framed ? m.sidebarInset : 0
-        content.background(colors.canvas).clipShape(RoundedRectangle(cornerRadius: framed ? m.radiusLarge : 0))
-            .padding([.vertical, .trailing], inset).padding(.leading, leading ? inset : 0)
+    private func applyMask(to view: MaskedVisualEffectView) {
+        guard view.appliedCornerRadius != cornerRadius else { return }
+        view.appliedCornerRadius = cornerRadius
+        guard cornerRadius > 0 else {
+            view.maskImage = nil
+            return
+        }
+        let side = cornerRadius * 2 + 1
+        let image = NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius).fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(
+            top: cornerRadius, left: cornerRadius, bottom: cornerRadius, right: cornerRadius)
+        image.resizingMode = .stretch
+        view.maskImage = image
     }
 }

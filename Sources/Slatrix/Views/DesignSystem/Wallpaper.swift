@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-/// The chat wallpaper, as Android draws it, behind the messages in a frame theme: faint doodles of the app's own icons
-/// on a tile that repeats. The board is `design/wallpaper.json`'s, in points.
+/// The chat wallpaper, as Android draws it, behind the messages when Chat wallpaper is on: faint doodles of the app's
+/// own icons on a tile that repeats. The board is `design/wallpaper.json`'s, in points.
 enum Wallpaper {
     static let tile: CGFloat = 240
     static let stroke: CGFloat = 1.5

@@ -63,9 +63,9 @@ struct DesignTokenTests {
             "mentionYouFill": \.mentionYouFill, "code": \.code, "presenceActive": \.presenceActive,
             "presenceAway": \.presenceAway, "mediaBackdrop": \.mediaBackdrop, "mediaControl": \.mediaControl,
             "mediaShade": \.mediaShade, "onMedia": \.onMedia, "onMediaEdge": \.onMediaEdge,
-            "frame": \.frame, "frameEnd": \.frameEnd, "onFrame": \.onFrame.textPrimary,
-            "onFrameSecondary": \.onFrame.textSecondary, "onFrameTertiary": \.onFrame.textTertiary,
-            "frameSelection": \.onFrame.selection, "wallpaperDoodle": \.wallpaperDoodle,
+            "sidebarEnd": \.sidebarEnd, "onSidebar": \.onSidebar.textPrimary,
+            "onSidebarSecondary": \.onSidebar.textSecondary, "onSidebarTertiary": \.onSidebar.textTertiary,
+            "sidebarSelection": \.onSidebar.selection, "wallpaperDoodle": \.wallpaperDoodle,
         ]
         #expect(Set(tokens.mac.colors.keys) == Set(roles.keys))
         #expect(Set(tokens.mac.themes.keys) == Set(ColorTheme.allCases.dropFirst().map(\.rawValue)))

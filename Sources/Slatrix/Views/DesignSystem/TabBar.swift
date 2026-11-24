@@ -6,6 +6,7 @@ struct TabBar<Value: Hashable>: View {
     struct Tab {
         let value: Value
         let title: String
+        var accessibilityLabel: String? = nil
         var symbol: String? = nil
         /// Shown in a neutral badge.
         var count: Int? = nil
@@ -20,7 +21,8 @@ struct TabBar<Value: Hashable>: View {
         HStack(spacing: m.sp24) {
             ForEach(tabs, id: \.value) { tab in
                 TabItem(
-                    title: tab.title, symbol: tab.symbol, count: tab.count, selected: tab.value == selection,
+                    title: tab.title, accessibilityLabel: tab.accessibilityLabel, symbol: tab.symbol, count: tab.count,
+                    selected: tab.value == selection,
                     ringed: keyboardFocused(focused) && tab.value == selection
                 ) {
                     selection = tab.value
@@ -45,6 +47,7 @@ struct TabBar<Value: Hashable>: View {
 
 private struct TabItem: View {
     let title: String
+    let accessibilityLabel: String?
     let symbol: String?
     let count: Int?
     let selected: Bool
@@ -75,6 +78,7 @@ private struct TabItem: View {
             .opacity(enabled ? 1 : 0.4)
         }
         .buttonStyle(.row).focusable(false).onHover { hovering = $0 }
+        .accessibilityLabel(accessibilityLabel ?? title)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
