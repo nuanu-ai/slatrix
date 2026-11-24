@@ -138,6 +138,10 @@ class MatrixActivity(private val userId: String, scope: CoroutineScope,
         current.map { if (it.roomId == roomId && it.threadRoot == threadRoot) it.copy(unread = false) else it }
     }
 
+    fun markRoomRead(roomId: String) = mutableItems.update { current ->
+        current.map { if (it.roomId == roomId) it.copy(unread = false) else it }
+    }
+
     private fun add(item: ActivityItem) {
         mutableItems.update { current ->
             // A later decryption of the same event replaces it in place, read if it was.

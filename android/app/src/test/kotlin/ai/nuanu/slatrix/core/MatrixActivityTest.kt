@@ -76,6 +76,18 @@ class MatrixActivityTest {
         assertEquals(listOf("\$same", "\$other"), activity.items.value.filter { it.unread }.map { it.eventId })
     }
 
+    // capability: activity.badge
+    @Test fun markingARoomReadClearsItsThreadRepliesAndNoOtherRooms() = runTest {
+        val activity = MatrixActivity("@alex:example.org", backgroundScope) { _, _ -> null }
+        activity.listener.onNotification(notification("\$one", "Agreed", at = 1_000u, thread = "\$root"), "!team:example.org")
+        activity.listener.onNotification(notification("\$two", "Later", at = 2_000u, thread = "\$elsewhere"), "!team:example.org")
+        activity.listener.onNotification(notification("\$otherRoom", "Hi", at = 3_000u, thread = "\$root"), "!design:example.org")
+        activity.items.first { it.size == 3 }
+
+        activity.markRoomRead("!team:example.org")
+        assertEquals(listOf("\$otherRoom"), activity.items.value.filter { it.unread }.map { it.eventId })
+    }
+
     // capability: people.names
     @Test fun aMentionReadsAsThePeopleItNamesAndASenderWithoutANameByTheirLocalpart() = runTest {
         val activity = MatrixActivity("@alex:example.org", backgroundScope, memberNames = { room, ids ->

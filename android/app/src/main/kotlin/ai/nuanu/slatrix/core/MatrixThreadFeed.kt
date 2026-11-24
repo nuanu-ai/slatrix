@@ -1,5 +1,6 @@
 package ai.nuanu.slatrix.core
 
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,6 +23,7 @@ import org.matrix.rustcomponents.sdk.ThreadListItemEvent
 import org.matrix.rustcomponents.sdk.ThreadListService
 import org.matrix.rustcomponents.sdk.ThreadListUpdate
 import org.matrix.rustcomponents.sdk.TimelineItemContent
+import org.matrix.rustcomponents.sdk.UserReceipt
 
 data class ThreadFeedMessage(val senderName: String, val initials: String, val colorIndex: Int, val body: String, val timestamp: Long,
     val avatarUrl: String? = null)
@@ -51,6 +53,30 @@ data class ThreadFeedState(val items: List<ThreadFeedItem> = emptyList(), val lo
 class MatrixThreadFeed(scope: CoroutineScope, private val client: Client, private val userId: String, rooms: List<RoomSummary>) {
     private val mutableState = MutableStateFlow(ThreadFeedState(loading = rooms.isNotEmpty()))
     val state: StateFlow<ThreadFeedState> = mutableState.asStateFlow()
+    private val roomChannels = ConcurrentHashMap<String, Channel<Unit>>()
+    /** Latest reply ID read locally before sync echoes the receipt back; clears on any newer reply. */
+    private val locallyRead = ConcurrentHashMap<Pair<String, String>, String>()
+    private val latestEventIds = ConcurrentHashMap<Pair<String, String>, String>()
+
+    /** Re-reads receipts for [roomId], or every room when null, since thread list updates don't fire on receipts. */
+    fun refresh(roomId: String? = null) {
+        if (roomId != null) roomChannels[roomId]?.trySend(Unit)
+        else roomChannels.values.forEach { it.trySend(Unit) }
+    }
+
+    /** Clears a thread's unread dot as soon as reading [eventId] succeeds, before the receipt echoes back. */
+    fun markThreadRead(roomId: String, rootId: String, eventId: String) {
+        locallyRead[roomId to rootId] = eventId
+        refresh(roomId)
+    }
+
+    /** Clears unread dots for every currently listed thread in [roomId] when the room is marked read. */
+    fun markRoomRead(roomId: String) {
+        for ((key, latestId) in latestEventIds) {
+            if (key.first == roomId) locallyRead[key] = latestId
+        }
+        refresh(roomId)
+    }
 
     init {
         // Thread lists come from the server one room at a time; two at once, as on the Mac.
@@ -84,23 +110,26 @@ class MatrixThreadFeed(scope: CoroutineScope, private val client: Client, privat
         var room: Room? = null
         var service: ThreadListService? = null
         var handle: TaskHandle? = null
+        var changes: Channel<Unit>? = null
         var counted = false
         try {
             room = client.getRoom(summary.id) ?: return
             val list = room.threadListService().also { service = it }
-            val changes = Channel<Unit>(Channel.CONFLATED)
+            val channel = Channel<Unit>(Channel.CONFLATED).also { changes = it }
+            roomChannels[summary.id] = channel
             handle = list.subscribeToItemsUpdates(object : ThreadListEntriesListener {
-                override fun onUpdate(diff: List<ThreadListUpdate>) { changes.trySend(Unit) }
+                override fun onUpdate(diff: List<ThreadListUpdate>) { channel.trySend(Unit) }
             })
             runCatching { requests.withPermit { list.paginate() } }.onFailure { if (it is CancellationException) throw it }
             publish(project(summary, room, list), true)
             counted = true
-            for (change in changes) publish(project(summary, room, list), false)
+            for (change in channel) publish(project(summary, room, list), false)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
             // A room whose threads can't load leaves the rest of the feed.
         } finally {
+            changes?.let { roomChannels.remove(summary.id, it) }
             handle?.let { runCatching { it.cancel() }; it.close() }
             service?.close()
             room?.close()
@@ -111,20 +140,19 @@ class MatrixThreadFeed(scope: CoroutineScope, private val client: Client, privat
     private suspend fun project(summary: RoomSummary, room: Room, list: ThreadListService): List<ThreadFeedItem> {
         val threads = list.items()
         try {
+            // An unthreaded room receipt (from Mark as read or another device) marks threads up to its timestamp read too.
+            val unthreadedRead = loadReceipt(room, ReceiptThread.Unthreaded)
             return threads.mapNotNull { thread ->
                 val latest = thread.latestEvent
-                val read = try {
-                    room.loadUserReceipt(ReceiptType.READ, ReceiptThread.Thread(thread.rootEvent.eventId), userId)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    null
-                }
-                if (!thread.rootEvent.isOwn && latest?.isOwn != true && read == null) return@mapNotNull null
+                val threadRead = loadReceipt(room, ReceiptThread.Thread(thread.rootEvent.eventId))
+                if (!thread.rootEvent.isOwn && latest?.isOwn != true && threadRead == null) return@mapNotNull null
+                val key = summary.id to thread.rootEvent.eventId
+                if (latest != null) latestEventIds[key] = latest.eventId
+                val readLocally = latest != null && locallyRead[key] == latest.eventId
                 ThreadFeedItem(summary.id, summary.name, summary.direct, thread.rootEvent.eventId, message(thread.rootEvent),
                     latest?.let(::message), thread.numReplies.toInt(),
-                    unread = latest != null && !latest.isOwn && read?.eventId != latest.eventId &&
-                        (read?.receipt?.timestamp ?: 0u) < latest.timestamp,
+                    unread = latest != null && !latest.isOwn && !readLocally &&
+                        !threadRead.covers(latest) && !unthreadedRead.covers(latest),
                     rootRow = thread.rootEvent.run {
                         (content as? TimelineItemContent.MsgLike)?.content
                             ?.let { messageRow(eventId, eventId, sender, senderProfile, isOwn, timestamp, it) }
@@ -134,6 +162,17 @@ class MatrixThreadFeed(scope: CoroutineScope, private val client: Client, privat
             threads.forEach { it.destroy() }
         }
     }
+
+    private suspend fun loadReceipt(room: Room, thread: ReceiptThread): UserReceipt? = try {
+        room.loadUserReceipt(ReceiptType.READ, thread, userId)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun UserReceipt?.covers(event: ThreadListItemEvent): Boolean =
+        this != null && (eventId == event.eventId || (receipt.timestamp ?: 0u) >= event.timestamp)
 
     private fun message(event: ThreadListItemEvent): ThreadFeedMessage {
         val profile = event.senderProfile as? ProfileDetails.Ready
