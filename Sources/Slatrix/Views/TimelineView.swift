@@ -189,7 +189,7 @@ struct TimelineView: View {
                     HStack {
                         Spacer(minLength: 0)
                         Button {
-                            if matrix.focusedEventID != nil {
+                            if !thread && matrix.focusedEventID != nil {
                                 if let onJumpToLatest {
                                     onJumpToLatest()
                                 } else {
@@ -1159,14 +1159,18 @@ extension TimelineRowContext {
         if row.message.senderID == matrix?.user?.id && row.message.sendState != "sent" {
             return [MessageMenuCommand(id: "cancel-send", title: "Cancel sending…", perform: actions.cancelSend)]
         }
-        return [
-            MessageMenuCommand(id: "thread", title: "Reply in thread", perform: actions.thread),
+        var commands: [MessageMenuCommand] = []
+        if !isThread {
+            commands.append(MessageMenuCommand(id: "thread", title: "Reply in thread", perform: actions.thread))
+        }
+        commands += [
             MessageMenuCommand(
                 id: "reaction", title: "Add reaction", isEnabled: actions.openReactions != nil,
                 perform: { actions.openReactions?() }),
             MessageMenuCommand(
                 id: "save", title: row.saved ? "Remove from Later" : "Save for later", perform: actions.save),
         ]
+        return commands
     }
 
     private func menu(_ row: TimelineMessageEntry, target: MessageActionTarget?, actions: MessageRowActions)
@@ -1202,11 +1206,14 @@ extension TimelineRowContext {
             commands.append(MessageMenuCommand(id: "profile", title: "View profile", perform: openProfile))
             commands.append(MessageMenuCommand(id: "profile-divider", title: "", isSeparator: true))
         }
-        commands += [
+        commands.append(
             MessageMenuCommand(
                 id: "reaction", title: "Add reaction…", isEnabled: actions.openReactions != nil,
-                perform: { actions.openReactions?() }),
-            MessageMenuCommand(id: "thread", title: "Reply in thread", perform: actions.thread),
+                perform: { actions.openReactions?() }))
+        if !isThread {
+            commands.append(MessageMenuCommand(id: "thread", title: "Reply in thread", perform: actions.thread))
+        }
+        commands += [
             MessageMenuCommand(id: "reply", title: "Reply", perform: actions.reply),
             MessageMenuCommand(
                 id: "save", title: row.saved ? "Remove from Later" : "Save for later", perform: actions.save),
