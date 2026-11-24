@@ -329,12 +329,12 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     // With one other person, the header already says who wrote what isn't yours.
     val named = !room.direct || room.memberCount > 2
     @Composable
-    fun messageRow(row: ConversationMessage, last: Boolean, lifted: Boolean = false) {
+    fun messageRow(row: ConversationMessage, last: Boolean, afterAttachment: Boolean = false, lifted: Boolean = false) {
         val rowNames = if (row.reactions.isNotEmpty() || row.runs.any { it.mention != null }) state.names else emptyMap()
-        LiveMessageRow(row, last, named,
+        LiveMessageRow(row, last, afterAttachment, named,
             state.ownUserId, rowNames, actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null },
             onOpenReplies.takeIf { threadRoot == null }, onOpenMessage, loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
-            loadThreadOrigin, actions.onQuote, lifted) { y -> menu = Pressed(row, last, y) }
+            loadThreadOrigin, actions.onQuote, lifted) { y -> menu = Pressed(row, last, afterAttachment, y) }
     }
     var origin by remember { mutableFloatStateOf(0f) }
     Box(Modifier.fillMaxSize().onGloballyPositioned { origin = it.positionInWindow().y }) {
@@ -395,10 +395,12 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                             val first = line != null && row.eventId == line
                             if (first) NewLine()
                             // The newer row, below; a run of one sender's bubbles shows their picture by its last.
+                            val prev = rows.getOrNull(rows.lastIndex - index - 1) as? ConversationMessage
                             val next = rows.getOrNull(rows.size - index) as? ConversationMessage
                             val last = next == null || !next.grouped || restarts(next)
                             val root = threadRoot != null && row.eventId == threadRoot
-                            messageRow(if (root || restarts(row)) row.copy(grouped = false) else row, root || last)
+                            val shownRow = if (root || restarts(row)) row.copy(grouped = false) else row
+                            messageRow(shownRow, root || last, afterAttachment = shownRow.grouped && prev?.attachment != null)
                             if (root) state.replies?.let { RepliesBar(it) }
                         }
                     }
@@ -443,7 +445,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         Box(Modifier.fillMaxWidth().onSizeChanged { height = it.height }.graphicsLayer {
             val from = pressed.y - origin
             translationY = from + (top - gap - height - origin - from) * focus.value
-        }.clearAndSetSemantics {}) { messageRow(pressed.message, pressed.last, lifted = true) }
+        }.clearAndSetSemantics {}) { messageRow(pressed.message, pressed.last, pressed.afterAttachment, lifted = true) }
     }
     }
 }
@@ -453,7 +455,7 @@ private fun LazyListState.atBottom() =
     firstVisibleItemScrollOffset == 0 && (firstVisibleItemIndex == 0 || firstVisibleItemIndex == 1)
 
 /** A long-pressed message, as its row showed it, and where its top was in the window. */
-private data class Pressed(val message: ConversationMessage, val last: Boolean, val y: Float)
+private data class Pressed(val message: ConversationMessage, val last: Boolean, val afterAttachment: Boolean, val y: Float)
 
 /** The glass header over a conversation: back, who or what it is, and who's typing or how many are in it. */
 @Composable
@@ -619,7 +621,7 @@ internal fun timeLabel(timestamp: Long): String = DateFormat.getTimeInstance(Dat
  * in their color, atop the first; yours on the right in the accent. The time sits inside, after the last line when it fits.
  */
 @Composable
-private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, named: Boolean, me: String?, names: Map<String, String>, onReact: ((ConversationMessage, String) -> Unit)?,
+private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, afterAttachment: Boolean, named: Boolean, me: String?, names: Map<String, String>, onReact: ((ConversationMessage, String) -> Unit)?,
     onShowReactions: (ConversationMessage) -> Unit, onOpenThread: ((String) -> Unit)?, onOpenReplies: ((String, Int) -> Unit)?,
     onOpenReply: (String) -> Unit,
     loadPicture: PictureLoader, videos: VideoPlayback, opening: Boolean, onOpenFile: (ConversationMessage) -> Unit, onView: (tile: Pair<Int, Int>) -> Unit,
@@ -672,7 +674,11 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, nam
             detectTapGestures(onLongPress = { haptics.performHapticFeedback(HapticFeedbackType.LongPress); menu() })
         }
             .semantics(mergeDescendants = true) { onLongClick("Message actions") { menu(); true } })
-        .padding(top = if (message.grouped) UiMetrics.Hairline * 4 else UiMetrics.GapSmall)
+        .padding(top = when {
+            !message.grouped -> UiMetrics.BubbleSenderGap
+            afterAttachment -> UiMetrics.BubbleAfterAttachmentGap
+            else -> UiMetrics.BubbleGroupedGap
+        })
         .layout { measurable, constraints ->
             val gutter = if (own || !named) (constraints.maxWidth * UiMetrics.BubbleGutter).roundToInt()
             else lerp(UiMetrics.IncomingGutterNarrow, UiMetrics.IncomingGutterWide,

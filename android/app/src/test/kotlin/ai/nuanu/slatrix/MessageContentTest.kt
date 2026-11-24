@@ -356,6 +356,28 @@ class MessageContentTest {
         compose.onNodeWithText("Couldn’t download Q3 report.pdf.").assertIsDisplayed()
     }
 
+    @Test fun groupedNewSenderAndPostAttachmentBubblesKeepDistinctVerticalRhythm() {
+        val report = MessageAttachment(MessageAttachment.Kind.File, "Q3 report.pdf", "application/pdf", 250_000, null, null, source)
+        val first = message("First line")
+        val groupedText = message("Second line").copy(grouped = true)
+        val file = message("Q3 report.pdf").copy(kind = MessageKind.Attachment, attachment = report, grouped = true)
+        val afterFile = message("Following file").copy(grouped = true)
+        val otherSender = ConversationMessage("other", "\$other", "@sam:example.org", "Sam", "New speaker", null,
+            1_700_000_060_000L, MessageKind.Text, MessageSendState.Sent, false, "S", 1, grouped = false)
+        show(first, groupedText, file, afterFile, otherSender)
+        val density = compose.density.density
+        // Each bubble's first text line sits BubbleInsetVertical (6dp) below its top edge; the merged row starts above top padding.
+        fun textTop(text: String) = compose.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot.top
+        fun rowTop(text: String) = compose.onNodeWithText(text).fetchSemanticsNode().boundsInRoot.top
+        val bubbleInset = 6f * density
+        val groupedGap = textTop("Second line") - rowTop("Second line") - bubbleInset
+        val afterFileGap = textTop("Following file") - rowTop("Following file") - bubbleInset
+        val newSenderGap = textTop("Sam") - rowTop("New speaker") - bubbleInset
+        assertEquals("Grouped bubbles sit 3dp apart", 3f * density, groupedGap, 1.5f)
+        assertEquals("Grouped bubble after a file sits 6dp below it", 6f * density, afterFileGap, 1.5f)
+        assertEquals("New sender sits 12dp below the previous bubble", 12f * density, newSenderGap, 1.5f)
+    }
+
     // capability: message.deleted
     @Test fun aDeletedMessageReadsAsSlacksInItalics() {
         show(message("This message was deleted").copy(kind = MessageKind.Deleted))

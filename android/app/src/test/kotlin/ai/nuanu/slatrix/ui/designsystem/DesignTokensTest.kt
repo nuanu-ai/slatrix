@@ -25,6 +25,15 @@ class DesignTokensTest {
         assertEquals(android["radius"].asJsonObject.entrySet().associate { it.key to it.value.asInt }, DesignTokens.radii)
     }
 
+    @Test fun `incoming bubbles are borderless and wallpaper doodles stay visible yet calm`() {
+        val light = DesignTokens.colors(false)
+        val dark = DesignTokens.colors(true)
+        assertEquals(0f, light.getValue("bubbleEdge").alpha, 0.0001f)
+        assertEquals(0f, dark.getValue("bubbleEdge").alpha, 0.0001f)
+        assertEquals(Color(0xff1a64d6).copy(alpha = 0.07f).toArgb(), light.getValue("wallpaperDoodle").toArgb())
+        assertEquals(Color(0xffffffff).copy(alpha = 0.045f).toArgb(), dark.getValue("wallpaperDoodle").toArgb())
+    }
+
     @Test fun `in dark theirs stand off every stop of the wallpaper`() {
         val colors = DesignTokens.colors(true)
         for (stop in listOf("wallpaper")) {

@@ -64,7 +64,7 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
     /** The chat wallpaper: a calm cool gray under faint doodles of the app's own icons. */
     val wallpaper = roles.getValue("wallpaper")
     val wallpaperDoodle = roles.getValue("wallpaperDoodle")
-    /** Others' bubbles, lifted off the wallpaper by a hairline [bubbleEdge]; your own are [accentFill] under [onAccent]. */
+    /** Others' bubbles on the wallpaper, borderless ([bubbleEdge] is transparent); your own are [accentFill] under [onAccent]. */
     val bubbleIn = roles.getValue("bubbleIn")
     val bubbleEdge = roles.getValue("bubbleEdge")
     val bubbleOutMeta = roles.getValue("bubbleOutMeta")
@@ -126,7 +126,7 @@ private fun wallpaperRoles(dark: Boolean, scheme: ColorScheme): Map<String, Colo
         "accent" to scheme.primary, "accentTint" to scheme.primary.copy(alpha = 0.12f), "accentFill" to scheme.primary,
         "onAccent" to scheme.onPrimary, "mention" to scheme.primary, "mentionText" to scheme.primary,
         "mentionFill" to scheme.primary.copy(alpha = 0.12f), "wallpaper" to lerp(scheme.surfaceContainer, scheme.primary, WashAccent),
-        "wallpaperDoodle" to if (dark) scheme.onSurface.copy(alpha = 0.06f) else scheme.primary.copy(alpha = 0.1f),
+        "wallpaperDoodle" to if (dark) scheme.onSurface.copy(alpha = 0.045f) else scheme.primary.copy(alpha = 0.07f),
         "bubbleOutMeta" to scheme.onPrimary.copy(alpha = 0.8f), "bubbleOutRule" to scheme.onPrimary.copy(alpha = 0.22f),
         "bubbleIn" to if (dark) scheme.surfaceContainerHigh else scheme.surfaceContainerLowest,
         "reaction" to scheme.surfaceContainerHighest,
