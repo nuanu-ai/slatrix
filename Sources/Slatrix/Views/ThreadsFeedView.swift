@@ -67,6 +67,7 @@ struct ThreadsFeedView: View {
                         .frame(maxWidth: .infinity)
                 }
             }
+            Divider().overlay(colors.border)
             coverage
         }.background(colors.canvas)
             .task(id: workspaceID) { await matrix.openThreads(workspaceID: workspaceID) }
@@ -203,7 +204,6 @@ private struct ThreadFeedRow: View {
                         item.replyCount > 0
                             ? "\(item.replyCount) \(item.replyCount == 1 ? "reply" : "replies")" : "Open thread"
                     ).font(m.font(.subheadline, .semibold))
-                    Spacer()
                     Image(systemName: "chevron.right").font(m.font(.subheadline, .semibold))
                 }.foregroundStyle(colors.accent).padding(.leading, m.avatar + m.sp12)
                 if failed {

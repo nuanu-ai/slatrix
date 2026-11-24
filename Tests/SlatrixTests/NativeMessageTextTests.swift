@@ -203,8 +203,54 @@ struct NativeMessageTextTests {
             }
             return secondLine("One\n\nTwo") - secondLine("One\nTwo")
         }
-        #expect((4...10).contains(gap()))
+        #expect((6...10).contains(gap()))
         #expect(gap(MessageBlock(code: true)) > 14)
+    }
+
+    @Test("Normal paragraphs use paragraph spacing and pushOut line breaking; code blocks keep tight default breaks")
+    func paragraphRhythmAndLineBreakStrategy() throws {
+        let text = NativeSelectableMessageText.attributed(
+            [
+                MessageBodyRun(text: "First paragraph\nSecond paragraph\n"),
+                MessageBodyRun(text: "let a = 1\nlet b = 2\n", style: .code, block: MessageBlock(code: true)),
+                MessageBodyRun(text: "Trailing prose"),
+            ], fontSize: 14, textColor: .labelColor, linkColor: .systemBlue)
+        let normal = try #require(style(text, at: 0))
+        #expect(normal.paragraphSpacing > 2 && normal.paragraphSpacing <= 5)
+        #expect(normal.lineBreakStrategy == .pushOut)
+
+        let codeStart = (text.string as NSString).range(of: "let a = 1").location
+        let codeFirst = try #require(style(text, at: codeStart))
+        #expect(codeFirst.paragraphSpacing == 0)
+        #expect(codeFirst.lineBreakStrategy == [])
+    }
+
+    @Test("A single-line quote draws its bar across the full line height down past the baseline")
+    func singleLineQuoteBarCoversFullLineHeight() throws {
+        let storage = laidOut([MessageBodyRun(text: "Quoted line", block: MessageBlock(quote: 1))], width: 300)
+        let layout = try #require(storage.layoutManagers.first as? PillLayoutManager)
+        let size = NSSize(width: 300, height: 40)
+        let rep = try #require(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: Int(size.width), pixelsHigh: Int(size.height), bitsPerSample: 8,
+                samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0,
+                bitsPerPixel: 0))
+        let context = try #require(NSGraphicsContext(bitmapImageRep: rep))
+        context.cgContext.translateBy(x: 0, y: size.height)
+        context.cgContext.scaleBy(x: 1, y: -1)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context.cgContext, flipped: true)
+        layout.drawBlocks(forGlyphRange: NSRange(location: 0, length: layout.numberOfGlyphs), at: .zero)
+        NSGraphicsContext.restoreGraphicsState()
+        let barColumn = Int(MessageBlocks.barWidth(15) / 2)
+        let paintedY = (0..<Int(size.height)).filter { y in
+            (rep.colorAt(x: barColumn, y: y)?.alphaComponent ?? 0) > 0.05
+        }
+        let barHeight = (paintedY.last ?? 0) - (paintedY.first ?? 0) + 1
+        let font = try #require(storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
+        #expect(
+            CGFloat(barHeight) >= font.ascender,
+            "Quote bar height (\(barHeight) px) ended above the baseline (ascender \(font.ascender))")
     }
 
     @Test("A quote indents past its bar, and the text after it does not")

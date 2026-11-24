@@ -349,15 +349,23 @@ struct TimelineView: View {
         let collapsed = matrix.collapsedMedia
         let seen = matrix.user.map { SeenPolicy.headers(rows, me: $0.id) } ?? [:]
         var sawFailureInPane = false
+        var previousHadAttachment = false
         for row in rows {
             switch row.kind {
-            case .day(let label): entries.append(TimelineEntry(id: row.id, kind: .day(label)))
-            case .unread: entries.append(TimelineEntry(id: row.id, kind: .unread))
+            case .day(let label):
+                entries.append(TimelineEntry(id: row.id, kind: .day(label)))
+                previousHadAttachment = false
+            case .unread:
+                entries.append(TimelineEntry(id: row.id, kind: .unread))
+                previousHadAttachment = false
             case .replies(let count):
                 entries.append(TimelineEntry(id: row.id, kind: .replies(count)))
                 olderAt = entries.count
+                previousHadAttachment = false
             case .message(let message, let grouped, let time):
                 if message.eventID == threadRootID { olderAt = entries.count + 1 }
+                let followsAttachment = grouped && previousHadAttachment
+                previousHadAttachment = !message.isRedacted && message.attachment != nil
                 let key = SendQueueMessageKey(roomID: message.roomID, messageID: message.eventID)
                 let failure = failures.isEmpty ? nil : failures[key]
                 let own = message.senderID == matrix.user?.id
@@ -373,7 +381,7 @@ struct TimelineView: View {
                         id: row.id,
                         kind: .message(
                             TimelineMessageEntry(
-                                message: message, grouped: grouped, time: time,
+                                message: message, grouped: grouped, followsAttachment: followsAttachment, time: time,
                                 saved: !savedIDs.isEmpty
                                     && savedIDs.contains(
                                         SavedMessageReference(roomID: message.roomID, eventID: message.eventID).id),
@@ -644,6 +652,8 @@ struct MessageRow: View {
     @EnvironmentObject var appearance: AppearanceStore
     let message: ChatMessage
     var grouped = false
+    /// Immediately follows an attachment row from the same sender, so it needs structural breathing space above it.
+    var followsAttachment = false
     var isThread = false
     var own = false
     var highlighted = false
@@ -687,17 +697,15 @@ struct MessageRow: View {
     }
     var body: some View {
         layout
-            // Inset and rounded, as Mail marks the row under the pointer.
-            .background {
-                RoundedRectangle(cornerRadius: m.radius).fill(hovered ? colors.hover : .clear)
-                    .padding(.horizontal, isThread ? m.sp8 : m.sp12)
-            }
             .conversationRow(m, isThread: isThread)
             .background {
                 // A cell shows another message after a scroll; that one's highlight starts afresh, never fading in.
                 colors.highlight.opacity(highlighted ? 1 : 0)
                     .animation(highlighted ? nil : Motion.highlight, value: highlighted).id(message.id)
             }
+            // Full-bleed opaque hover band across the pane so cards never sit inside a nested box and wallpaper never
+            // bleeds through.
+            .background(hovered ? colors.rowHover : .clear)
             .contentShape(Rectangle())
     }
     private var layout: some View {
@@ -713,15 +721,14 @@ struct MessageRow: View {
             }
             content(gutter: gutter)
         }.padding(.horizontal, m.conversationInset(thread: isThread))
-            // 12 above a sender and 2 around a message under them, counted from 20 pt lines: a one-line row has none of
-            // that leading of its own, so it comes on top of them. Two grouped rows share both their 2s, so a sender's
-            // first gap is the tightest.
-            .padding(.top, Self.topInset(m, grouped: grouped, compact: compact))
+            .padding(.top, Self.topInset(m, grouped: grouped, compact: compact, followsAttachment: followsAttachment))
             .padding(.bottom, compact ? m.sp2 : grouped ? m.sp4 : m.sp2)
     }
     /// The space above a row's first line, which the hover toolbar may hang into.
-    static func topInset(_ m: Metrics, grouped: Bool, compact: Bool) -> CGFloat {
-        compact ? (grouped ? 0 : m.sp2) : grouped ? m(3) : m.sp12
+    static func topInset(_ m: Metrics, grouped: Bool, compact: Bool, followsAttachment: Bool = false) -> CGFloat {
+        if compact { return grouped ? 0 : m.sp2 }
+        if !grouped { return m.sp12 }
+        return followsAttachment ? m(10) : m(3)
     }
     @ViewBuilder private func content(gutter: CGFloat) -> some View {
         if compact {
@@ -1002,39 +1009,48 @@ private struct WrappingRow: Layout {
     }
 }
 
-/// The replies bar: who replied last, how many replies and when. Hovering fills it and offers the thread, at the same
-/// height.
-private struct ThreadRepliesBar: View {
-    private static let maxWidth: CGFloat = 600
+/// The replies bar: who replied last, how many replies and when. Hovering fills it with an opaque elevated surface
+/// and offers the thread, at the same height, fitting its content without stretching across the window.
+struct ThreadRepliesBar: View {
+    static let maxWidth: CGFloat = 340
     let count: Int
     let lastReply: ThreadReply?
     let avatar: AvatarView?
     let prepare: () -> Void
     let action: () -> Void
-    @State private var hovering = false
+    @State var hovering = false
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
     var body: some View {
         let colors = appearance.colors
         let shape = RoundedRectangle(cornerRadius: m.radius)
         Button(action: action) {
-            HStack(spacing: m.sp8) {
-                if let avatar { avatar }
-                Text("\(count) \(count == 1 ? "reply" : "replies")").font(m.font(.body, .semibold))
-                    .foregroundStyle(colors.accent)
-                if hovering {
-                    Text("View thread").font(m.font(.body)).foregroundStyle(colors.textSecondary)
-                    Spacer(minLength: m.sp8)
-                    Image(systemName: "chevron.right").font(m.font(.subheadline, .semibold))
-                        .foregroundStyle(colors.textSecondary)
-                } else if let lastReply {
-                    Text(ThreadReply.lastReplyText(lastReply.timestamp, now: Date())).font(m.font(.body))
-                        .foregroundStyle(colors.textSecondary)
+            FitWidthLayout(max: m(Self.maxWidth)) {
+                HStack(spacing: m.sp8) {
+                    if let avatar { avatar }
+                    Text("\(count) \(count == 1 ? "reply" : "replies")").font(m.font(.body, .semibold))
+                        .foregroundStyle(colors.accent)
+                    // Keep both labels in one ZStack so hovering near the trailing edge never shrinks the hit box under
+                    // the pointer.
+                    ZStack(alignment: .leading) {
+                        if let lastReply {
+                            Text(ThreadReply.lastReplyText(lastReply.timestamp, now: Date())).font(m.font(.body))
+                                .foregroundStyle(colors.textSecondary)
+                                .opacity(hovering ? 0 : 1)
+                        }
+                        HStack(spacing: m.sp8) {
+                            Text("View thread").font(m.font(.body)).foregroundStyle(colors.textSecondary)
+                            Image(systemName: "chevron.right").font(m.font(.subheadline, .semibold))
+                                .foregroundStyle(colors.textSecondary)
+                        }
+                        .opacity(hovering ? 1 : 0)
+                    }
                 }
-            }.lineLimit(1).padding(.horizontal, m.sp4).frame(
-                maxWidth: m(Self.maxWidth), minHeight: m.sp24, alignment: .leading
-            )
-            .background(hovering ? colors.hover : .clear, in: shape)
+                .lineLimit(1).padding(.horizontal, m.sp8)
+                .frame(minHeight: m.sp24, alignment: .leading)
+                .background(hovering ? colors.overlay : .clear, in: shape)
+                .overlay(shape.strokeBorder(hovering ? colors.border : .clear, lineWidth: 1))
+            }
         }.buttonStyle(.row)
             .onHover {
                 hovering = $0
@@ -1042,12 +1058,12 @@ private struct ThreadRepliesBar: View {
             }
             .accessibilityLabel("\(count) replies, view thread")
             // The face lines up with the text above; the hover box reaches past it.
-            .padding(.leading, -m.sp4)
+            .padding(.leading, -m.sp8)
     }
 }
 
-/// Slack's hover toolbar: three one-click reactions, then add reaction, reply in thread, forward, save and more.
-/// The timeline floats one over the hovered row's top edge, so no row draws it or changes height for it.
+/// Slack's hover toolbar: three one-click reactions, a hairline divider, then add reaction, reply in thread, save and
+/// more. The timeline floats one over the hovered row's top edge, so no row draws it or changes height for it.
 struct MessageToolbar: View {
     static let button: CGFloat = 24
     let quick: [String]
@@ -1061,11 +1077,11 @@ struct MessageToolbar: View {
 
     var body: some View {
         let colors = appearance.colors
-        let shape = RoundedRectangle(cornerRadius: m.radiusLarge)
+        let shape = RoundedRectangle(cornerRadius: m.radius)
         HStack(spacing: 0) {
             if !pending {
                 // Left out, not dimmed, while the message can't take a reaction: a faded emoji looks broken.
-                if let react = actions.react {
+                if let react = actions.react, !quick.isEmpty {
                     ForEach(quick, id: \.self) { emoji in
                         Button {
                             react(emoji)
@@ -1074,6 +1090,9 @@ struct MessageToolbar: View {
                                 .frame(width: m(Self.button), height: m(Self.button))
                         }.buttonStyle(.icon).help("React with \(EmojiCatalog.shortcode(for: emoji))")
                     }
+                    Rectangle().fill(colors.border)
+                        .frame(width: 1, height: m.sp16)
+                        .padding(.horizontal, m.sp4)
                 }
                 if let openReactions = actions.openReactions {
                     button("face.smiling", "Find another reaction", action: openReactions)
@@ -1092,7 +1111,7 @@ struct MessageToolbar: View {
                 .accessibilityLabel("More actions")
         }
         .foregroundStyle(colors.textSecondary).padding(m.sp2)
-        .background(colors.overlay, in: shape).elevation(.e1, cornerRadius: m.radiusLarge)
+        .background(colors.overlay, in: shape).elevation(.e1, cornerRadius: m.radius)
     }
 
     private func button(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {

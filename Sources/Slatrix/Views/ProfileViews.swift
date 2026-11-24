@@ -59,6 +59,7 @@ struct ProfilePane: View {
                     .padding(m.sp16)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(colors.raised, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+                    .overlay(RoundedRectangle(cornerRadius: m.radiusLarge).strokeBorder(colors.border))
                 }.padding(.horizontal, m.sp16).padding(.vertical, m.sp24)
             }
         }

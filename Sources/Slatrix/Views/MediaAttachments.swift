@@ -316,13 +316,13 @@ private struct MediaActionsToolbar: View {
         HStack(spacing: 0) {
             if let fullScreen {
                 IconButton(
-                    symbol: "arrow.up.left.and.arrow.down.right", label: "Full screen", role: .reading, side: side,
+                    symbol: "arrow.up.left.and.arrow.down.right", label: "Full screen", role: .body, side: side,
                     action: fullScreen)
             }
             if downloading {
                 DelayedProgress().frame(width: m(side), height: m(side))
             } else {
-                IconButton(symbol: "arrow.down.to.line", label: "Download", role: .reading, side: side) {
+                IconButton(symbol: "arrow.down.to.line", label: "Download", role: .body, side: side) {
                     downloading = true
                     Task {
                         await AttachmentFiles.shared.download(message, matrix: matrix)
@@ -332,14 +332,14 @@ private struct MediaActionsToolbar: View {
             }
             if let forward = actions.forward {
                 IconButton(
-                    symbol: "arrowshape.turn.up.right", label: "Forward", role: .reading, side: side, action: forward)
+                    symbol: "arrowshape.turn.up.right", label: "Forward", role: .body, side: side, action: forward)
             }
             Menu {
                 AttachmentMenuItems(matrix: matrix, message: message, copyLink: actions.copyLink)
             } label: {
-                Image(systemName: "ellipsis").font(m.font(.reading)).frame(width: m(side), height: m(side))
+                Image(systemName: "ellipsis").font(m.font(.body)).frame(width: m(side), height: m(side))
             }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: m(side)).help("More actions")
-        }.padding(.horizontal, m.sp2).frame(height: m(side))
+        }.foregroundStyle(colors.textSecondary).padding(.horizontal, m.sp2).frame(height: m(side))
             .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radius))
             .elevation(.e1, cornerRadius: m.radius)
     }
@@ -350,8 +350,10 @@ struct AttachmentMenuItems: View {
     let matrix: MatrixService
     let message: ChatMessage
     let copyLink: (() -> Void)?
+    var forward: (() -> Void)? = nil
 
     var body: some View {
+        if let forward { Button("Forward…", action: forward) }
         if let copyLink { Button("Copy link", action: copyLink) }
         Button("Open in default app") { Task { await AttachmentFiles.shared.open(message, matrix: matrix) } }
         if AttachmentFiles.shared.saved[message.eventID] != nil {
@@ -360,55 +362,91 @@ struct AttachmentMenuItems: View {
     }
 }
 
-/// A file as a card: a colored type tile, its name, and "PDF · 2 MB". A click opens it in the viewer.
-private struct FileCard: View {
-    private static let maxWidth: CGFloat = 420
+/// A file as a compact card: a soft tinted type tile, subordinate filename and metadata, and quiet trailing download
+/// and menu actions on hover that never collide with the filename. A click opens it in the viewer.
+struct FileCard: View {
+    private enum Focus { case card, download, menu }
+    static let minWidth: CGFloat = 240
+    static let maxWidth: CGFloat = 348
+    static let iconSide: CGFloat = 36
+    private static let trailingReserve: CGFloat = 56
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
     let matrix: MatrixService
     let message: ChatMessage
     let attachment: MessageAttachment
-    let pendingSend: Bool
-    let actions: AttachmentActions
+    var pendingSend = false
+    var actions = AttachmentActions()
     @State private var hovering = false
     @State private var downloading = false
+    @FocusState private var focus: Focus?
 
     var body: some View {
         let colors = appearance.colors
         let shape = RoundedRectangle(cornerRadius: m.radiusLarge)
-        Button(action: actions.open) {
-            HStack(spacing: m.sp12) {
-                FileTypeIcon(kind: attachment.fileKind)
-                VStack(alignment: .leading, spacing: m.sp2) {
-                    FileNameText(attachment.name, role: .reading, semibold: true).foregroundStyle(colors.textPrimary)
-                    Text(caption).font(m.font(.body)).foregroundStyle(colors.textSecondary).lineLimit(1)
+        let showActions = hovering || downloading || focus != nil
+        FitWidthLayout(min: m(Self.minWidth), max: m(Self.maxWidth)) {
+            Button(action: actions.open) {
+                HStack(spacing: m.sp12) {
+                    FileTypeIcon(kind: attachment.fileKind, side: Self.iconSide, glyph: .body)
+                    VStack(alignment: .leading, spacing: m.sp2) {
+                        FileNameText(attachment.name, role: .body, weight: .medium).foregroundStyle(colors.textPrimary)
+                        Text(caption).font(m.font(.caption)).foregroundStyle(colors.textSecondary).lineLimit(1)
+                    }
                 }
-                Spacer(minLength: m.sp8)
+                .padding(.leading, m(10)).padding(.vertical, m(10))
+                .padding(.trailing, m(10) + m(Self.trailingReserve))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .opacity(pendingSend ? 0.5 : 1)
+                .background(colors.surfaceCard, in: shape)
+                .overlay(alignment: .bottom) {
+                    if pendingSend {
+                        PendingUploadProgressOverlay(
+                            store: matrix.uploadProgress, roomID: message.roomID, messageID: message.eventID)
+                    }
+                }
+                .clipShape(shape)
+                .overlay(shape.strokeBorder(hovering ? colors.borderStrong : colors.border))
             }
-            .padding(m.sp12).frame(maxWidth: m(Self.maxWidth), alignment: .leading)
-            .opacity(pendingSend ? 0.5 : 1)
-            .background(colors.raised, in: shape)
-            .overlay(alignment: .bottom) {
-                if pendingSend {
-                    PendingUploadProgressOverlay(
-                        store: matrix.uploadProgress, roomID: message.roomID, messageID: message.eventID)
+            .buttonStyle(.row).focused($focus, equals: .card).help("Open \(attachment.name)")
+            .overlay(alignment: .trailing) {
+                if showActions {
+                    trailingActions.padding(.trailing, m.sp8).transition(.opacity)
                 }
             }
-            .clipShape(shape)
-            .overlay(shape.strokeBorder(colors.border))
+            .animation(Motion.overlay, value: showActions)
+            .onHover { hovering = $0 }
         }
-        .buttonStyle(.row).help("Open \(attachment.name)")
-        .overlay(alignment: .topTrailing) {
-            if hovering || downloading {
-                MediaActionsToolbar(matrix: matrix, message: message, actions: actions, downloading: $downloading)
-                    .padding(m.sp8)
-            }
-        }
-        .onHover { hovering = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityAction(named: "Download") {
             Task { await AttachmentFiles.shared.download(message, matrix: matrix) }
         }
+    }
+
+    private var trailingActions: some View {
+        let colors = appearance.colors
+        let side = MessageToolbar.button
+        return HStack(spacing: 0) {
+            if downloading {
+                DelayedProgress().frame(width: m(side), height: m(side))
+            } else {
+                IconButton(symbol: "arrow.down.to.line", label: "Download", role: .body, side: side) {
+                    downloading = true
+                    Task {
+                        await AttachmentFiles.shared.download(message, matrix: matrix)
+                        downloading = false
+                    }
+                }
+                .focused($focus, equals: .download)
+            }
+            Menu {
+                AttachmentMenuItems(
+                    matrix: matrix, message: message, copyLink: actions.copyLink, forward: actions.forward)
+            } label: {
+                Image(systemName: "ellipsis").font(m.font(.body)).frame(width: m(side), height: m(side))
+            }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: m(side)).help("More actions")
+                .focused($focus, equals: .menu)
+        }.foregroundStyle(colors.textSecondary)
     }
 
     private var caption: String {
@@ -454,7 +492,7 @@ private struct UploadProgressBar: View {
     }
 }
 
-/// A file type as a colored tile with a white glyph.
+/// A file type as a soft tinted tile with a subtle edge and crisp vector symbol.
 struct FileTypeIcon: View {
     let kind: FileKind
     /// The tile's side at 100% zoom.
@@ -465,8 +503,12 @@ struct FileTypeIcon: View {
 
     var body: some View {
         let colors = appearance.colors
-        RoundedRectangle(cornerRadius: m.radius).fill(colors.file(kind))
-            .overlay(Image(systemName: kind.symbol).font(m.font(glyph, .semibold)).foregroundStyle(colors.onMedia))
+        let shape = RoundedRectangle(cornerRadius: m.radius)
+        shape.fill(colors.fileFill(kind))
+            .overlay(shape.strokeBorder(colors.fileEdge(kind), lineWidth: 1))
+            .overlay(
+                Image(systemName: kind.symbol).font(m.font(glyph, .medium)).foregroundStyle(colors.fileGlyph(kind))
+            )
             .frame(width: m(side), height: m(side)).accessibilityHidden(true)
     }
 }

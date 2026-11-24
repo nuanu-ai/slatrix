@@ -115,6 +115,7 @@ struct SharedFilesView: View {
                     }.padding(.horizontal, inset - m.sp12).padding(.vertical, m.sp8)
                 }
                 if service.unavailableEncryptedCount > 0 {
+                    Divider().overlay(colors.border)
                     HStack {
                         Label("\(service.unavailableEncryptedCount) locked", systemImage: "lock")
                         Spacer(minLength: 0)

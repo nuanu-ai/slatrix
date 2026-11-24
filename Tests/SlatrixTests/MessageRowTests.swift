@@ -287,4 +287,124 @@ struct MessageRowTests {
         let bookmarked = height(saved: true)
         #expect(abs(unsaved - bookmarked) < 0.5, "Compact bookmark changed row height: \(unsaved) vs \(bookmarked)")
     }
+
+    @Test("A grouped message immediately after an attachment gets structural breathing room above it")
+    func groupedRowAfterAttachmentHasBreathingRoom() {
+        let saved = UserDefaults.standard.object(forKey: "appearance.density")
+        defer { UserDefaults.standard.set(saved, forKey: "appearance.density") }
+        let appearance = AppearanceStore()
+        appearance.density = .comfortable
+        let regularGrouped = MessageRow.topInset(m, grouped: true, compact: false, followsAttachment: false)
+        let afterAttachment = MessageRow.topInset(m, grouped: true, compact: false, followsAttachment: true)
+        let newSender = MessageRow.topInset(m, grouped: false, compact: false, followsAttachment: false)
+        #expect(afterAttachment > regularGrouped + 4)
+        #expect(afterAttachment <= newSender)
+
+        let groupedHeight = NSHostingView(
+            rootView: MessageRow(message: message([]), grouped: true, followsAttachment: false)
+                .frame(width: 500).environmentObject(appearance).environment(\.metrics, m)
+        ).fittingSize.height
+        let afterAttachmentHeight = NSHostingView(
+            rootView: MessageRow(message: message([]), grouped: true, followsAttachment: true)
+                .frame(width: 500).environmentObject(appearance).environment(\.metrics, m)
+        ).fittingSize.height
+        #expect(afterAttachmentHeight >= groupedHeight + 6)
+    }
+
+    @Test("FileCard hugs short filenames at minWidth, caps long filenames at maxWidth, and fits narrow panes")
+    func fileCardCompactWidthBounds() {
+        let matrix = MatrixService.scratch()
+        let appearance = AppearanceStore()
+        func cardWidth(name: String, offered: CGFloat) -> CGFloat {
+            let attachment = MessageAttachment(
+                name: name, url: "mxc://example.org/\(name)", mimeType: "text/plain", size: 1_024)
+            let msg = ChatMessage(
+                id: "$file-\(name)", roomID: "!room:example.org", senderID: "@a:example.org", senderName: "Anna",
+                body: name, timestamp: Date(timeIntervalSince1970: 1_800_000_000), kind: "m.file",
+                attachment: attachment)
+            let host = NSHostingController(
+                rootView: FileCard(matrix: matrix, message: msg, attachment: attachment)
+                    .environmentObject(appearance).environment(\.metrics, m))
+            return host.sizeThatFits(in: CGSize(width: offered, height: 200)).width
+        }
+        let short = cardWidth(name: "a.txt", offered: 680)
+        let long = cardWidth(
+            name: "Q4-2026-Comprehensive-Architecture-Design-Specification-Final-v12.txt", offered: 680)
+        let narrow = cardWidth(name: "a.txt", offered: 200)
+        #expect(abs(short - FileCard.minWidth) < 1, "Short file card should hug minWidth, got \(short)")
+        #expect(short < FileCard.maxWidth - 60)
+        #expect(abs(long - FileCard.maxWidth) < 1, "Long file card should cap at maxWidth, got \(long)")
+        #expect(narrow <= 200.5, "FileCard must clamp inside narrow panes, got \(narrow)")
+    }
+
+    @Test("ThreadRepliesBar fits its content without stretching across wide panes and keeps constant height on hover")
+    func threadRepliesBarCompactAndStableHeight() {
+        let appearance = AppearanceStore()
+        let reply = ThreadReply(
+            senderID: "@bo:example.org", senderName: "Bo", timestamp: Date(timeIntervalSince1970: 1_800_000_000))
+        func size(hovering: Bool, offered: CGFloat) -> CGSize {
+            let host = NSHostingController(
+                rootView: ThreadRepliesBar(
+                    count: 3, lastReply: reply, avatar: AvatarView(name: "Bo", size: m.avatarSmall),
+                    prepare: {}, action: {}, hovering: hovering
+                ).environmentObject(appearance).environment(\.metrics, m))
+            return host.sizeThatFits(in: CGSize(width: offered, height: 100))
+        }
+        let rest = size(hovering: false, offered: 700)
+        let hovered = size(hovering: true, offered: 700)
+        #expect(rest.width <= ThreadRepliesBar.maxWidth + 1)
+        #expect(hovered.width <= ThreadRepliesBar.maxWidth + 1)
+        #expect(abs(rest.width - hovered.width) < 0.5, "Hovering must not shrink the hit area under the pointer")
+        #expect(abs(rest.height - hovered.height) < 0.5)
+    }
+
+    @Test("Hovered MessageRow paints full-bleed opaque rowHover so wallpaper behind it never bleeds through")
+    func hoveredMessageRowIsOpaqueFullBleed() throws {
+        let savedMode = UserDefaults.standard.object(forKey: "appearance.mode")
+        let savedTheme = UserDefaults.standard.object(forKey: "appearance.theme")
+        defer {
+            UserDefaults.standard.set(savedMode, forKey: "appearance.mode")
+            UserDefaults.standard.set(savedTheme, forKey: "appearance.theme")
+        }
+        let appearance = AppearanceStore()
+        appearance.mode = .dark
+        appearance.theme = .aubergine
+        appearance.systemIsDark = true
+        let width: CGFloat = 500
+        func sample(hovered: Bool, backdrop: NSColor, x: CGFloat) throws -> NSColor {
+            let hosting = NSHostingView(
+                rootView: ZStack {
+                    Color(nsColor: backdrop)
+                    MessageRow(message: message([]), hovered: hovered)
+                        .environmentObject(appearance).environment(\.metrics, m)
+                }.frame(width: width))
+            let height = ceil(hosting.fittingSize.height)
+            hosting.frame = NSRect(x: 0, y: 0, width: width, height: height)
+            let window = offscreenWindow(NSSize(width: width, height: height))
+            defer {
+                window.contentView = nil
+                window.close()
+            }
+            window.contentView = hosting
+            hosting.layoutSubtreeIfNeeded()
+            let rep = try #require(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
+            hosting.cacheDisplay(in: hosting.bounds, to: rep)
+            let scale = CGFloat(rep.pixelsWide) / hosting.bounds.width
+            return try #require(rep.colorAt(x: Int(x * scale), y: Int((height / 2) * scale))?.usingColorSpace(.sRGB))
+        }
+        // Check far-left (x = 2 pt) and far-right (x = width - 2 pt) edges: hovered pixels must be identical over
+        // red and blue backdrops (proving full-bleed coverage and 100% opacity), while unhovered lets the backdrop show.
+        for x in [CGFloat(2), width - 2] {
+            let overRed = try sample(hovered: true, backdrop: .systemRed, x: x)
+            let overBlue = try sample(hovered: true, backdrop: .systemBlue, x: x)
+            #expect(
+                abs(overRed.redComponent - overBlue.redComponent) < 0.005
+                    && abs(overRed.greenComponent - overBlue.greenComponent) < 0.005
+                    && abs(overRed.blueComponent - overBlue.blueComponent) < 0.005,
+                "Backdrop bled through hovered row at x=\(x): red=\(overRed) blue=\(overBlue)")
+        }
+        let restRed = try sample(hovered: false, backdrop: .systemRed, x: 2)
+        let restBlue = try sample(hovered: false, backdrop: .systemBlue, x: 2)
+        #expect(abs(restRed.redComponent - restBlue.redComponent) > 0.3)
+    }
 }

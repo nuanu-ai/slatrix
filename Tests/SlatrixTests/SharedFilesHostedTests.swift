@@ -65,18 +65,19 @@ struct SharedFilesHostedTests {
         #expect(await eventually { viewer.message?.id == "preview.video" })
     }
 
-    /// The first point, in window coordinates, drawn in a clear red; in the sample only a PDF's tile is.
+    /// The first point in the file list (below the filter/tab header), in window coordinates, drawn in a clear red;
+    /// in the sample only a PDF's tinted glyph is. Skipping the header avoids matching warm system accents on tabs.
     private func redPoint(in view: NSView) -> CGPoint? {
         view.layoutSubtreeIfNeeded()
         guard let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
         view.cacheDisplay(in: view.bounds, to: image)
         let scale = CGFloat(image.pixelsWide) / view.bounds.width
-        for y in stride(from: 0, to: image.pixelsHigh, by: 2) {
+        let startY = Int(100 * scale)
+        for y in stride(from: startY, to: image.pixelsHigh, by: 2) {
             for x in stride(from: 0, to: image.pixelsWide, by: 2) {
-                guard let pixel = image.colorAt(x: x, y: y) else { continue }
-                if pixel.redComponent - pixel.greenComponent > 0.4 && pixel.redComponent - pixel.blueComponent > 0.4 {
-                    // A few points in, past the tile's rounded corner.
-                    return CGPoint(x: CGFloat(x) / scale + 4, y: view.bounds.height - CGFloat(y) / scale - 4)
+                guard let pixel = image.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                if pixel.redComponent - pixel.greenComponent > 0.2 && pixel.redComponent - pixel.blueComponent > 0.2 {
+                    return CGPoint(x: CGFloat(x) / scale, y: view.bounds.height - CGFloat(y) / scale)
                 }
             }
         }

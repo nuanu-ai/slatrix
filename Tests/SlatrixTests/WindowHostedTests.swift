@@ -632,7 +632,7 @@ struct WindowHostedTests {
         #expect(abs(newest.convert(newest.bounds, to: nil).minY - before.minY) < 1)
     }
 
-    @Test("The composer keeps to the conversation's column, centered over the messages")
+    @Test("The composer spans the conversation pane between its edge insets and grows with the pane")
     func composerInColumn() async throws {
         let harness = Harness()
         defer { harness.close() }
@@ -643,14 +643,15 @@ struct WindowHostedTests {
             return (timeline.convert(timeline.bounds, to: nil), editor.convert(editor.bounds, to: nil))
         }
         let (pane, field) = try measured()
-        // The composer is 720 wide; its text field sits inside, between its buttons.
-        #expect(field.minX >= pane.midX - 360 && field.maxX <= pane.midX + 360, "\(field) in \(pane)")
-        // It stays over the middle of a wider pane.
+        // The composer spans the pane between its 20 pt edge insets; its text field sits inside, between its buttons.
+        #expect(field.minX > pane.minX + 20 && field.maxX < pane.maxX - 20, "\(field) in \(pane)")
+        // Widening the pane widens the composer by the same amount, keeping its leading edge fixed to the pane's inset.
         harness.window.setContentSize(NSSize(width: harness.window.frame.width + 300, height: 800))
         #expect(await harness.settle())
         let (widerPane, widerField) = try measured()
         #expect(widerPane.width > pane.width)
-        #expect(abs((widerField.minX - widerPane.midX) - (field.minX - pane.midX)) < 1)
+        #expect(abs((widerField.minX - widerPane.minX) - (field.minX - pane.minX)) < 1)
+        #expect(abs((widerField.width - field.width) - (widerPane.width - pane.width)) < 1)
     }
 
     @Test("The composer sits 12 pt above the window's edge, with air between it and the newest message")
@@ -799,8 +800,8 @@ struct WindowHostedTests {
             }
             let row = cell.convert(cell.bounds, to: nil)
             let point = NSPoint(
-                x: row.midX - min(row.width, m.conversationRow) / 2 + m.conversationInset(thread: false)
-                    + m.conversationText(thread: false) + 40, y: row.midY)
+                x: row.minX + m.conversationInset(thread: false) + m.conversationText(thread: false) + 40,
+                y: row.midY)
             var view = frame.hitTest(point)
             while let shown = view, !(shown is TimelineCell) { view = shown.superview }
             return view === cell ? point : nil

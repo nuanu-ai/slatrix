@@ -16,36 +16,97 @@ struct ThemeTests {
         let colors = AppColors(dark: dark, accent: AppColors.resolve(.systemBlue, dark: dark), theme: theme)
         // WCAG AA for text.
         let surfaces = [
-            colors.canvas, colors.sidebar, colors.overlay, colors.control,
-            over(colors.selection, colors.sidebar), over(colors.code, colors.canvas),
+            colors.canvas, colors.rowHover, colors.raised, colors.surfaceCard, colors.sidebar, colors.overlay,
+            colors.control, over(colors.selection, colors.sidebar), over(colors.code, colors.canvas),
         ]
         for surface in surfaces {
             #expect(contrast(colors.textPrimary, surface) >= 4.5)
             #expect(contrast(colors.textSecondary, surface) >= 4.5)
         }
-        for surface in [colors.canvas, colors.raised, colors.overlay, colors.control] {
+        for surface in [
+            colors.canvas, colors.rowHover, colors.raised, colors.surfaceCard, colors.overlay, colors.control,
+        ] {
             #expect(contrast(colors.textTertiary, surface) >= 4.5, "\(theme) dark=\(dark) textTertiary")
         }
         #expect(contrast(colors.onAccent, colors.accentFill) >= 4.5, "\(theme) dark=\(dark) onAccent/accentFill")
         #expect(
             contrast(colors.onAccent, colors.destructiveFill) >= 4.5, "\(theme) dark=\(dark) onAccent/destructiveFill")
-        for surface in [colors.canvas, colors.raised, colors.overlay] {
+        for surface in [colors.canvas, colors.rowHover, colors.raised, colors.surfaceCard, colors.overlay] {
             #expect(contrast(colors.destructive, surface) >= 4.5, "\(theme) dark=\(dark) destructive text")
         }
-        for surface in [colors.canvas, colors.raised] {
+        for surface in [colors.canvas, colors.rowHover, colors.raised, colors.surfaceCard] {
             #expect(contrast(colors.warning, surface) >= 4.5, "\(theme) dark=\(dark) warning")
             #expect(contrast(colors.success, surface) >= 4.5, "\(theme) dark=\(dark) success")
         }
         #expect(contrast(colors.accent, colors.canvas) >= 4.5)
         #expect(contrast(colors.mentionText, over(colors.mentionFill, colors.canvas)) >= 4.5)
-        // A mention of you, also on the message jumped to and under the pointer.
-        for row in [colors.canvas, over(colors.hover, over(colors.highlight, colors.canvas))] {
-            #expect(contrast(colors.mentionYouText, over(colors.mentionYouFill, row)) >= 4.5)
+        // Own mentions use warm amber so they stand apart from links and other mentions, readable even on highlighted rows.
+        let amberFill = NSColor(colors.mentionYouFill).usingColorSpace(.sRGB)!
+        #expect(
+            amberFill.redComponent > amberFill.greenComponent && amberFill.greenComponent > amberFill.blueComponent,
+            "\(theme) dark=\(dark) mentionYouFill must be warm amber")
+        for row in [
+            colors.canvas, colors.rowHover, over(colors.highlight, colors.rowHover),
+            over(colors.hover, over(colors.highlight, colors.canvas)),
+        ] {
+            #expect(
+                contrast(colors.mentionYouText, over(colors.mentionYouFill, row)) >= 4.5,
+                "\(theme) dark=\(dark) mentionYou contrast")
+        }
+        // Soft tinted file type tiles keep crisp icon contrast without screaming as solid blocks.
+        for kind in FileKind.allCases {
+            let tile = over(colors.fileFill(kind), colors.surfaceCard)
+            #expect(contrast(colors.fileGlyph(kind), tile) >= 3.0, "\(theme) dark=\(dark) fileGlyph \(kind)")
         }
         // Where a message crosses a doodle, and under the pointer too.
         let doodled = over(colors.wallpaperDoodle, colors.canvas)
         #expect(contrast(colors.textSecondary, over(colors.hover, doodled)) >= 4.5)
         #expect(contrast(colors.accent, doodled) >= 4.5)
+        if theme.framed {
+            let doodleAlpha = NSColor(colors.wallpaperDoodle).usingColorSpace(.sRGB)!.alphaComponent
+            #expect((0.02...0.03).contains(doodleAlpha), "\(theme) dark=\(dark) wallpaperDoodle alpha=\(doodleAlpha)")
+        }
+    }
+
+    // capability: app.themes
+    @Test(
+        "Surfaces form an opaque, monotonic luminance ladder so hovered rows never invert cards or bleed wallpaper",
+        arguments: ColorTheme.allCases, [false, true])
+    func surfaceLadder(theme: ColorTheme, dark: Bool) {
+        let colors = AppColors(dark: dark, accent: AppColors.resolve(.systemBlue, dark: dark), theme: theme)
+        // Opaque surfaces stop framed-theme wallpaper doodles from bleeding through hovered rows, cards and overlays.
+        for (name, surface) in [
+            ("canvas", colors.canvas), ("rowHover", colors.rowHover), ("control", colors.control),
+            ("raised", colors.raised), ("surfaceCard", colors.surfaceCard), ("overlay", colors.overlay),
+        ] {
+            let alpha = NSColor(surface).usingColorSpace(.sRGB)!.alphaComponent
+            #expect(alpha >= 0.999, "\(theme) dark=\(dark) \(name) must be opaque, got alpha=\(alpha)")
+        }
+        let canvas = luminance(colors.canvas)
+        let rowHover = luminance(colors.rowHover)
+        let control = luminance(colors.control)
+        let raised = luminance(colors.raised)
+        let card = luminance(colors.surfaceCard)
+        let overlay = luminance(colors.overlay)
+        if dark {
+            #expect(canvas < rowHover, "\(theme) dark: canvas < rowHover")
+            #expect(rowHover < control, "\(theme) dark: rowHover < control")
+            #expect(control < raised, "\(theme) dark: control < raised")
+            #expect(raised <= card, "\(theme) dark: raised <= surfaceCard")
+            #expect(card < overlay, "\(theme) dark: surfaceCard < overlay")
+        } else {
+            #expect(canvas > rowHover, "\(theme) light: canvas > rowHover")
+            #expect(rowHover > raised, "\(theme) light: rowHover > raised")
+            #expect(card > rowHover, "\(theme) light: surfaceCard lifts above rowHover")
+            #expect(overlay > rowHover, "\(theme) light: overlay lifts above rowHover")
+        }
+        if theme.framed && !colors.translucentFrame {
+            let side = colors.onFrame
+            #expect(luminance(side.canvas) < luminance(side.rowHover))
+            #expect(luminance(side.rowHover) < luminance(side.control))
+            #expect(luminance(side.control) < luminance(side.raised))
+            #expect(luminance(side.surfaceCard) < luminance(side.overlay))
+        }
     }
 
     // capability: app.themes
@@ -108,16 +169,17 @@ struct ThemeTests {
             blue: mix(top.blueComponent, bottom.blueComponent))
     }
 
-    private func contrast(_ first: Color, _ second: Color) -> Double {
-        func luminance(_ color: Color) -> Double {
-            let rgb = NSColor(color).usingColorSpace(.sRGB)!
-            func linear(_ value: CGFloat) -> Double {
-                let value = Double(value)
-                return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
-            }
-            return 0.2126 * linear(rgb.redComponent) + 0.7152 * linear(rgb.greenComponent) + 0.0722
-                * linear(rgb.blueComponent)
+    private func luminance(_ color: Color) -> Double {
+        let rgb = NSColor(color).usingColorSpace(.sRGB)!
+        func linear(_ value: CGFloat) -> Double {
+            let value = Double(value)
+            return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
         }
+        return 0.2126 * linear(rgb.redComponent) + 0.7152 * linear(rgb.greenComponent) + 0.0722
+            * linear(rgb.blueComponent)
+    }
+
+    private func contrast(_ first: Color, _ second: Color) -> Double {
         let (lighter, darker) = (max(luminance(first), luminance(second)), min(luminance(first), luminance(second)))
         return (lighter + 0.05) / (darker + 0.05)
     }
