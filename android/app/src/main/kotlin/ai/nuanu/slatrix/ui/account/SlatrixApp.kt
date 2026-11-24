@@ -110,6 +110,29 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     notification: NotificationTarget? = null, threads: MatrixWorkspace? = null, activity: MatrixActivity? = null,
     search: MatrixSearch? = null, people: MatrixPeople? = null, onNotificationHandled: (NotificationTarget) -> Unit = {}) {
     val state by account.state.collectAsState()
+    SlatrixApp(state, account::selectHomeserver, account::signIn, account::signInWithBrowser, account::restore,
+        account::signOut, account::cancel, identity, rooms, workspace, notification, threads, activity, search, people, onNotificationHandled)
+}
+
+@Composable
+internal fun SlatrixApp(
+    state: AccountState,
+    onSelectHomeserver: (String) -> Unit,
+    onSignIn: (String, String) -> Unit,
+    onSignInWithBrowser: () -> Unit,
+    onRestore: () -> Unit,
+    onSignOut: () -> Unit,
+    onCancel: () -> Unit,
+    identity: IdentityVerification?,
+    rooms: MatrixRooms?,
+    workspace: MatrixWorkspace?,
+    notification: NotificationTarget? = null,
+    threads: MatrixWorkspace? = null,
+    activity: MatrixActivity? = null,
+    search: MatrixSearch? = null,
+    people: MatrixPeople? = null,
+    onNotificationHandled: (NotificationTarget) -> Unit = {},
+) {
     RequestNotificationPermission(signedIn = state is AccountState.Connected, configured = BuildConfig.PUSH_GATEWAY.isNotEmpty())
     val context = LocalContext.current
     val appearance = remember(context) { AppearancePreferences(context) }
@@ -118,7 +141,6 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     var theme by rememberSaveable { mutableStateOf(appearance.theme) }
     var chatWallpaper by rememberSaveable { mutableStateOf(appearance.chatWallpaper) }
     var increaseContrast by rememberSaveable { mutableStateOf(appearance.increaseContrast) }
-    var workspaceThemes by remember(appearance) { mutableStateOf(appearance.workspaceThemes) }
     var messageScale by rememberSaveable { mutableFloatStateOf(appearance.messageScale) }
     var server by rememberSaveable { mutableStateOf("") }
     var you by rememberSaveable { mutableStateOf(false) }
@@ -135,23 +157,23 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
     // Back during a restore leaves the app; cancelling would show sign-in with the session still saved.
     BackHandler(enabled = (state as? AccountState.Connecting)?.restoring == false || state is AccountState.ChooseMethod ||
         state is AccountState.BrowserSignIn || (state as? AccountState.Failed)?.let { it.options != null && !it.canRetryRestore } == true) {
-        account.cancel()
+        onCancel()
     }
     var restoreFailed by remember { mutableStateOf(false) }
     LaunchedEffect(state) { if ((state as? AccountState.Failed)?.canRetryRestore == true) restoreFailed = true }
-    SlatrixTheme(dark = dark, theme = theme, chatWallpaper = chatWallpaper, increaseContrast = increaseContrast, messageScale = messageScale) {
-        val failure = state as? AccountState.Failed
-        val connecting = state as? AccountState.Connecting
-        val options = when (val current = state) {
-            is AccountState.ChooseMethod -> current.options
-            is AccountState.Connecting -> current.options
-            is AccountState.Failed -> current.options
-            else -> null
-        }
-        when {
-            state is AccountState.Connected -> key((state as AccountState.Connected).client) {
-                val userId = (state as AccountState.Connected).userId
-                val client = (state as AccountState.Connected).client
+    val failure = state as? AccountState.Failed
+    val connecting = state as? AccountState.Connecting
+    val options = when (val current = state) {
+        is AccountState.ChooseMethod -> current.options
+        is AccountState.Connecting -> current.options
+        is AccountState.Failed -> current.options
+        else -> null
+    }
+    if (state is AccountState.Connected) {
+        key(state.client) {
+                val userId = state.userId
+                val client = state.client
+                var workspaceThemes by remember(appearance, userId) { mutableStateOf(appearance.workspaceThemes(userId)) }
                 val media = remember(client) { MatrixMedia(client, userId, File(context.cacheDir, "media")) }
                 val workspacePreferences = remember(userId, context) { WorkspacePreferences(context, userId) }
                 val laterScope = rememberCoroutineScope()
@@ -271,9 +293,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                         onNotificationHandled(target)
                     }
                 }
-                val activeTheme = remember(selectedSpaceId, theme, workspaceThemes) {
-                    appearance.effectiveTheme(selectedSpaceId)
-                }
+                val activeTheme = AppearancePreferences.resolveTheme(selectedSpaceId, theme, workspaceThemes)
                 SlatrixTheme(dark = dark, theme = activeTheme, chatWallpaper = chatWallpaper, increaseContrast = increaseContrast, messageScale = messageScale) {
                 CompositionLocalProvider(LocalAvatarLoader provides avatars, LocalPictures provides pictures) { Box(Modifier.fillMaxSize()) {
                     ProvideConnection(rooms?.connection, rooms?.let { it::retry }) { ConnectedAccountScreen(identityState,
@@ -295,7 +315,7 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                             } },
                             WorkspaceCover("you") {
                                 LiveYouScreen(userId, ownName,
-                                    { preferences = true }, account::signOut, onViewProfile = { name -> person = userId to name },
+                                    { preferences = true }, onSignOut, onViewProfile = { name -> person = userId to name },
                                     onBack = { you = false }, avatarUrl = userAvatarUrl)
                             }.takeIf { you },
                             channels?.let { page -> WorkspaceCover("channels") {
@@ -317,14 +337,13 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                 LiveNewMessage(userId, people, rooms, { room -> newMessage = false; threads?.back(); workspace?.open(room) }) { newMessage = false }
                             }.takeIf { newMessage },
                             WorkspaceCover("edit profile") {
-                                LiveEditProfile((state as? AccountState.Connected)?.client, userId, people?.known(userId)?.takeIf { it.name != it.id }) { editingProfile = false }
+                                LiveEditProfile(client, userId, people?.known(userId)?.takeIf { it.name != it.id }) { editingProfile = false }
                             }.takeIf { editingProfile },
                             invitation?.let { id -> WorkspaceCover("invitation") {
                                 LiveInvitation(id, rooms, { room -> invitation = null; threads?.back(); workspace?.open(room) },
                                     { space -> invitation = null; chooseSpace(space) }, { notice = it }) { invitation = null }
                             } },
                             WorkspaceCover("preferences") {
-                                val client = (state as AccountState.Connected).client
                                 val activeSpaceName = selectedSpaceId?.let { id -> roomList?.value?.spaces?.firstOrNull { it.id == id }?.name }
                                 LivePreferencesScreen(
                                     dark = dark,
@@ -341,8 +360,8 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                                     activeWorkspaceName = activeSpaceName,
                                     workspaceTheme = selectedSpaceId?.let { workspaceThemes[it] },
                                     onWorkspaceTheme = { id, chosen ->
-                                        appearance.setWorkspaceTheme(id, chosen)
-                                        workspaceThemes = appearance.workspaceThemes
+                                        appearance.setWorkspaceTheme(id, chosen, userId)
+                                        workspaceThemes = appearance.workspaceThemes(userId)
                                     },
                                     messageScale = messageScale,
                                     onMessageScale = { messageScale = it; appearance.messageScale = it },
@@ -373,32 +392,36 @@ fun SlatrixApp(account: MatrixAccount, identity: IdentityVerification?, rooms: M
                     } }
                     notice?.let { LaunchedEffect(it) { delay(UiMetrics.NoticeMillis); notice = null } }
                     // One place for both, so a notice never sits on top of the account's warning.
-                    (notice ?: (state as AccountState.Connected).warning)?.let { text ->
+                    (notice ?: state.warning)?.let { text ->
                         Snackbar(Modifier.align(Alignment.BottomCenter).padding(UiMetrics.GapLarge)) { Text(text) }
                     }
                 } }
                 }
-            }
-            state is AccountState.BrowserSignIn -> {
-                val browser = state as AccountState.BrowserSignIn
-                var error by remember(browser.attemptId) { mutableStateOf<String?>(null) }
-                val open = {
-                    try {
-                        CustomTabsIntent.Builder().build().launchUrl(context, browser.url.toUri())
-                        error = null
-                    } catch (_: ActivityNotFoundException) { error = "Install a browser to continue." }
+        }
+    } else {
+        SlatrixTheme(dark = dark, theme = theme, chatWallpaper = chatWallpaper, increaseContrast = increaseContrast, messageScale = messageScale) {
+            when {
+                state is AccountState.BrowserSignIn -> {
+                    val browser = state
+                    var error by remember(browser.attemptId) { mutableStateOf<String?>(null) }
+                    val open = {
+                        try {
+                            CustomTabsIntent.Builder().build().launchUrl(context, browser.url.toUri())
+                            error = null
+                        } catch (_: ActivityNotFoundException) { error = "Install a browser to continue." }
+                    }
+                    LaunchedEffect(browser.attemptId) { open() }
+                    BrowserSignInScreen(browser.options.homeserver, error, open, onCancel)
                 }
-                LaunchedEffect(browser.attemptId) { open() }
-                BrowserSignInScreen(browser.options.homeserver, error, open, account::cancel)
+                // Like Slack's launch, a first restore shows only the background.
+                connecting?.restoring == true && !restoreFailed -> Box(Modifier.fillMaxSize().background(SlatrixTheme.colors.canvas))
+                connecting?.restoring == true || failure?.canRetryRestore == true ->
+                    RestoreSessionScreen(connecting != null, failure?.message, onRestore, onSignOut)
+                options != null && (options.password || options.oauth || options.sso) ->
+                    SignInMethodsScreen(options, connecting != null, failure?.message, onSignIn, onSignInWithBrowser, onCancel)
+                else -> AccountProviderScreen(server, { server = it }, connecting != null, failure?.message,
+                    { onSelectHomeserver(server) }, onCancel)
             }
-            // Like Slack's launch, a first restore shows only the background.
-            connecting?.restoring == true && !restoreFailed -> Box(Modifier.fillMaxSize().background(SlatrixTheme.colors.canvas))
-            connecting?.restoring == true || failure?.canRetryRestore == true ->
-                RestoreSessionScreen(connecting != null, failure?.message, account::restore, account::signOut)
-            options != null && (options.password || options.oauth || options.sso) ->
-                SignInMethodsScreen(options, connecting != null, failure?.message, account::signIn, account::signInWithBrowser, account::cancel)
-            else -> AccountProviderScreen(server, { server = it }, connecting != null, failure?.message,
-                { account.selectHomeserver(server) }, account::cancel)
         }
     }
 }

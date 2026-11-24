@@ -13,6 +13,7 @@ import android.view.View
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
@@ -41,13 +42,13 @@ class SlatrixThemeTest {
 
     // capability: app.themes
     @Test fun allSixThemesMeetWcagContrastInLightDarkAndHighContrast() {
-        val captured = linkedMapOf<Triple<AndroidTheme, Boolean, Boolean>, Pair<AppColors, Color>>()
+        val captured = linkedMapOf<Triple<AndroidTheme, Boolean, Boolean>, Pair<AppColors, ColorScheme>>()
         compose.setContent {
             for (theme in AndroidTheme.entries) {
                 for (dark in listOf(false, true)) {
                     for (highContrast in listOf(false, true)) {
                         SlatrixTheme(dark = dark, theme = theme, increaseContrast = highContrast) {
-                            captured[Triple(theme, dark, highContrast)] = SlatrixTheme.colors to MaterialTheme.colorScheme.primary
+                            captured[Triple(theme, dark, highContrast)] = SlatrixTheme.colors to MaterialTheme.colorScheme
                         }
                     }
                 }
@@ -66,9 +67,15 @@ class SlatrixThemeTest {
             for (dark in listOf(false, true)) {
                 val normal = captured.getValue(Triple(theme, dark, false)).first
                 for (highContrast in listOf(false, true)) {
-                    val (colors, primary) = captured.getValue(Triple(theme, dark, highContrast))
+                    val (colors, scheme) = captured.getValue(Triple(theme, dark, highContrast))
                     val tag = "${theme.key} dark=$dark hc=$highContrast"
-                    assertEquals("$tag MaterialTheme.primary tracks accentFill", colors.accentFill.toArgb(), primary.toArgb())
+                    assertEquals("$tag MaterialTheme.primary uses surface-legible accent", colors.accent.toArgb(), scheme.primary.toArgb())
+                    for ((surfName, bg) in listOf("canvas" to colors.canvas, "raised" to colors.raised, "overlay" to colors.overlay)) {
+                        val primaryRatio = contrast(scheme.primary, bg)
+                        assertTrue("$tag MaterialTheme.primary/$surfName=$primaryRatio", primaryRatio >= 4.5f)
+                    }
+                    assertTrue("$tag MaterialTheme.onPrimary/primary", contrast(scheme.onPrimary, scheme.primary) >= 4.5f)
+                    assertTrue("$tag MaterialTheme.onError/error", contrast(scheme.onError, scheme.error) >= 4.5f)
                     assertEquals("$tag bubbleEdge stays transparent", 0f, colors.bubbleEdge.alpha, 0.0001f)
                     assertEquals("$tag wallpaperDoodle alpha", if (dark) 0.045f else 0.07f, colors.wallpaperDoodle.alpha, 0.002f)
 
@@ -84,6 +91,13 @@ class SlatrixThemeTest {
                         }
                     }
                     assertTrue("$tag onAccent/accentFill", contrast(colors.onAccent, colors.accentFill) >= 4.5f)
+                    val onFill = colors.onFill
+                    val outMentionBg = onFill.mentionFill.compositeOver(colors.accentFill)
+                    assertTrue("$tag outgoing mention contrast=${contrast(onFill.mentionText, outMentionBg)}",
+                        contrast(onFill.mentionText, outMentionBg) >= 4.5f)
+                    val outMentionYouBg = onFill.mentionYouFill.compositeOver(colors.accentFill)
+                    assertTrue("$tag outgoing @room/@you mention contrast=${contrast(onFill.mentionYouText, outMentionYouBg)}",
+                        contrast(onFill.mentionYouText, outMentionYouBg) >= 4.5f)
                     assertTrue("$tag destructive/canvas", contrast(colors.destructive, colors.canvas) >= 4.5f)
                     val chipBg = colors.dateChip.compositeOver(colors.wallpaper)
                     assertTrue("$tag onDateChip/dateChip", contrast(colors.onDateChip, chipBg) >= 4.5f)

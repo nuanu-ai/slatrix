@@ -65,41 +65,43 @@ class AppearancePreferences(private val context: Context) {
 
     /** Per-workspace theme overrides keyed by Matrix space ID. */
     val workspaceThemes: Map<String, AndroidTheme>
-        get() {
-            val stored = values.all["workspaceThemes"] as? String ?: return emptyMap()
-            return runCatching {
-                val json = JSONObject(stored)
-                buildMap {
-                    val keys = json.keys()
-                    while (keys.hasNext()) {
-                        val id = keys.next()
-                        if (id.isBlank()) continue
-                        val parsed = AndroidTheme.fromKey(json.opt(id) as? String)
-                        if (parsed != null) put(id, parsed)
-                    }
+        get() = workspaceThemes(userId = null)
+
+    /** Per-workspace theme overrides, scoped to [userId] when signed in so accounts on one phone stay isolated. */
+    fun workspaceThemes(userId: String? = null): Map<String, AndroidTheme> {
+        val stored = values.all[workspaceThemesKey(userId)] as? String ?: return emptyMap()
+        return runCatching {
+            val json = JSONObject(stored)
+            buildMap {
+                val keys = json.keys()
+                while (keys.hasNext()) {
+                    val id = keys.next()
+                    if (id.isBlank()) continue
+                    val parsed = AndroidTheme.fromKey(json.opt(id) as? String)
+                    if (parsed != null) put(id, parsed)
                 }
-            }.getOrElse { emptyMap() }
-        }
+            }
+        }.getOrElse { emptyMap() }
+    }
 
     /** Resolves [workspaceId]'s override when set, otherwise the global [theme]. */
-    fun effectiveTheme(workspaceId: String?): AndroidTheme =
-        workspaceId?.let { workspaceThemes[it] } ?: theme
+    fun effectiveTheme(workspaceId: String?, userId: String? = null): AndroidTheme =
+        resolveTheme(workspaceId, theme, workspaceThemes(userId))
 
     /** Sets a per-workspace theme override, or clears it back to the global default when [theme] is null. */
-    fun setWorkspaceTheme(workspaceId: String, theme: AndroidTheme?) {
+    fun setWorkspaceTheme(workspaceId: String, theme: AndroidTheme?, userId: String? = null) {
         if (workspaceId.isBlank()) return
-        val updated = workspaceThemes.toMutableMap()
-        if (theme == null) updated.remove(workspaceId) else updated[workspaceId] = theme
+        val key = workspaceThemesKey(userId)
+        // Mutate the raw JSON object directly so unrecognized entries from newer builds stay intact for other spaces.
+        val json = (values.all[key] as? String)?.let { stored -> runCatching { JSONObject(stored) }.getOrNull() } ?: JSONObject()
+        if (theme == null) json.remove(workspaceId) else json.put(workspaceId, theme.key)
         values.edit {
-            if (updated.isEmpty()) {
-                remove("workspaceThemes")
-            } else {
-                val json = JSONObject()
-                updated.forEach { (id, choice) -> json.put(id, choice.key) }
-                putString("workspaceThemes", json.toString())
-            }
+            if (json.length() == 0) remove(key) else putString(key, json.toString())
         }
     }
+
+    private fun workspaceThemesKey(userId: String?): String =
+        if (userId.isNullOrBlank()) "workspaceThemes" else "workspaceThemes:$userId"
 
     /** How much larger or smaller than the phone's text size messages are set, on this phone only. */
     var messageScale: Float
@@ -109,5 +111,9 @@ class AppearancePreferences(private val context: Context) {
     companion object {
         /** From 14 to 24 sp at the phone's default text size, in 2 sp steps. */
         val MessageScales = listOf(0.875f, 1f, 1.125f, 1.25f, 1.375f, 1.5f)
+
+        /** Pure in-memory lookup matching [effectiveTheme] without re-parsing SharedPreferences JSON on the UI thread. */
+        fun resolveTheme(workspaceId: String?, global: AndroidTheme, overrides: Map<String, AndroidTheme>): AndroidTheme =
+            workspaceId?.let { overrides[it] } ?: global
     }
 }

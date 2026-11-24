@@ -7,8 +7,11 @@ import ai.nuanu.slatrix.ui.account.LivePreferencesScreen
 import ai.nuanu.slatrix.ui.account.MessagePreview
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
@@ -193,6 +196,66 @@ class LiveProfileScreenTest {
         compose.runOnIdle {
             assertEquals(AndroidTheme.Ocean, globalTheme.value)
             assertEquals(AndroidTheme.Jade, harborOverride.value)
+        }
+    }
+
+    // capability: app.themes
+    @Test fun lateArrivingWorkspaceNameStillStartsOnWorkspaceScopeWhenOverridden() {
+        val workspaceName = mutableStateOf<String?>(null)
+        val harborOverride = mutableStateOf<AndroidTheme?>(AndroidTheme.Aubergine)
+        compose.setContent {
+            SlatrixTheme(theme = harborOverride.value ?: AndroidTheme.Neutral) {
+                LivePreferencesScreen(
+                    dark = false,
+                    darkOverride = null,
+                    theme = AndroidTheme.Neutral,
+                    onColorMode = {},
+                    onTheme = {},
+                    onBack = {},
+                    activeWorkspaceId = "!harbor:example.org",
+                    activeWorkspaceName = workspaceName.value,
+                    workspaceTheme = harborOverride.value,
+                    onWorkspaceTheme = { _, choice -> harborOverride.value = choice },
+                )
+            }
+        }
+        compose.onNodeWithText("All workspaces").assertDoesNotExist()
+        compose.runOnIdle { workspaceName.value = "Harbor" }
+        compose.onNode(hasText("Harbor") and isSelectable()).performScrollTo().assertIsSelected()
+        compose.onNode(hasText("Aubergine") and isSelectable()).performScrollTo().assertIsSelected()
+    }
+
+    // capability: app.themes
+    @Test @Config(qualifiers = "w320dp-h640dp-420dpi")
+    fun narrowPhoneAtLargeTextSizeShowsAllPaletteAndScopeLabelsWithoutClipping() {
+        compose.setContent {
+            val baseDensity = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(baseDensity.density, fontScale = 2f)) {
+                SlatrixTheme {
+                    LivePreferencesScreen(
+                        dark = false,
+                        darkOverride = null,
+                        theme = AndroidTheme.MaterialYou,
+                        onColorMode = {},
+                        onTheme = {},
+                        onBack = {},
+                        activeWorkspaceId = "!harbor:example.org",
+                        activeWorkspaceName = "All workspaces North America",
+                        workspaceTheme = null,
+                        onWorkspaceTheme = { _, _ -> },
+                    )
+                }
+            }
+        }
+        for (label in listOf("Material You", "Aubergine", "All workspaces", "All workspaces North America")) {
+            val node = compose.onNode(hasText(label), useUnmergedTree = true).performScrollTo()
+            val layouts = mutableListOf<TextLayoutResult>()
+            node.fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action!!(layouts)
+            val result = layouts.single()
+            assertTrue(
+                "'$label' clipped on 320dp at 200% font size: lines=${result.lineCount} width=${result.size.width}/${result.layoutInput.constraints.maxWidth} ovW=${result.didOverflowWidth} ovH=${result.didOverflowHeight}",
+                !result.didOverflowWidth && !result.didOverflowHeight,
+            )
         }
     }
 

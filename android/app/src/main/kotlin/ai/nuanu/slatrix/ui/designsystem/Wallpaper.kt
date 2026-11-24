@@ -8,6 +8,7 @@ import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Canvas
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.ImageShader
 import androidx.compose.ui.graphics.ShaderBrush
@@ -19,12 +20,16 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import kotlin.math.roundToInt
 
 /**
  * The chat wallpaper: a calm tinted backdrop with optional faint doodles of the app's own icons. It stays put behind
- * the messages, and its tile is drawn once per theme while doodles are on, so scrolling only repeats it.
+ * the messages, and its tile is cached by pixel size and ink across screens (channel, thread, and preview) while
+ * doodles are on, so scrolling and bounds resizes only repeat it.
  */
 @Composable
 fun Modifier.wallpaper(showDoodles: Boolean = SlatrixTheme.chatWallpaper): Modifier {
@@ -36,23 +41,42 @@ fun Modifier.wallpaper(showDoodles: Boolean = SlatrixTheme.chatWallpaper): Modif
     }
     return this then remember(colors.wallpaper, colors.wallpaperDoodle) { Modifier.drawWithCache {
         val side = UiMetrics.WallpaperTile.toPx().roundToInt().coerceAtLeast(1)
-        val tile = ImageBitmap(side, side)
-        val unit = side / TileUnits
-        val stroke = Stroke(StrokeUnits, cap = StrokeCap.Round, join = StrokeJoin.Round)
-        CanvasDrawScope().draw(this, layoutDirection, Canvas(tile), Size(side.toFloat(), side.toFloat())) {
-            scale(unit, unit, Offset.Zero) {
-                // Each doodle also one tile over on every side, so one crossing an edge carries on in the next tile.
-                for (doodle in Doodles) for (dx in Wrap) for (dy in Wrap) translate(doodle.x + dx, doodle.y + dy) {
-                    rotate(doodle.turn, Offset.Zero) { drawPath(Paths[doodle.icon], colors.wallpaperDoodle, style = stroke) }
-                }
-            }
-        }
-        val doodles = ShaderBrush(ImageShader(tile, TileMode.Repeated, TileMode.Repeated))
+        val doodles = cachedDoodleBrush(side, colors.wallpaperDoodle, this, layoutDirection)
         onDrawBehind {
             drawRect(colors.wallpaper)
             drawRect(doodles)
         }
     } }
+}
+
+private data class TileKey(val side: Int, val inkArgb: Int)
+
+private val TileCacheLock = Any()
+private var cachedKey: TileKey? = null
+private var cachedBrush: ShaderBrush? = null
+
+private fun cachedDoodleBrush(side: Int, ink: Color, density: Density, layoutDirection: LayoutDirection): ShaderBrush {
+    val key = TileKey(side, ink.toArgb())
+    synchronized(TileCacheLock) {
+        if (cachedKey == key) cachedBrush?.let { return it }
+    }
+    val tile = ImageBitmap(side, side)
+    val unit = side / TileUnits
+    val stroke = Stroke(StrokeUnits, cap = StrokeCap.Round, join = StrokeJoin.Round)
+    CanvasDrawScope().draw(density, layoutDirection, Canvas(tile), Size(side.toFloat(), side.toFloat())) {
+        scale(unit, unit, Offset.Zero) {
+            // Each doodle also one tile over on every side, so one crossing an edge carries on in the next tile.
+            for (doodle in Doodles) for (dx in Wrap) for (dy in Wrap) translate(doodle.x + dx, doodle.y + dy) {
+                rotate(doodle.turn, Offset.Zero) { drawPath(Paths[doodle.icon], ink, style = stroke) }
+            }
+        }
+    }
+    val brush = ShaderBrush(ImageShader(tile, TileMode.Repeated, TileMode.Repeated))
+    synchronized(TileCacheLock) {
+        cachedKey = key
+        cachedBrush = brush
+    }
+    return brush
 }
 
 private class Doodle(val x: Float, val y: Float, val turn: Float, val icon: Int)

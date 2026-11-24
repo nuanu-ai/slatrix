@@ -16,6 +16,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
@@ -103,13 +104,18 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
 
     /** The roles inside your own bubble, on [accentFill]: text, links and marks in [onAccent] and its quieter tints. */
     internal val onFill: AppColors by lazy {
+        val fill = roles.getValue("accentFill")
         val on = roles.getValue("onAccent")
         val meta = roles.getValue("bubbleOutMeta")
         val rule = roles.getValue("bubbleOutRule")
+        // Shade away from [on] so mention pills stay visually distinct while increasing text contrast over [fill].
+        val pillShade = if (on.luminance() >= fill.luminance()) Color.Black else Color.White
         AppColors(roles + mapOf(
             "textPrimary" to on, "textBody" to on, "textSecondary" to meta, "textTertiary" to meta, "border" to rule,
-            "accent" to on, "accentTint" to rule, "accentFill" to rule, "mentionText" to on, "mentionFill" to rule,
-            "mentionYouText" to on, "reaction" to rule, "bubbleIn" to roles.getValue("accentFill"),
+            "accent" to on, "accentTint" to rule, "accentFill" to rule,
+            "mentionText" to on, "mentionFill" to pillShade.copy(alpha = 0.18f),
+            "mentionYouText" to on, "mentionYouFill" to pillShade.copy(alpha = 0.3f),
+            "reaction" to rule, "bubbleIn" to fill,
         ), dark, underlineLinks = true)
     }
 
@@ -126,14 +132,19 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
 fun OnAccentFill(content: @Composable () -> Unit) {
     val fill = LocalColors.current.onFill
     // Material's own components, such as progress indicators, draw in the scheme's primary, which is the bubble's fill.
-    val scheme = MaterialTheme.colorScheme.copy(primary = fill.textPrimary, secondaryContainer = fill.border, surfaceVariant = fill.border)
+    val scheme = MaterialTheme.colorScheme.copy(
+        primary = fill.textPrimary,
+        onPrimary = fill.bubbleIn,
+        secondaryContainer = fill.border,
+        surfaceVariant = fill.border,
+    )
     CompositionLocalProvider(LocalColors provides fill, LocalContentColor provides fill.textPrimary) {
         MaterialTheme(colorScheme = scheme, content = content)
     }
 }
 
 private val LocalColors = staticCompositionLocalOf { AppColors(DesignTokens.colors(false), false) }
-private val LocalChatWallpaper = staticCompositionLocalOf { true }
+private val LocalChatWallpaper = compositionLocalOf { true }
 
 /** Material You: the theme's surfaces and accent from the phone's wallpaper, washed into the chat backdrop. */
 private fun wallpaperRoles(dark: Boolean, scheme: ColorScheme): Map<String, Color> {
@@ -273,6 +284,12 @@ internal fun themeRoles(
 private const val WashAccentLight = 0.05f
 private const val WashAccentDark = 0.03f
 
+private fun contrastRatio(first: Color, second: Color): Float {
+    val a = first.luminance()
+    val b = second.luminance()
+    return (maxOf(a, b) + 0.05f) / (minOf(a, b) + 0.05f)
+}
+
 object SlatrixTheme {
     val topPanelShape @Composable get() = MaterialTheme.shapes.extraLarge.copy(bottomStart = ZeroCornerSize, bottomEnd = ZeroCornerSize)
     val colors: AppColors @Composable get() = LocalColors.current
@@ -307,18 +324,22 @@ fun SlatrixTheme(
     }
     val scheme = remember(colors, dark) {
         val base = if (dark) darkColorScheme() else lightColorScheme()
+        // Material buttons, switches, sliders, and focus rings draw `primary` directly on surfaces, so it must use the
+        // surface-legible `accent` role while outgoing bubbles and FABs read `accentFill` explicitly.
+        val onPrimary = if (contrastRatio(colors.onAccent, colors.accent) >= 4.5f) colors.onAccent else colors.canvas
+        val onError = if (contrastRatio(colors.onAccent, colors.destructive) >= 4.5f) colors.onAccent else colors.canvas
         base.copy(
-            primary = colors.accentFill,
-            onPrimary = colors.onAccent,
+            primary = colors.accent,
+            onPrimary = onPrimary,
             primaryContainer = colors.accentTint,
             onPrimaryContainer = colors.accent,
             inversePrimary = colors.accent,
             secondary = colors.accent,
-            onSecondary = colors.onAccent,
+            onSecondary = onPrimary,
             secondaryContainer = colors.accentTint,
             onSecondaryContainer = colors.accent,
             tertiary = colors.mentionText,
-            onTertiary = colors.onAccent,
+            onTertiary = onPrimary,
             tertiaryContainer = colors.mentionFill,
             onTertiaryContainer = colors.mentionText,
             background = colors.canvas,
@@ -331,7 +352,7 @@ fun SlatrixTheme(
             inverseSurface = colors.tooltip,
             inverseOnSurface = colors.onTooltip,
             error = colors.destructive,
-            onError = colors.onAccent,
+            onError = onError,
             errorContainer = colors.mentionYouFill,
             onErrorContainer = colors.textPrimary,
             outline = colors.borderStrong,

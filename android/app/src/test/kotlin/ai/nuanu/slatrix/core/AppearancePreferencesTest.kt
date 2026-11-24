@@ -103,6 +103,33 @@ class AppearancePreferencesTest {
         assertEquals(emptyMap<String, AndroidTheme>(), AppearancePreferences(context).workspaceThemes)
     }
 
+    // capability: app.themes
+    @Test fun perWorkspaceOverridesAreIsolatedByAccountAndPreserveUnknownFutureKeys() {
+        val context = RuntimeEnvironment.getApplication()
+        val settings = AppearancePreferences(context)
+        settings.theme = AndroidTheme.Neutral
+
+        val harbor = "!harbor:example.org"
+        val alice = "@alice:example.org"
+        val bob = "@bob:example.org"
+        settings.setWorkspaceTheme(harbor, AndroidTheme.Jade, userId = alice)
+        assertEquals(AndroidTheme.Jade, AppearancePreferences(context).effectiveTheme(harbor, userId = alice))
+        assertEquals(AndroidTheme.Neutral, AppearancePreferences(context).effectiveTheme(harbor, userId = bob))
+        assertEquals(emptyMap<String, AndroidTheme>(), AppearancePreferences(context).workspaceThemes(userId = bob))
+
+        // Bob clearing Harbor does not disturb Alice's override.
+        settings.setWorkspaceTheme(harbor, null, userId = bob)
+        assertEquals(AndroidTheme.Jade, AppearancePreferences(context).effectiveTheme(harbor, userId = alice))
+
+        // Updating one workspace keeps unrecognized entries from future versions intact for other workspaces.
+        val raw = context.getSharedPreferences("appearance", Context.MODE_PRIVATE)
+        raw.edit().putString("workspaceThemes", """{"!harbor:example.org":"jade","!studio:example.org":"futurePalette"}""").commit()
+        settings.setWorkspaceTheme(harbor, null)
+        val stored = raw.getString("workspaceThemes", null)
+        assertTrue("Unknown future entry for Studio is preserved: $stored", stored?.contains("futurePalette") == true)
+        assertFalse("Cleared Harbor entry is removed: $stored", stored?.contains(harbor) == true)
+    }
+
     @Test fun messageTextSizeSurvivesReopeningAndAPlantedSizeFallsBackToTheDefault() {
         val context = RuntimeEnvironment.getApplication()
         val bigger = AppearancePreferences.MessageScales.last()
