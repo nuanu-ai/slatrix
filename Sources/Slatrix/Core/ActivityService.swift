@@ -181,6 +181,10 @@ enum ActivityBadge {
             ).prefix(4096))
     }
 
+    nonisolated static func previewBody(for message: ChatMessage, names: [String: String] = [:]) -> String {
+        String(MatrixMapping.messagePreviewText(message, names: names).prefix(4096))
+    }
+
     /// The people a message notification mentions, so their names can be looked up before it shows.
     nonisolated static func mentionedIDs(_ notification: NotificationItem) -> Set<String> {
         guard case .timeline(let event) = notification.event,

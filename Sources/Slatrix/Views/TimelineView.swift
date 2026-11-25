@@ -708,14 +708,18 @@ struct MessageRow: View {
             .background(hovered ? colors.rowHover : .clear)
             .contentShape(Rectangle())
     }
+    private var compactGutter: CGFloat { m(42) }
+    private var compactGap: CGFloat { m.sp8 }
+    private var compactRail: CGFloat { compactGutter + compactGap }
     private var layout: some View {
         let gutter = m(ConversationGrid.gap(thread: isThread))
         return VStack(alignment: .leading, spacing: m.sp2) {
             // Above the avatar and the name, so both start on the name's line as in every other row; the pin stands in
             // the avatar's column, as in Slack.
             if isPinned {
-                HStack(spacing: compact ? m.sp4 : gutter) {
-                    Image(systemName: "pin.fill").frame(width: compact ? nil : m.avatar, alignment: .trailing)
+                HStack(spacing: compact ? compactGap : gutter) {
+                    Image(systemName: "pin.fill")
+                        .frame(width: compact ? compactGutter : m.avatar, alignment: .trailing)
                     Text("Pinned")
                 }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
             }
@@ -733,24 +737,20 @@ struct MessageRow: View {
     @ViewBuilder private func content(gutter: CGFloat) -> some View {
         if compact {
             VStack(alignment: .leading, spacing: m.sp2) {
-                if !message.isRedacted, let replyPreview { replyPreview.id(message.id) }
-                HStack(alignment: .top, spacing: m(6)) {
-                    HStack(alignment: .firstTextBaseline, spacing: m(6)) {
-                        Text(time).font(m.font(.subheadline)).monospacedDigit()
-                            .foregroundStyle(colors.textSecondary).fixedSize()
-                        Button {
-                            actions.openProfile?()
-                        } label: {
-                            Text(message.senderName).font(m.font(.reading, .semibold))
-                                .foregroundStyle(colors.textPrimary).lineLimit(1).truncationMode(.tail)
-                        }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help("View profile")
-                        if let seen, !pendingSend {
-                            ReadTicks(read: seen.read).help(seen.tooltip ?? "")
-                        }
-                    }
+                if !message.isRedacted, let replyPreview {
+                    replyPreview.id(message.id).padding(.leading, compactRail)
+                }
+                HStack(alignment: .top, spacing: compactGap) {
+                    Text(gutterTime)
+                        .font(m.font(.subheadline)).monospacedDigit().lineLimit(1)
+                        .foregroundStyle(colors.textTertiary)
+                        .frame(width: compactGutter, alignment: .trailing)
+                        .padding(.top, m.sp2)
+                        .help(time)
                     VStack(alignment: .leading, spacing: m.sp2) {
-                        messageText
+                        compactBody
                     }.frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.trailing, isThread ? m(4) : 0)
                 }
                 .overlay(alignment: .topLeading) {
                     if isSaved || effectiveWaitStatus != nil {
@@ -768,7 +768,17 @@ struct MessageRow: View {
                         .offset(x: -m(4), y: m.sp2)
                     }
                 }
-                if !message.isRedacted { messageExtras }
+                .overlay(alignment: .topTrailing) {
+                    if let seen, !pendingSend {
+                        ReadTicks(read: seen.read).help(seen.tooltip ?? "")
+                            .fixedSize()
+                            .frame(width: 0, alignment: .leading)
+                            .offset(x: isThread ? -m(2) : m(2), y: m.sp2)
+                    }
+                }
+                if !message.isRedacted {
+                    messageExtras.padding(.leading, compactRail)
+                }
             }
         } else {
             HStack(alignment: .top, spacing: gutter) {
@@ -819,6 +829,24 @@ struct MessageRow: View {
                     messageText
                     if !message.isRedacted { messageExtras }
                 }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+    }
+    @ViewBuilder private var compactBody: some View {
+        if !message.isRedacted && message.kind != "m.room.encrypted" && message.showsMessageBody {
+            NativeMessageBody(
+                body: message.body, formattedBody: message.formattedBody, edited: message.isEdited,
+                senderName: message.senderName, onOpenSender: actions.openProfile, menuCommands: actions.menu
+            ).opacity(pendingSend || pendingMutation ? 0.5 : 1)
+        } else {
+            Button {
+                actions.openProfile?()
+            } label: {
+                Text(message.senderName).font(m.font(.reading, .semibold))
+                    .foregroundStyle(colors.textPrimary).lineLimit(1).truncationMode(.tail)
+            }.buttonStyle(.row).disabled(actions.openProfile == nil).linkCursor().help("View profile")
+            if message.isRedacted || message.kind == "m.room.encrypted" || message.isEdited {
+                messageText
             }
         }
     }

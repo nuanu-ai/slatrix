@@ -267,6 +267,95 @@ struct MessageRowTests {
             "Long sender name squeezed compact attachment: short=\(shortName) long=\(longName)")
     }
 
+    @Test("Compact mode aligns body text and extras on one rail to the right of the timestamp gutter")
+    func compactAlignsBodyAndExtrasOnOneRail() throws {
+        let saved = UserDefaults.standard.object(forKey: "appearance.density")
+        defer { UserDefaults.standard.set(saved, forKey: "appearance.density") }
+        let appearance = AppearanceStore()
+        appearance.density = .compact
+        let matrix = MatrixService.scratch()
+        func views(in view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        func measure(senderName: String) throws -> (bodyX: CGFloat, bodyWidth: CGFloat, extraX: CGFloat) {
+            var msg = ChatMessage(
+                id: "$rail-\(senderName)", roomID: "!room:example.org", senderID: "@a:example.org",
+                senderName: senderName,
+                body: "A compact message long enough to wrap cleanly onto a second line inside the content rail",
+                timestamp: Date(timeIntervalSince1970: 1_800_000_000))
+            msg.reactions = [MessageReaction(key: "🔥", count: 2, mine: false)]
+            msg.replyCount = 2
+            let attachment = MessageAttachment(
+                name: "notes.txt", url: "mxc://example.org/notes", mimeType: "text/plain", size: 2_048)
+            msg.kind = "m.file"
+            msg.mediaCaption = msg.body
+            msg.attachment = attachment
+            let hosting = NSHostingView(
+                rootView: MessageRow(
+                    message: msg, grouped: false, timeLabel: "10:00",
+                    attachment: AttachmentView(matrix: matrix, message: msg, attachment: attachment)
+                ).frame(width: 440).environmentObject(appearance).environment(\.metrics, m))
+            let rowHeight = ceil(hosting.fittingSize.height)
+            hosting.frame = NSRect(x: 0, y: 0, width: 440, height: rowHeight)
+            let window = offscreenWindow(NSSize(width: 440, height: rowHeight))
+            defer {
+                window.contentView = nil
+                window.close()
+            }
+            window.contentView = hosting
+            hosting.layoutSubtreeIfNeeded()
+            let text = try #require(views(in: hosting).compactMap { $0 as? MessageTextView }.first)
+            let textFrame = text.convert(text.bounds, to: nil)
+            // The FileCard's button sits directly inside messageExtras below the body.
+            let extra = try #require(
+                views(in: hosting).first {
+                    let frame = $0.convert($0.bounds, to: nil)
+                    return frame.maxY < textFrame.minY && frame.width >= FileCard.minWidth - 1 && frame.width < 360
+                })
+            let extraFrame = extra.convert(extra.bounds, to: nil)
+            return (textFrame.minX, textFrame.width, extraFrame.minX)
+        }
+        let short = try measure(senderName: "Bo")
+        let long = try measure(senderName: "Alexandria Bartholomew-Wellington")
+        let minRail = m.conversationInset(thread: false) + m(40)
+        #expect(short.bodyX >= minRail, "Compact body must clear the fixed timestamp gutter: \(short.bodyX)")
+        #expect(
+            abs(short.bodyX - long.bodyX) < 1,
+            "Sender name length shifted body rail: \(short.bodyX) vs \(long.bodyX)")
+        #expect(
+            abs(short.bodyWidth - long.bodyWidth) < 1,
+            "Sender name length narrowed compact body: \(short.bodyWidth) vs \(long.bodyWidth)")
+        #expect(
+            abs(short.extraX - short.bodyX) < 2,
+            "Compact extras must align on the content rail (\(short.bodyX)), not under the timestamp (\(short.extraX))")
+    }
+
+    @Test("Compact mode stacks sender name above block-starting bodies while flowing inline for plain text")
+    func compactBlockVsInlineSender() {
+        let plain = MessageBodyRenderer().render(body: "Regular inline message", formattedBody: nil)
+        let codeBlock = MessageBodyRenderer().render(
+            body: "let x = 1", formattedBody: "<pre><code>let x = 1</code></pre>")
+        let quote = MessageBodyRenderer().render(body: "> quoted", formattedBody: "<blockquote>quoted</blockquote>")
+        let list = MessageBodyRenderer().render(body: "- item", formattedBody: "<ul><li>item</li></ul>")
+        let heading = MessageBodyRenderer().render(body: "Title", formattedBody: "<h2>Title</h2>")
+        let emoji = MessageBodyRenderer().render(body: "🎉", formattedBody: nil)
+        let leadingBlank = MessageBodyRenderer().render(body: "\nStarts after blank line", formattedBody: nil)
+        #expect(NativeMessageBody.canFlowInlineSender(plain))
+        #expect(!NativeMessageBody.canFlowInlineSender(codeBlock))
+        #expect(!NativeMessageBody.canFlowInlineSender(quote))
+        #expect(!NativeMessageBody.canFlowInlineSender(list))
+        #expect(!NativeMessageBody.canFlowInlineSender(heading))
+        #expect(!NativeMessageBody.canFlowInlineSender(emoji))
+        #expect(!NativeMessageBody.canFlowInlineSender(leadingBlank))
+
+        let textView = MessageTextView()
+        textView.string = "Alice  Body text"
+        textView.senderPrefixLength = ("Alice  " as NSString).length
+        #expect(
+            textView.copyableText(for: NSRange(location: 0, length: (textView.string as NSString).length))
+                == "Body text")
+        #expect(textView.copyableText(for: NSRange(location: 0, length: 0)) == "Body text")
+        #expect(textView.copyableText(for: NSRange(location: 7, length: 4)) == "Body")
+    }
+
     @Test("Bookmarking a compact message does not narrow or rewrap its body text")
     func compactBookmarkDoesNotRewrap() {
         let saved = UserDefaults.standard.object(forKey: "appearance.density")
@@ -406,5 +495,49 @@ struct MessageRowTests {
         let restRed = try sample(hovered: false, backdrop: .systemRed, x: 2)
         let restBlue = try sample(hovered: false, backdrop: .systemBlue, x: 2)
         #expect(abs(restRed.redComponent - restBlue.redComponent) > 0.3)
+    }
+
+    // capability: message.deleted
+    @Test("A deleted message hides reactions, reply previews, attachments and thread bars in both densities")
+    func redactedHidesAllExtras() {
+        let saved = UserDefaults.standard.object(forKey: "appearance.density")
+        defer { UserDefaults.standard.set(saved, forKey: "appearance.density") }
+        let matrix = MatrixService.scratch()
+        var plain = ChatMessage(
+            id: "$deleted", roomID: "!room:example.org", senderID: "@anna:example.org", senderName: "Anna",
+            body: ChatMessage.deletedBody, timestamp: Date(timeIntervalSince1970: 1_800_000_000), isRedacted: true)
+        var polluted = plain
+        polluted.reactions = [MessageReaction(key: "🔥", count: 2, mine: true, senders: ["@anna:example.org"])]
+        polluted.replyCount = 4
+        polluted.replyToID = "$orig"
+        polluted.replyPreview = ChatReplyPreview(
+            state: .ready, eventID: "$orig", senderID: "@bo:example.org", senderName: "Bo", body: "Original")
+        let attachment = MessageAttachment(
+            name: "photo.png", url: "mxc://example.org/photo", mimeType: "image/png", width: 800, height: 600)
+        polluted.kind = "m.image"
+        polluted.attachment = attachment
+
+        for density: MessageDensity in [.comfortable, .compact] {
+            let appearance = AppearanceStore()
+            appearance.density = density
+            let cleanHeight = NSHostingView(
+                rootView: MessageRow(message: plain, timeLabel: "10:00").frame(width: 420)
+                    .environmentObject(appearance).environment(\.metrics, m)
+            ).fittingSize.height
+            let pollutedHeight = NSHostingView(
+                rootView: MessageRow(
+                    message: polluted, timeLabel: "10:00",
+                    replyPreview: ReplyPreviewView(
+                        matrix: matrix, message: polluted, preview: polluted.replyPreview!, origin: nil),
+                    attachment: AttachmentView(matrix: matrix, message: polluted, attachment: attachment)
+                ).frame(width: 420).environmentObject(appearance).environment(\.metrics, m)
+            ).fittingSize.height
+            #expect(
+                abs(pollutedHeight - cleanHeight) < 0.5,
+                "Deleted row grew in \(density): \(pollutedHeight) vs \(cleanHeight)")
+        }
+        plain.isRedacted = false
+        let liveWithReactions = height(message(["🔥"]), width: 420)
+        #expect(liveWithReactions > height(plain, width: 420))
     }
 }

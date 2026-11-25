@@ -336,7 +336,18 @@ struct TimelineTable: NSViewRepresentable {
                 }
                 return entry.message.senderID == me && entry.message.sendState != "sent"
             }
-        preservingPosition(keeping: sent ? .bottom : nil) {
+        let keeping: Policy.Position? =
+            if sent {
+                .bottom
+            } else if configuration.context.isThread && viewport.top <= 1 && difference.removals.isEmpty
+                && difference.insertions.count == 1,
+                case .insert(let offset, _, _) = difference.insertions.first, next[offset].id == "older"
+            {
+                .top
+            } else {
+                nil
+            }
+        preservingPosition(keeping: keeping) {
             if !difference.isEmpty {
                 NSAnimationContext.beginGrouping()
                 NSAnimationContext.current.duration = 0
@@ -504,10 +515,12 @@ struct TimelineTable: NSViewRepresentable {
             }
             lines += max(1, ceil(characters / perLine))
             var height = (row.grouped ? (row.followsAttachment ? m(14) : m.sp4) : m(29)) + lines * line
-            if !row.message.reactions.isEmpty { height += m(30) }
-            if row.message.attachment != nil { height += m(300) }
-            if row.message.replyPreview != nil { height += m(48) }
-            if (row.message.replyCount ?? 0) > 0 { height += m(28) }
+            if !row.message.isRedacted {
+                if !row.message.reactions.isEmpty { height += m(30) }
+                if row.message.attachment != nil { height += m(300) }
+                if row.message.replyPreview != nil { height += m(48) }
+                if (row.message.replyCount ?? 0) > 0 { height += m(28) }
+            }
             return height
         }
     }
@@ -723,6 +736,16 @@ struct TimelineTable: NSViewRepresentable {
             ])
     }
 
+    /// A thread pane holding only its root opens at the top so a tall root is never cut off.
+    private var startsAtTop: Bool {
+        guard configuration?.context.isThread == true else { return false }
+        let rootID = configuration?.context.threadRootID
+        return !rows.contains {
+            if case .message(let row) = $0.kind { return row.message.eventID != rootID }
+            return false
+        }
+    }
+
     private func open() {
         guard let configuration else { return }
         let hasContent = rows.contains {
@@ -737,9 +760,11 @@ struct TimelineTable: NSViewRepresentable {
             applying = false
             afterScroll()
         }
+        let openAtTop = startsAtTop
+        let fallback: Policy.Position = openAtTop ? .top : .bottom
         guard hasContent && configuration.canOpen else {
-            scroll(to: .bottom)
-            return settle(keeping: .bottom)
+            scroll(to: fallback)
+            return settle(keeping: fallback)
         }
         opened = true
         let focused = pendingFocus.flatMap { focus in rows.first { $0.messageEventID == focus }?.id }
@@ -747,7 +772,8 @@ struct TimelineTable: NSViewRepresentable {
         let remembered = configuration.live || restoresReadingPosition ? rememberedPosition : nil
         let opening = Policy.opening(
             focusedRowID: restoresReadingPosition ? nil : focused, unreadRowID: index["unread"] == nil ? nil : "unread",
-            startsAtUnread: configuration.startsAtUnread, remembered: remembered, contains: { index[$0] != nil })
+            startsAtUnread: configuration.startsAtUnread, remembered: remembered, startsAtTop: openAtTop,
+            contains: { index[$0] != nil })
         let held = known.count
         scroll(to: opening)
         settle(keeping: opening)
@@ -758,6 +784,7 @@ struct TimelineTable: NSViewRepresentable {
             case .bottom: 0
             case .centered: 3
             case _ where opening == remembered: 1
+            case .top: 4
             default: 2
             }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.logFit(opening: start) }
@@ -995,6 +1022,12 @@ struct TimelineTable: NSViewRepresentable {
             let eventID = rows[row].messageEventID
         {
             TimelineMemory.positions[key] = TimelineMemory.Anchor(eventID: eventID, offset: offset)
+        } else if startsAtTop, viewport.top >= 1, let row = visibleRows(excluding: []).first,
+            let eventID = rows[row].messageEventID, let rowFrame = frame(rows[row].id)
+        {
+            // A standalone root defaults to top when unremembered, so persist a scrolled-to-bottom offset.
+            TimelineMemory.positions[key] = TimelineMemory.Anchor(
+                eventID: eventID, offset: rowFrame.top - viewport.top)
         } else {
             TimelineMemory.positions[key] = nil
         }
@@ -1020,8 +1053,8 @@ struct TimelineTable: NSViewRepresentable {
         for (id, height) in known { if let row = index[id] { heights[id] = (fingerprint(rows[row]), height) } }
         TimelineMemory.heights.removeAll { $0.key == key }
         TimelineMemory.heights.append((key, heights))
-        // The open conversations, their threads and a few left behind.
-        if TimelineMemory.heights.count > 8 { TimelineMemory.heights.removeFirst() }
+        // The open conversations, their threads and the recent timelines kept live.
+        if TimelineMemory.heights.count > 20 { TimelineMemory.heights.removeFirst() }
     }
 
     /// Rows this timeline showed last, unchanged and at the same width, keep the heights they were measured at.

@@ -629,7 +629,7 @@ struct RootView: View {
             if let message = try? await matrix.messagePreview(roomID: item.roomID, eventID: item.eventID) {
                 let text = DesktopMessageNotification.message(
                     room: room?.name ?? "", sender: message.senderName, direct: room?.isDirect ?? false,
-                    body: message.body, reply: message.replyToID != nil)
+                    body: ActivityService.previewBody(for: message))
                 (title, body) = (text.title, "Reminder: \(text.text)")
             }
             return DesktopMessageNotification(target: target, title: title, body: body, playSound: true)

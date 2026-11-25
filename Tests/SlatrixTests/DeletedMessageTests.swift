@@ -323,6 +323,34 @@ extension DeletedMessageTests {
         #expect(await eventually { center.shown.map(\.target.eventID) == ["$kept"] })
         #expect(center.reads == 1)
     }
+
+    // capability: message.deleted
+    @Test("Deleted messages stay visible with the deleted placeholder in both channels and threads")
+    func deletedShownInChannelAndThread() async throws {
+        let root = FakeTimelineItem(textEvent("$root", body: "Root"), uniqueID: "root")
+        let reply = FakeTimelineItem(textEvent("$reply", body: "Reply"), uniqueID: "reply")
+        let room = FakeOpenRoom(Self.room, cached: [root, reply])
+        room.threadItems = [root, reply]
+        use([room])
+        await service.selectRoom(room.id())
+        let main = try #require(room.timelines.all.first)
+        main.emit([
+            .set(index: 1, value: FakeTimelineItem(textEvent("$reply", body: "", redacted: true), uniqueID: "reply"))
+        ])
+        #expect(await eventually { service.messages.last?.isRedacted == true })
+        #expect(service.messages.last?.body == ChatMessage.deletedBody)
+        #expect(service.messages.last?.reactions.isEmpty == true)
+
+        try await service.loadThread(try #require(service.messages.first))
+        #expect(await eventually { service.threadMessages.count == 2 })
+        let thread = try #require(room.timelines.all.last)
+        thread.emit([
+            .set(index: 1, value: FakeTimelineItem(textEvent("$reply", body: "", redacted: true), uniqueID: "reply"))
+        ])
+        #expect(await eventually { service.threadMessages.last?.isRedacted == true })
+        #expect(service.threadMessages.last?.body == ChatMessage.deletedBody)
+        #expect(service.threadMessages.last?.reactions.isEmpty == true)
+    }
 }
 
 /// The real SDK against the loopback homeserver: what it answers once a message is deleted on the server.

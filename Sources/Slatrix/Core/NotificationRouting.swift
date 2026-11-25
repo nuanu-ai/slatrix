@@ -64,16 +64,32 @@ struct DesktopMessageNotification {
         return lines.joined(separator: "\n")
     }
 
+    /// Removes fenced code delimiters and inline Markdown formatting markers while preserving line breaks and quotes.
+    static func stripMarkdown(_ body: String) -> String {
+        let withoutFences = body.components(separatedBy: "\n").filter {
+            !$0.trimmingCharacters(in: .whitespaces).hasPrefix("```")
+        }.joined(separator: "\n")
+        return markers.reduce(withoutFences) { text, marker in
+            marker.stringByReplacingMatches(
+                in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "$1")
+        }
+    }
+
+    static func oneLine(_ text: String) -> String {
+        text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
     private static func plain(_ body: String) -> String {
         let joined = body.components(separatedBy: "\n").filter {
             !$0.trimmingCharacters(in: .whitespaces).hasPrefix("```")
         }
         .map { $0.hasPrefix(">") ? String($0.dropFirst()) : $0 }.joined(separator: " ")
-        let text = markers.reduce(joined) { text, marker in
+        let mentionsResolved = MessageBodyRenderer.replacingMarkdownMentions(in: joined)
+        let text = markers.reduce(mentionsResolved) { text, marker in
             marker.stringByReplacingMatches(
                 in: text, range: NSRange(text.startIndex..., in: text), withTemplate: "$1")
         }
-        return text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        return oneLine(text)
     }
 
     func applyingPreviewPreference(_ enabled: Bool) -> Self {

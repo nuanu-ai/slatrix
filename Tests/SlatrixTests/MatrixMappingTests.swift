@@ -52,6 +52,39 @@ struct MatrixMappingTests {
         #expect(message.attachment == nil && message.formattedBody == nil)
     }
 
+    // capability: message.deleted
+    @Test(
+        "A deleted timeline item strips reactions, reply previews and lastReply while keeping thread membership and reply count"
+    )
+    func redactedDropsStaleExtras() {
+        final class FakeSummary: ThreadSummary, @unchecked Sendable {
+            override func numReplies() -> UInt64 { 3 }
+            override func latestEvent() -> EmbeddedEventDetails { .unavailable }
+        }
+        let quote = ReplyDetails(id: "$quoted", details: ready(content("Original")))
+        let redacted = MsgLikeContent(
+            kind: .redacted, inReplyTo: quote, threadRoot: "$root", threadSummary: FakeSummary(noHandle: .init()))
+        let item = EventTimelineItem(
+            isRemote: true, eventOrTransactionId: .eventId(eventId: "$gone"),
+            sender: "@alice:example.org", senderProfile: .unavailable, forwarder: nil, forwarderProfile: nil,
+            isOwn: false, isEditable: false, content: .msgLike(content: redacted),
+            reactions: [
+                Reaction(
+                    key: "👍",
+                    senders: [ReactionSenderData(senderId: "@bob:example.org", timestamp: 0, sendState: nil)])
+            ], eventTypeRaw: "m.room.message", timestamp: 2_000, localSendState: nil, editSendState: nil,
+            redactionSendState: nil, localCreatedAt: nil, readReceipts: [:], origin: nil, canBeRepliedTo: false,
+            lazyProvider: LazyTimelineItemProvider(noHandle: .init()))
+        let mapped = MatrixMapping.message(item, roomID: "!room:example.org", ownUserID: "@me:example.org")
+        #expect(mapped?.isRedacted == true)
+        #expect(mapped?.body == ChatMessage.deletedBody)
+        #expect(mapped?.threadRootID == "$root")
+        #expect(mapped?.reactions.isEmpty == true)
+        #expect(mapped?.replyToID == nil && mapped?.replyPreview == nil)
+        #expect(mapped?.replyCount == 3 && mapped?.lastReply == nil)
+        #expect(mapped?.attachment == nil && mapped?.formattedBody == nil)
+    }
+
     @Test("A sender reads as their localpart until the profile resolves, and a shared name carries the ID")
     func profileName() {
         #expect(MatrixMapping.profileName(.pending, userID: "@alice:example.org") == "alice")
@@ -261,6 +294,31 @@ struct ReplyPreviewMappingTests {
             "Hidden answer", formatted: FormattedBody(format: .html, body: "<span data-mx-spoiler>Hidden answer</span>")
         )
         #expect(MatrixMapping.replyPreview(eventID: "$spoiler", details: ready(spoiler)).body == "[Spoiler hidden]")
+    }
+
+    @Test("Plain-text previews sanitize Matrix Markdown mention links, inline backticks and code fences")
+    func previewSanitizesMarkdownAndBackticks() {
+        let rawMention = "[Dmitry Ukhanov](https://matrix.to/#/@dmitry.ukhanov:example.org) run `swift test`"
+        #expect(ActivityService.previewBody(rawMention, formatted: nil) == "@Dmitry Ukhanov run swift test")
+        let quote = MatrixMapping.replyPreview(eventID: "$quoted", details: ready(content(rawMention)))
+        #expect(quote.body == "@Dmitry Ukhanov run swift test")
+
+        func latest(_ body: String, formatted: FormattedBody? = nil, replyTo: InReplyToDetails? = nil) -> String? {
+            let value = LatestEventValue.remote(
+                timestamp: 1_000, sender: "@alice:example.org", isOwn: false, profile: .unavailable,
+                content: .msgLike(content: content(body, formatted: formatted, replyTo: replyTo)))
+            return MatrixMapping.latestMessage(value)?.body
+        }
+        #expect(latest("Запускаю живой план для `foo`") == "Запускаю живой план для foo")
+        #expect(latest(rawMention) == "@Dmitry Ukhanov run swift test")
+        #expect(latest("Header\n```swift\nlet x = 1\n```") == "Header let x = 1")
+        let reply = ReplyDetails(id: "$orig", details: .unavailable)
+        #expect(latest("> <@bob:example.org> Old\n\nNew `reply`", replyTo: reply) == "New reply")
+        #expect(
+            latest(
+                "secret",
+                formatted: FormattedBody(format: .html, body: "<span data-mx-spoiler>secret</span>"))
+                == "[Spoiler hidden]")
     }
 }
 

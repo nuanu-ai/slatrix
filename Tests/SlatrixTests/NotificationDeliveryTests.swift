@@ -434,6 +434,14 @@ struct NotificationTextTests {
         #expect(synced.title == spec.title && synced.text == spec.text)
         #expect(later.title == spec.title && later.text == spec.text)
     }
+
+    @Test("Direct notification text sanitizes Matrix Markdown person links and inline backticks")
+    func sanitizesMarkdownMentionsAndBackticks() {
+        let note = DesktopMessageNotification.message(
+            room: "General", sender: "Alice", direct: false,
+            body: "[Dmitry Ukhanov](https://matrix.to/#/@dmitry.ukhanov:example.org) check `deploy.sh`")
+        #expect(note.title == "General" && note.text == "Alice: @Dmitry Ukhanov check deploy.sh")
+    }
 }
 
 /// Banners of messages deleted after they came in.

@@ -7,6 +7,8 @@ enum TimelineScrollPolicy {
     static let bottomTolerance: CGFloat = 2
 
     enum Position: Equatable {
+        /// The start of the timeline, for a thread whose root stands alone.
+        case top
         /// The end of the timeline, following new messages.
         case bottom
         /// A row kept at `offset` points from the top of the viewport (negative when its top is scrolled past), and the
@@ -69,6 +71,7 @@ enum TimelineScrollPolicy {
     ) -> CGFloat? {
         let target: CGFloat
         switch position {
+        case .top: target = 0
         case .bottom: target = contentHeight - viewportHeight
         case .anchored:
             guard let held = held(position, viewportHeight: viewportHeight, frame: frame) else { return nil }
@@ -101,6 +104,7 @@ enum TimelineScrollPolicy {
     static func jump(from position: Position, to viewport: Viewport, frame: (String) -> RowFrame?) -> CGFloat? {
         let moved: CGFloat
         switch position {
+        case .top: moved = viewport.top
         case .bottom: moved = viewport.distanceFromBottom
         case .anchored:
             guard let held = held(position, viewportHeight: viewport.height, frame: frame) else { return nil }
@@ -110,16 +114,17 @@ enum TimelineScrollPolicy {
         return abs(moved) >= 1 ? moved : nil
     }
 
-    /// Where a timeline opens: at a linked message, else where the reader left this conversation, else the end.
-    /// `startsAtUnread` puts the unread line at the top instead, when it is loaded.
+    /// Where a timeline opens: at a linked message, else where the reader left this conversation, else the end (or the
+    /// start when `startsAtTop` is set, as for a thread with no replies yet). `startsAtUnread` puts the unread line at
+    /// the top instead, when it is loaded.
     static func opening(
         focusedRowID: String?, unreadRowID: String?, startsAtUnread: Bool, remembered: Position?,
-        contains: (String) -> Bool
+        startsAtTop: Bool = false, contains: (String) -> Bool
     ) -> Position {
         if startsAtUnread, let unreadRowID, contains(unreadRowID) { return .anchored(rowID: unreadRowID, offset: 0) }
         if let focusedRowID { return .centered(rowID: focusedRowID) }
         if let remembered, case .anchored(let id, _, _) = remembered, contains(id) { return remembered }
-        return .bottom
+        return startsAtTop ? .top : .bottom
     }
 
     /// "Jump to recent" shows anywhere in a timeline opened at an older message, which never gets new ones. In a live

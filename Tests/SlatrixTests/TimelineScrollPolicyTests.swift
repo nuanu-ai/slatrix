@@ -177,6 +177,25 @@ struct TimelineScrollPolicyTests {
             Policy.opening(
                 focusedRowID: nil, unreadRowID: nil, startsAtUnread: false, remembered: nil,
                 contains: loaded.contains) == .bottom)
+        #expect(
+            Policy.opening(
+                focusedRowID: nil, unreadRowID: nil, startsAtUnread: false, remembered: nil, startsAtTop: true,
+                contains: loaded.contains) == .top)
+        #expect(
+            Policy.opening(
+                focusedRowID: "linked", unreadRowID: nil, startsAtUnread: false, remembered: nil, startsAtTop: true,
+                contains: loaded.contains) == .centered(rowID: "linked"))
+        #expect(
+            Policy.opening(
+                focusedRowID: nil, unreadRowID: nil, startsAtUnread: false, remembered: remembered, startsAtTop: true,
+                contains: loaded.contains) == remembered)
+        #expect(Policy.top(for: .top, contentHeight: 2_000, viewportHeight: 600, frame: { _ in nil }) == 0)
+        #expect(
+            Policy.jump(from: .top, to: Viewport(top: 0, height: 600, contentHeight: 2_000), frame: { _ in nil })
+                == nil)
+        #expect(
+            Policy.jump(from: .top, to: Viewport(top: 120, height: 600, contentHeight: 2_000), frame: { _ in nil })
+                == 120)
     }
 
     // capability: conversation.jump-to-newest

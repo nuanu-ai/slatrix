@@ -109,14 +109,24 @@ class PillLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
     }
 }
 
+/// Compact mode's sender name flowing at the start of a plain or inline message.
+struct InlineSenderPrefix: Equatable {
+    var name: String
+    var color: NSColor
+}
+
 struct NativeSelectableMessageText: NSViewRepresentable {
     /// Layout width until SwiftUI proposes one; never seen on screen.
     private static let fallbackWidth: CGFloat = 480
+    fileprivate static let senderURL = URL(string: "slatrix-sender://profile")!
     var runs: [MessageBodyRun]
     var fontSize: Double
     var textColor: NSColor
     var linkColor: NSColor
     var mentions: MentionPalette? = nil
+    /// Compact mode's sender name flowing before the first word.
+    var senderPrefix: InlineSenderPrefix? = nil
+    var onOpenSender: (() -> Void)? = nil
     /// Muted text after the last word, such as "(edited)".
     var suffix: NSAttributedString? = nil
     var menuCommands: () -> [MessageMenuCommand]
@@ -158,9 +168,11 @@ struct NativeSelectableMessageText: NSViewRepresentable {
         let textChanged =
             context.coordinator.runs != runs || context.coordinator.fontSize != fontSize
             || context.coordinator.textColor != textColor || context.coordinator.linkColor != linkColor
-            || context.coordinator.mentions != mentions || context.coordinator.suffix != suffix
+            || context.coordinator.mentions != mentions || context.coordinator.senderPrefix != senderPrefix
+            || context.coordinator.senderLinkable != (onOpenSender != nil) || context.coordinator.suffix != suffix
         if textChanged || limitChanged { context.coordinator.sizes = [:] }
         context.coordinator.onOpenURL = onOpenURL
+        context.coordinator.onOpenSender = onOpenSender
         view.menuCommands = menuCommands
         if limitChanged {
             view.textContainer?.maximumNumberOfLines = maxLines
@@ -173,10 +185,47 @@ struct NativeSelectableMessageText: NSViewRepresentable {
             let attributed = NSMutableAttributedString(
                 attributedString: Self.attributed(
                     runs, fontSize: fontSize, textColor: textColor, linkColor: linkColor, mentions: mentions))
+            var prefixLength = 0
+            if let senderPrefix {
+                let style =
+                    (attributed.length > 0
+                        ? attributed.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle : nil)
+                    ?? MessageBlocks.paragraph(
+                        quote: false, list: 0, code: false, marker: 0, heading: false, fontSize: fontSize,
+                        lineSpacing: MessageBlocks.readingLineSpacing(fontSize))
+                var nameAttributes: [NSAttributedString.Key: Any] = [
+                    .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
+                    .foregroundColor: senderPrefix.color,
+                    .paragraphStyle: style,
+                ]
+                if onOpenSender != nil { nameAttributes[.link] = Self.senderURL }
+                let prefix = NSMutableAttributedString(string: senderPrefix.name, attributes: nameAttributes)
+                prefix.append(
+                    NSAttributedString(
+                        string: "  ",
+                        attributes: [.font: NSFont.systemFont(ofSize: fontSize), .paragraphStyle: style]))
+                prefixLength = prefix.length
+                attributed.insert(prefix, at: 0)
+            }
             if let suffix { attributed.append(suffix) }
-            let selection =
-                view.string == attributed.string
-                ? view.selectedRanges : [NSValue(range: NSRange(location: 0, length: 0))]
+            let oldText = view.string as NSString
+            let oldPrefix = min(view.senderPrefixLength, oldText.length)
+            let newText = attributed.string as NSString
+            let sameBody = oldText.substring(from: oldPrefix) == newText.substring(from: prefixLength)
+            let delta = prefixLength - oldPrefix
+            let selection: [NSValue] =
+                if sameBody {
+                    view.selectedRanges.map { value in
+                        let range = value.rangeValue
+                        if range.length == 0 { return NSValue(range: NSRange(location: 0, length: 0)) }
+                        let start = min(max(0, range.location + delta), newText.length)
+                        let length = min(range.length, newText.length - start)
+                        return NSValue(range: NSRange(location: start, length: length))
+                    }
+                } else {
+                    [NSValue(range: NSRange(location: 0, length: 0))]
+                }
+            view.senderPrefixLength = prefixLength
             view.textStorage?.setAttributedString(attributed)
             view.selectedRanges = selection
             context.coordinator.runs = runs
@@ -184,6 +233,8 @@ struct NativeSelectableMessageText: NSViewRepresentable {
             context.coordinator.textColor = textColor
             context.coordinator.linkColor = linkColor
             context.coordinator.mentions = mentions
+            context.coordinator.senderPrefix = senderPrefix
+            context.coordinator.senderLinkable = onOpenSender != nil
             context.coordinator.suffix = suffix
         }
     }
@@ -214,15 +265,22 @@ struct NativeSelectableMessageText: NSViewRepresentable {
         var textColor: NSColor?
         var linkColor: NSColor?
         var mentions: MentionPalette?
+        var senderPrefix: InlineSenderPrefix?
+        var senderLinkable = false
         var maximumNumberOfLines: Int?
         var suffix: NSAttributedString?
         /// Laid-out sizes by width for the current text; a timeline row is measured at one or two widths, many times.
         var sizes: [CGFloat: CGSize] = [:]
         var onOpenURL: (URL) -> Void
+        var onOpenSender: (() -> Void)?
         init(onOpenURL: @escaping (URL) -> Void) { self.onOpenURL = onOpenURL }
 
         func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
             let source = (link as? URL)?.absoluteString ?? (link as? String) ?? ""
+            if source == NativeSelectableMessageText.senderURL.absoluteString {
+                onOpenSender?()
+                return true
+            }
             if let url = MessageBodyRenderer.safeLink(source) { onOpenURL(url) }
             return true
         }
@@ -303,6 +361,28 @@ struct NativeSelectableMessageText: NSViewRepresentable {
 
 final class MessageTextView: NSTextView {
     var menuCommands: () -> [MessageMenuCommand] = { [] }
+    /// UTF-16 length of the compact inline sender prefix ("Name  "), excluded when copying body text.
+    var senderPrefixLength = 0
+
+    func copyableText(for range: NSRange) -> String {
+        let text = string as NSString
+        let prefix = min(senderPrefixLength, text.length)
+        if range.length == 0 { return text.substring(from: prefix) }
+        let end = min(NSMaxRange(range), text.length)
+        guard range.location < end else { return "" }
+        let start = (prefix > 0 && range.location < prefix && end > prefix) ? prefix : range.location
+        return text.substring(with: NSRange(location: start, length: end - start))
+    }
+
+    override func copy(_ sender: Any?) {
+        guard senderPrefixLength > 0 else { return super.copy(sender) }
+        let range = selectedRange()
+        guard range.location != NSNotFound, range.length > 0 else { return super.copy(sender) }
+        let copied = copyableText(for: range)
+        guard !copied.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(copied, forType: .string)
+    }
 
     /// A message never scrolls the timeline: AppKit asks a resized text view to reveal its selection, which would
     /// pull a resizing conversation away from its newest message.
@@ -383,7 +463,7 @@ final class MessageTextView: NSTextView {
             proposedRange.location != NSNotFound && NSMaxRange(proposedRange) <= (string as NSString).length
             ? proposedRange : NSRange(location: 0, length: 0)
         if range.length > 0 || commands.isEmpty {
-            let selection = range.length > 0 ? (string as NSString).substring(with: range) : string
+            let selection = copyableText(for: range)
             let copy = MessageMenuCommand(
                 id: "native-copy-selection", title: range.length > 0 ? "Copy selection" : "Copy text",
                 isEnabled: !selection.isEmpty
