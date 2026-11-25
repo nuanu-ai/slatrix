@@ -55,6 +55,7 @@ fun OpenChannel.waiting(): ConversationState =
 
 private const val RECENT = 10
 private const val WARM_LIMIT = 6
+private const val WARM_MIN_ROWS = 15
 private const val SNAPSHOT_LIMIT = 24
 private const val SNAPSHOT_ROWS = 30
 private const val THREAD_ROOT_KEY = "thread-root"
@@ -246,7 +247,12 @@ class MatrixWorkspace(private val scope: CoroutineScope, private val client: Cli
                 warming = entry
                 var promoted = false
                 try {
-                    val settled = timeline.state.first { !it.loading || it.error != null }
+                    var settled = timeline.state.first { !it.loading || it.error != null }
+                    if (warming === entry && settled.error == null && settled.hasMore && settled.rows.size < WARM_MIN_ROWS &&
+                        mutableSelected.value == null) {
+                        timeline.loadOlder().join()
+                        settled = timeline.state.value
+                    }
                     if (warming === entry && settled.error == null && mutableSelected.value == null &&
                         roomId !in recent && current?.room?.id != roomId && recent.size < RECENT) {
                         warming = null

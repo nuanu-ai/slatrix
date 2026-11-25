@@ -204,7 +204,12 @@ fun LiveWorkspace(covers: List<WorkspaceCover>, home: @Composable () -> Unit) {
     LaunchedEffect(slide) {
         if (slide.value < 1f) {
             if (coroutineContext.isMotionReduced(context)) slide.snapTo(1f)
-            else slide.animateTo(1f, Motion.spatial(Motion.UnitThreshold)) { topSlide.value = value }
+            else {
+                // Let the newly mounted page finish its first layout frame before starting the spring clock so heavy
+                // first-frame composition never swallows the opening 30-40ms of the slide.
+                withFrameNanos { }
+                slide.animateTo(1f, Motion.spatial(Motion.UnitThreshold)) { topSlide.value = value }
+            }
         }
         topSlide.value = slide.value
     }

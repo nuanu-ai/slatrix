@@ -641,10 +641,34 @@ class MatrixWorkspaceTest {
         workspace.close()
         assertTrue("Closing the workspace destroys all warmed room handles", client.handles.all { it.uniffiIsDestroyed })
     }
+
+    @Test fun warmingASparseRoomBackPaginatesOnePageSoFirstOpenIsNotBlank() = runTest {
+        val paged = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val betaStarted = CompletableDeferred<Unit>()
+        val client = WorkspaceClient(
+            beforeTimeline = { id -> if (id == "!beta:example.org") betaStarted.complete(Unit) },
+            onPaginate = { id -> paged += id },
+        )
+        val workspace = MatrixWorkspace(backgroundScope, client)
+        val alpha = workspaceRoom("!alpha:example.org", "Alpha")
+        val beta = workspaceRoom("!beta:example.org", "Beta")
+
+        workspace.warm(listOf(alpha.id, beta.id))
+        // Once beta starts warming, alpha has finished both initial timeline load and its sparse-room history page.
+        betaStarted.await()
+        assertEquals(listOf(alpha.id), paged.toList())
+
+        // Opening alpha attaches the warmed, already-paginated conversation synchronously on frame 0.
+        workspace.open(alpha)
+        val instant = workspace.selected.value?.conversation
+        assertNotNull("Warmed sparse room must attach on frame 0 after pre-paginating", instant)
+        workspace.close()
+    }
 }
 
 private class WorkspaceClient(private val threadRoots: Map<String, String> = emptyMap(),
     private val beforeTimeline: suspend (String) -> Unit = {},
+    private val onPaginate: (String) -> Unit = {},
     private val beforeSave: suspend () -> Unit = {}) : Client(NoHandle) {
     private val drafts = mutableMapOf<String, ComposerDraft>()
     val handles = mutableListOf<Room>()
@@ -670,7 +694,10 @@ private class WorkspaceClient(private val threadRoots: Map<String, String> = emp
                     listener.onUpdate(listOf(TimelineDiff.Reset(emptyList())))
                     return object : TaskHandle(NoHandle) { override fun cancel() { listeners -= listener } }
                 }
-                override suspend fun paginateBackwards(numEvents: UShort): Boolean = true
+                override suspend fun paginateBackwards(numEvents: UShort): Boolean {
+                    onPaginate(roomId)
+                    return true
+                }
                 override fun createMessageContent(msgType: MessageType): RoomMessageEventContentWithoutRelation =
                     object : RoomMessageEventContentWithoutRelation(NoHandle) {
                         override fun withMentions(mentions: Mentions): RoomMessageEventContentWithoutRelation = this

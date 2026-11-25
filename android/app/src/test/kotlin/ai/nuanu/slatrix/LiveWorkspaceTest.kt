@@ -463,6 +463,7 @@ class LiveWorkspaceTest {
         compose.mainClock.autoAdvance = false
         compose.runOnUiThread { stack.value = listOf("channel"); Snapshot.sendApplyNotifications() }
         compose.mainClock.advanceTimeByFrame()
+        assertFalse("Pushing page disables live blur on its first layout frame before the spring starts", channelGlass)
         compose.mainClock.advanceTimeByFrame()
         assertFalse("Pushing page must disable live blur while sliding in", channelGlass)
 
