@@ -464,4 +464,152 @@ struct ThreadFeedDiscoveryTests {
         let updated = try #require(feed.items.first { $0.root.eventID == "$t-pending" })
         #expect(updated.latest?.eventID == "$r-b" && updated.isUnread)
     }
+
+    // capability: threads.feed
+    @Test("Switching workspaces keeps each workspace's cached threads and updates read state across them")
+    func reopensAcrossWorkspacesAtOnce() async throws {
+        let me = "@me:example.org"
+        var roomA = ChatRoom(id: "!a:example.org", name: "Alpha")
+        roomA.spaceIDs = ["!ws-a:example.org"]
+        var roomB = ChatRoom(id: "!b:example.org", name: "Beta")
+        roomB.spaceIDs = ["!ws-b:example.org"]
+        let fakeA = FakeThreadRoom(
+            threads: FakeThreadList([
+                ThreadListItem(
+                    rootEvent: threadEvent("$root-a", timestamp: 1_000),
+                    latestEvent: threadEvent("$reply-a", timestamp: 5_000), numReplies: 2)
+            ]),
+            timelines: [
+                "$root-a": FakeEventTimeline(textEvent("$root-a", body: "Alpha root")),
+                "$reply-a": FakeEventTimeline(textEvent("$reply-a", body: "Alpha reply")),
+            ])
+        let fakeB = FakeThreadRoom(
+            threads: FakeThreadList([
+                ThreadListItem(
+                    rootEvent: threadEvent("$root-b", timestamp: 2_000),
+                    latestEvent: nil, numReplies: 1)
+            ]),
+            timelines: ["$root-b": FakeEventTimeline(textEvent("$root-b", body: "Beta root"))])
+        let client = FakeThreadClient(sdkRoom, rooms: [roomA.id: fakeA, roomB.id: fakeB])
+        await feed.open(client: client, rooms: [roomA, roomB], workspaceID: "!ws-a:example.org", ownUserID: me) { _ in }
+        feed.close()
+        await feed.open(client: client, rooms: [roomA, roomB], workspaceID: "!ws-b:example.org", ownUserID: me) { _ in }
+        feed.close()
+
+        // Marking a thread read in workspace A clears it in workspace A's cached list too.
+        feed.markThreadRead(roomID: roomA.id, rootID: "$root-a", eventID: "$reply-a")
+
+        var shownOnReturn: [(String, Bool)] = []
+        await feed.open(client: client, rooms: [roomA, roomB], workspaceID: "!ws-a:example.org", ownUserID: me) { _ in
+            if shownOnReturn.isEmpty { shownOnReturn = feed.items.map { ($0.root.eventID, $0.isUnread) } }
+        }
+        #expect(shownOnReturn.count == 1)
+        #expect(shownOnReturn.first?.0 == "$root-a")
+        #expect(shownOnReturn.first?.1 == false)
+    }
+
+    // capability: threads.feed
+    @Test("Opening Threads across many rooms updates subscriptions once instead of per small batch")
+    func discoversRoomsInOneBatch() async {
+        var subscriptionUpdates = 0
+        await feed.open(client: FakeThreadClient(sdkRoom), rooms: rooms, workspaceID: nil) { _ in
+            subscriptionUpdates += 1
+        }
+        #expect(subscriptionUpdates == 1)
+        #expect(feed.checkedRoomCount == rooms.count)
+    }
+
+    // capability: threads.feed
+    @Test("Reopening Threads with cached previews does not block on re-opening preview timelines")
+    func warmReopenSkipsHydrationBarrier() async throws {
+        let fakeRoom = FakeThreadRoom(
+            threads: FakeThreadList([
+                ThreadListItem(
+                    rootEvent: threadEvent("$root", timestamp: 1_000),
+                    latestEvent: threadEvent("$reply", timestamp: 2_000), numReplies: 1)
+            ]),
+            timelines: [
+                "$root": FakeEventTimeline(textEvent("$root", body: "Cached root")),
+                "$reply": FakeEventTimeline(textEvent("$reply", body: "Cached reply")),
+            ])
+        let client = FakeThreadClient(fakeRoom)
+        await feed.open(client: client, rooms: [rooms[0]], workspaceID: nil) { _ in }
+        feed.close()
+
+        fakeRoom.timelineGate.arm()
+        var finished = false
+        let reopen = Task {
+            await feed.open(client: client, rooms: [rooms[0]], workspaceID: nil) { _ in }
+            finished = true
+        }
+        let settled = await eventually(timeout: .seconds(2)) { finished || fakeRoom.timelineGate.isWaiting }
+        let blocked = fakeRoom.timelineGate.isWaiting
+        fakeRoom.timelineGate.release()
+        await reopen.value
+        #expect(settled && !blocked)
+        #expect(feed.preview(roomID: rooms[0].id, eventID: "$root").state == .ready)
+        #expect(feed.preview(roomID: rooms[0].id, eventID: "$reply").state == .ready)
+    }
+
+    // capability: threads.feed
+    @Test("Preparing Threads restores cached items synchronously and prevents an empty-state flash when cold")
+    func prepareRestoresCacheOrMarksDiscovering() async {
+        feed.prepare(workspaceID: "!cold:example.org")
+        #expect(feed.isDiscovering && feed.items.isEmpty)
+
+        let fakeRoom = FakeThreadRoom(
+            threads: FakeThreadList([ThreadListItem(rootEvent: threadEvent("$root"), latestEvent: nil, numReplies: 1)]),
+            timelines: ["$root": FakeEventTimeline(textEvent("$root", body: "Ready"))])
+        await feed.open(client: FakeThreadClient(fakeRoom), rooms: [rooms[0]], workspaceID: nil) { _ in }
+        feed.close()
+        #expect(feed.items.isEmpty && !feed.isDiscovering)
+
+        feed.prepare(workspaceID: nil)
+        #expect(feed.isDiscovering && feed.items.map(\.root.eventID) == ["$root"])
+    }
+
+    // capability: threads.feed
+    @Test("Cold open publishes threads when hydration times out instead of blocking on a slow preview")
+    func coldOpenRespectsHydrationTimeout() async {
+        let fakeRoom = FakeThreadRoom(
+            threads: FakeThreadList([ThreadListItem(rootEvent: threadEvent("$slow"), latestEvent: nil, numReplies: 1)]),
+            timelines: ["$slow": FakeEventTimeline(textEvent("$slow", body: "Arrived late"))])
+        fakeRoom.timelineGate.arm()
+        feed.hydrationTimeout = .milliseconds(25)
+        await feed.open(client: FakeThreadClient(fakeRoom), rooms: [rooms[0]], workspaceID: nil) { _ in }
+        #expect(!feed.isDiscovering && feed.items.map(\.root.eventID) == ["$slow"])
+        // Once the slow preview eventually lands in the background, the row updates cleanly.
+        fakeRoom.timelineGate.release()
+        #expect(await eventually { feed.preview(roomID: rooms[0].id, eventID: "$slow").state == .ready })
+    }
+
+    // capability: threads.feed
+    @Test("Failed rooms and rooms with older pages can be retried or loaded in batch")
+    func retryFailedAndLoadOlderBatch() async {
+        let failingList = FakeThreadList([
+            ThreadListItem(rootEvent: threadEvent("$recovered"), latestEvent: nil, numReplies: 1)
+        ])
+        failingList.failPaginate = true
+        let pagedList = FakeThreadList([
+            ThreadListItem(rootEvent: threadEvent("$page1"), latestEvent: nil, numReplies: 1)
+        ])
+        pagedList.remainingPages = 2
+        let client = FakeThreadClient(
+            sdkRoom,
+            rooms: [
+                rooms[0].id: FakeThreadRoom(threads: failingList),
+                rooms[1].id: FakeThreadRoom(threads: pagedList),
+            ])
+        await feed.open(client: client, rooms: [rooms[0], rooms[1]], workspaceID: nil) { _ in }
+        #expect(feed.failedRoomCount == 1)
+        #expect(feed.hasOlderThreads)
+
+        failingList.failPaginate = false
+        await feed.retryFailed()
+        #expect(feed.failedRoomCount == 0 && feed.items.contains { $0.root.eventID == "$recovered" })
+
+        await feed.loadOlder()
+        #expect(!feed.hasOlderThreads)
+        #expect(pagedList.pages.all.count == 2)
+    }
 }

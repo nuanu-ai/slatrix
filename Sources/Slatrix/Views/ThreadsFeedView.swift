@@ -1,52 +1,49 @@
 import SwiftUI
 
 struct ThreadsFeedView: View {
-    private static let historyMaxHeight: CGFloat = 144
     @Environment(\.metrics) private var m
     let matrix: MatrixService
     let feed: ThreadFeedService
     @Binding var workspaceID: String?
+    var unreadOnly = false
     var onOpen: (ChatMessage) -> Void
     @EnvironmentObject private var appearance: AppearanceStore
-    @State private var coverageExpanded = false
-    @State private var unreadOnly = false
     private var colors: AppColors { appearance.colors }
-    private var failedRoomCount: Int { feed.roomStates.filter { $0.state == .error }.count }
     private var displayedItems: [ThreadFeedItem] { unreadOnly ? feed.items.filter(\.isUnread) : feed.items }
+
+    private var errorBannerMessage: String? {
+        if let error = feed.errorMessage { return error }
+        let failed = feed.failedRoomCount
+        guard failed > 0 else { return nil }
+        return failed == 1 ? "Couldn’t check 1 conversation" : "Couldn’t check \(failed) conversations"
+    }
 
     var body: some View {
         let visibleItems = displayedItems
         VStack(spacing: 0) {
-            HStack(spacing: m.sp12) {
-                Spacer()
-                Toggle(isOn: $unreadOnly) { Text("Unreads").font(m.font(.body)) }
-                    .toggleStyle(.switch)
-                    .controlSize(.mini)
-                FeedWorkspacePicker(matrix: matrix, workspaceID: $workspaceID)
-                IconButton(symbol: "arrow.clockwise", label: "Refresh threads", role: .body) { refresh() }.disabled(
-                    feed.isLoading)
-            }.padding(.horizontal, m.sp20).frame(height: m.control + m.sp16)
             Divider().overlay(colors.border)
-            if let error = feed.errorMessage {
+            if let error = errorBannerMessage {
                 HStack {
                     InlineErrorView(message: error)
-                    Button("Retry", action: refresh).buttonStyle(.textLink).font(m.font(.subheadline)).padding(
-                        .trailing, m.sp20)
+                    Button("Retry") {
+                        if feed.errorMessage != nil { refresh() } else { Task { await matrix.retryFailedThreads() } }
+                    }.buttonStyle(.textLink).font(m.font(.subheadline)).padding(.trailing, m.sp20)
                 }.disabled(feed.isLoading)
+                Divider().overlay(colors.border)
             }
             if visibleItems.isEmpty {
                 if feed.items.isEmpty && (feed.isLoading || feed.isDiscovering) {
                     SkeletonRows(interval: .threadsLoading)
+                        .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else if unreadOnly && !feed.items.isEmpty {
                     EmptyStateView(symbol: "bubble.left.and.bubble.right", title: "No unread threads")
                 } else {
-                    EmptyStateView(symbol: "bubble.left.and.bubble.right", title: "No threads yet") {
-                        if feed.canCheckMore { Button("Look further") { Task { await matrix.checkMoreThreads() } } }
-                    }
+                    EmptyStateView(symbol: "bubble.left.and.bubble.right", title: "No threads yet")
                 }
             } else {
                 ScrollView {
-                    LazyVStack(spacing: 0) {
+                    LazyVStack(spacing: m.sp12) {
                         ForEach(visibleItems) { item in
                             ThreadFeedRow(
                                 item: item, root: feed.preview(roomID: item.roomID, eventID: item.root.eventID),
@@ -55,75 +52,32 @@ struct ThreadsFeedView: View {
                                         ? nil : feed.preview(roomID: item.roomID, eventID: $0.eventID)
                                 }, matrix: matrix, onOpen: onOpen,
                                 hydrate: { [feed] in await feed.hydratePreview(item, retry: $0) })
-                            Divider().overlay(colors.border).padding(.leading, m.sp20 + m.avatar + m.sp12)
                         }
-                        if feed.isLoading {
-                            DelayedProgress().padding(m.sp20).accessibilityLabel(
-                                "Checking more threads"
-                            ).loadingInterval(.threadsLoading)
+                        if feed.hasOlderThreads {
+                            Button("Load older threads") { Task { await matrix.loadOlderThreads() } }
+                                .buttonStyle(.textLink)
+                                .font(m.font(.subheadline, .medium))
+                                .padding(.vertical, m.sp8)
+                                .disabled(feed.isLoading)
                         }
-                    }.padding(.horizontal, m.sp2)
+                    }.padding(.horizontal, m.sp20).padding(.vertical, m.sp16)
                         .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
                         .frame(maxWidth: .infinity)
                 }
             }
-            Divider().overlay(colors.border)
-            coverage
         }.background(colors.canvas)
+            .environment(\.mentions, MentionContext(me: matrix.user?.id))
+            .onAppear { matrix.prepareThreads(workspaceID: workspaceID) }
+            .onChange(of: workspaceID) { _, next in matrix.prepareThreads(workspaceID: next) }
             .task(id: workspaceID) { await matrix.openThreads(workspaceID: workspaceID) }
             .onDisappear { matrix.closeThreads() }
-    }
-
-    private var coverage: some View {
-        VStack(alignment: .leading, spacing: m.sp12) {
-            HStack(alignment: .center) {
-                if failedRoomCount > 0 {
-                    Button("\(failedRoomCount) couldn’t load") { coverageExpanded = true }.buttonStyle(.textLink).font(
-                        m.font(.subheadline))
-                }
-                Spacer()
-                if feed.canCheckMore {
-                    Button("Look further") { Task { await matrix.checkMoreThreads() } }.font(m.font(.subheadline))
-                        .disabled(feed.isLoading)
-                }
-            }
-            DisclosureGroup(isExpanded: $coverageExpanded) {
-                ScrollView {
-                    LazyVStack(spacing: m.sp8) {
-                        ForEach(feed.roomStates) { state in
-                            HStack(spacing: m.sp8) {
-                                Text(state.name).font(m.font(.subheadline)).lineLimit(1)
-                                Spacer()
-                                if state.state == .loading {
-                                    DelayedProgress()
-                                } else if state.state == .error {
-                                    Button("Retry") { Task { await matrix.retryThreads(roomID: state.id) } }
-                                        .buttonStyle(.textLink).font(m.font(.subheadline)).help(
-                                            state.errorMessage ?? "Retry this conversation")
-                                } else if state.state == .unloaded {
-                                    Text("Not loaded").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-                                } else if state.hasMore {
-                                    Button("Load older") { Task { await matrix.loadOlderThreads(roomID: state.id) } }
-                                        .buttonStyle(.textLink).font(m.font(.subheadline)).disabled(feed.isLoading)
-                                } else {
-                                    Text("Done").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-                                }
-                            }
-                        }
-                    }.padding(.top, m.sp8).padding(.leading, m.sp16)
-                }.frame(maxHeight: m(Self.historyMaxHeight))
-            } label: {
-                Text("\(feed.checkedRoomCount) of \(feed.totalRoomCount) conversations").font(m.font(.subheadline))
-                    .foregroundStyle(colors.textSecondary)
-            }
-        }.padding(.horizontal, m.sp20).padding(.vertical, m.sp12).background(colors.raised)
     }
 
     private func refresh() { Task { await matrix.openThreads(workspaceID: workspaceID) } }
 }
 
 struct FeedWorkspacePicker: View {
-    private static let maxWidth: CGFloat = 210
+    private static let maxWidth: CGFloat = 180
     @Environment(\.metrics) private var m
     let matrix: MatrixService
     @Binding var workspaceID: String?
@@ -135,8 +89,32 @@ struct FeedWorkspacePicker: View {
     }
 }
 
-/// One thread. It reads only its own previews, so a preview that hydrates redraws this row alone.
-private struct ThreadFeedRow: View {
+/// Toolbar controls for Threads, isolated from `RootView` so refresh state changes never re-evaluate the window body.
+struct ThreadsToolbarControls: View {
+    @Environment(\.metrics) private var m
+    let matrix: MatrixService
+    let feed: ThreadFeedService
+    @Binding var workspaceID: String?
+    @Binding var unreadOnly: Bool
+
+    var body: some View {
+        HStack(spacing: m.sp12) {
+            Toggle(isOn: $unreadOnly) { Text("Unreads").font(m.font(.body)) }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .fixedSize()
+            if !matrix.workspaces.isEmpty {
+                FeedWorkspacePicker(matrix: matrix, workspaceID: $workspaceID)
+            }
+            IconButton(symbol: "arrow.clockwise", label: "Refresh threads", role: .body) {
+                Task { await matrix.openThreads(workspaceID: workspaceID) }
+            }.disabled(feed.isLoading)
+        }
+    }
+}
+
+/// One thread card. It reads only its own previews, so a preview that hydrates redraws this row alone.
+struct ThreadFeedRow: View {
     let item: ThreadFeedItem
     let root: ThreadPreview
     let latest: ThreadPreview?
@@ -145,103 +123,118 @@ private struct ThreadFeedRow: View {
     let hydrate: (_ retry: Bool) async -> Void
     @Environment(\.metrics) private var m
     @EnvironmentObject private var appearance: AppearanceStore
+    @State private var hovering = false
     private var colors: AppColors { appearance.colors }
     private var failed: Bool { root.state == .failed || latest?.state == .failed }
+    private var replyLabel: String {
+        item.replyCount > 0 ? "\(item.replyCount) \(item.replyCount == 1 ? "reply" : "replies")" : "Thread"
+    }
 
     var body: some View {
         let rootMessage = root.shown(item.root)
+        let cardShape = RoundedRectangle(cornerRadius: m.radiusLarge)
         Button {
             onOpen(rootMessage)
         } label: {
-            VStack(alignment: .leading, spacing: m.sp12) {
+            VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: m.sp8) {
-                    Image(
-                        systemName: item.isDirect ? "bubble.left.and.bubble.right" : item.isPrivate ? "lock" : "number"
-                    ).font(
-                        m.font(.subheadline))
-                    Text(item.roomName).font(m.font(.subheadline, item.isUnread ? .semibold : .regular)).lineLimit(1)
-                    Spacer()
-                    Text(item.lastActivityAt, format: .dateTime.month(.abbreviated).day().hour().minute()).font(
-                        m.font(.subheadline)
-                    ).foregroundStyle(colors.textSecondary)
+                    Image(systemName: item.isDirect ? "person" : item.isPrivate ? "lock" : "number")
+                        .font(m.font(.subheadline))
+                    Text(item.roomName)
+                        .font(m.font(.subheadline, item.isUnread ? .semibold : .medium))
+                        .lineLimit(1)
+                    Spacer(minLength: m.sp8)
+                    Text(replyLabel)
+                        .font(m.font(.subheadline, item.isUnread ? .semibold : .medium))
+                        .foregroundStyle(item.isUnread ? colors.accent : colors.textSecondary)
+                    Text("·").font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                    Text(LatestMessage(body: nil, timestamp: item.lastActivityAt, isOwn: false).time())
+                        .font(m.font(.subheadline))
+                        .foregroundStyle(colors.textSecondary)
+                        .help(item.lastActivityAt.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()))
                     if item.isUnread { Circle().fill(colors.accent).frame(width: m.sp8, height: m.sp8) }
                 }.foregroundStyle(item.isUnread ? colors.textPrimary : colors.textSecondary)
+                    .padding(.horizontal, m.sp16).padding(.top, m.sp12).padding(.bottom, m.sp8)
+
                 HStack(alignment: .top, spacing: m.sp12) {
                     AvatarView(
                         name: rootMessage.senderName, size: m.avatar, matrix: matrix, source: rootMessage.avatarURL)
                     VStack(alignment: .leading, spacing: m.sp4) {
-                        Text(rootMessage.senderName).font(m.font(.reading, item.isUnread ? .semibold : .medium))
-                            .foregroundStyle(colors.textPrimary)
-                        previewBody(rootMessage, state: root.state, shape: item.root).font(m.font(.reading))
-                            .foregroundStyle(
-                                colors.textBody
-                            ).lineLimit(3).multilineTextAlignment(.leading)
+                        Text(rootMessage.senderName).font(m.font(.reading, .semibold))
+                            .foregroundStyle(colors.textPrimary).lineLimit(1)
+                        previewBody(
+                            rootMessage, state: root.state, shape: item.root, role: .reading, color: colors.textBody,
+                            limit: 3)
                     }.frame(maxWidth: .infinity, alignment: .leading)
-                }
+                }.padding(.horizontal, m.sp16).padding(.top, m.sp4)
+                    .padding(.bottom, latest == nil ? m.sp16 : m.sp12)
+
                 if let latest, let snapshot = item.latest {
                     let message = latest.shown(snapshot)
+                    let textColumnInset = m.sp16 + m.avatar + m.sp12
+                    Divider().overlay(colors.border).padding(.leading, textColumnInset).padding(.trailing, m.sp16)
                     HStack(alignment: .top, spacing: m.sp8) {
-                        RoundedRectangle(cornerRadius: 1).fill(colors.border).frame(width: m(2)).padding(
-                            .leading, m.sp16)
                         AvatarView(
-                            name: message.senderName, size: m.avatarMedium, matrix: matrix, source: message.avatarURL)
-                        VStack(alignment: .leading, spacing: m.sp4) {
-                            HStack(spacing: m.sp8) {
-                                Text(message.senderName).font(m.font(.caption, item.isUnread ? .semibold : .regular))
-                                    .foregroundStyle(item.isUnread ? colors.textPrimary : colors.textSecondary)
-                                Text("Latest reply").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
-                            }
-                            previewBody(message, state: latest.state, shape: snapshot).font(m.font(.caption))
-                                .foregroundStyle(
-                                    item.isUnread ? colors.textBody : colors.textSecondary
-                                ).lineLimit(2).multilineTextAlignment(.leading)
+                            name: message.senderName, size: m.avatarSmall, matrix: matrix, source: message.avatarURL)
+                        VStack(alignment: .leading, spacing: m.sp2) {
+                            Text(message.senderName)
+                                .font(m.font(.body, item.isUnread ? .semibold : .medium))
+                                .foregroundStyle(item.isUnread ? colors.textPrimary : colors.textSecondary)
+                                .lineLimit(1)
+                            previewBody(
+                                message, state: latest.state, shape: snapshot, role: .body,
+                                color: item.isUnread ? colors.textBody : colors.textSecondary, limit: 2)
                         }.frame(maxWidth: .infinity, alignment: .leading)
-                    }.fixedSize(horizontal: false, vertical: true)
+                    }.padding(.leading, textColumnInset).padding(.trailing, m.sp16).padding(.vertical, m.sp12)
                 }
-                HStack(spacing: m.sp8) {
-                    Image(systemName: "bubble.left.and.bubble.right").font(m.font(.subheadline))
-                    Text(
-                        item.replyCount > 0
-                            ? "\(item.replyCount) \(item.replyCount == 1 ? "reply" : "replies")" : "Open thread"
-                    ).font(m.font(.subheadline, .semibold))
-                    Image(systemName: "chevron.right").font(m.font(.subheadline, .semibold))
-                }.foregroundStyle(colors.accent).padding(.leading, m.avatar + m.sp12)
-                if failed {
-                    Text("Preview unavailable").font(m.font(.caption)).foregroundStyle(colors.textSecondary)
-                        .padding(.leading, m.avatar + m.sp12).help(
-                            root.error ?? latest?.error ?? "Right-click to retry")
-                }
-            }.padding(.horizontal, m.sp20).padding(.vertical, m.sp20).frame(maxWidth: .infinity, alignment: .leading)
-                .modifier(FeedRowHover())
-                .contentShape(Rectangle())
+            }.frame(maxWidth: .infinity, alignment: .leading)
+                .background(hovering ? colors.rowHover : colors.surfaceCard, in: cardShape)
+                .overlay { cardShape.strokeBorder(hovering ? colors.borderStrong : colors.border, lineWidth: 0.5) }
+                .contentShape(cardShape)
+                .onHover { hovering = $0 }
                 .accessibilityElement(children: .combine).accessibilityLabel(
-                    "Thread in \(item.roomName), \(rootMessage.senderName), \(Self.plainPreview(rootMessage)), \(item.replyCount) replies"
+                    "Thread in \(item.roomName), \(rootMessage.senderName), \(Self.plainPreview(rootMessage)), \(item.replyCount) \(item.replyCount == 1 ? "reply" : "replies")"
                 ).accessibilityValue(item.isUnread ? "Unread" : "")
         }.buttonStyle(.row)
             .task(id: item.id + (item.latest?.eventID ?? "")) { await hydrate(false) }
             .contextMenu {
+                Button("Open thread") { onOpen(rootMessage) }
                 if failed { Button("Retry preview") { Task { await hydrate(true) } } }
             }
     }
 
-    /// Until its current text is read, a message shows as bars the shape of the text it was first sent with, so the
-    /// row keeps about its height and never shows a version that may since have been edited.
-    @ViewBuilder private func previewBody(_ message: ChatMessage, state: ThreadPreview.State, shape: ChatMessage)
-        -> some View
-    {
-        switch state {
-        case .ready where message.isRedacted:
-            Text(ChatMessage.deletedBody).italic().foregroundStyle(colors.textSecondary)
-        case .ready:
-            NativeMessageBody(
-                body: Self.preview(message), formattedBody: message.formattedBody, showsSpoilerControl: false,
-                largeEmoji: false
-            ).allowsHitTesting(false)
-        case .failed: Text(Self.plainPreview(message))
-        case .snapshot, .loading:
-            Text(Self.plainPreview(shape)).redacted(reason: .placeholder).accessibilityHidden(true)
+    /// Until its current text is read, a message shows as bars using the same font role, line spacing and line limit
+    /// as `NativeMessageBody`, so hydrating or failing keeps the card's height still and never exposes unedited text.
+    @ViewBuilder private func previewBody(
+        _ message: ChatMessage, state: ThreadPreview.State, shape: ChatMessage, role: TextRole, color: Color, limit: Int
+    ) -> some View {
+        let spacing = MessageBlocks.readingLineSpacing(m.size(role))
+        let minLine = ceil(m.size(role) + 3)
+        Group {
+            switch state {
+            case .ready where message.isRedacted:
+                Text(ChatMessage.deletedBody).italic().font(m.font(role)).lineSpacing(spacing)
+                    .foregroundStyle(colors.textSecondary)
+            case .ready:
+                NativeMessageBody(
+                    body: Self.preview(message), formattedBody: message.formattedBody, showsSpoilerControl: false,
+                    largeEmoji: false, role: role, textColor: color
+                ).allowsHitTesting(false)
+            case .failed:
+                Text("Preview unavailable").italic().font(m.font(role)).lineSpacing(spacing)
+                    .foregroundStyle(colors.textSecondary)
+                    .help(root.error ?? latest?.error ?? "Right-click to retry")
+            case .snapshot, .loading:
+                Text(Self.plainPreview(shape)).font(m.font(role)).lineSpacing(spacing)
+                    .foregroundStyle(color)
+                    .redacted(reason: .placeholder).accessibilityHidden(true)
+            }
         }
+        .lineLimit(limit)
+        .multilineTextAlignment(.leading)
+        .frame(minHeight: minLine, alignment: .topLeading)
     }
+
     private static func preview(_ message: ChatMessage) -> String {
         if message.isRedacted { return ChatMessage.deletedBody }
         if message.formattedBody?.localizedCaseInsensitiveContains("data-mx-spoiler") == true {
@@ -249,6 +242,7 @@ private struct ThreadFeedRow: View {
         }
         return message.body.isEmpty ? message.attachment?.name ?? "Message" : message.body
     }
+
     private static func plainPreview(_ message: ChatMessage) -> String {
         if message.isRedacted { return ChatMessage.deletedBody }
         let text = ActivityService.previewBody(for: message)

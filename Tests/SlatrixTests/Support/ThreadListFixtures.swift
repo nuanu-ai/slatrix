@@ -6,6 +6,8 @@ final class FakeThreadList: ThreadListService, @unchecked Sendable {
     private let lock = NSLock()
     private var storedValues: [ThreadListItem]
     let pages = Recorder<Void>()
+    var failPaginate = false
+    var remainingPages = 1
     private var listeners: [ThreadListEntriesListener] = []
     init(_ values: [ThreadListItem] = []) {
         self.storedValues = values
@@ -16,9 +18,13 @@ final class FakeThreadList: ThreadListService, @unchecked Sendable {
         get { lock.withLock { storedValues } }
         set { lock.withLock { storedValues = newValue } }
     }
-    override func paginate() async throws { pages.append(()) }
+    override func paginate() async throws {
+        pages.append(())
+        if failPaginate { throw ClientError.Generic(msg: "pagination failed", details: nil) }
+        if remainingPages > 0 { remainingPages -= 1 }
+    }
     override func items() -> [ThreadListItem] { values }
-    override func paginationState() -> ThreadListPaginationState { .idle(endReached: true) }
+    override func paginationState() -> ThreadListPaginationState { .idle(endReached: remainingPages == 0) }
     override func subscribeToItemsUpdates(listener: ThreadListEntriesListener) -> TaskHandle {
         let current = lock.withLock {
             listeners.append(listener)
@@ -28,7 +34,7 @@ final class FakeThreadList: ThreadListService, @unchecked Sendable {
         return FakeCancellableHandle(noHandle: .init())
     }
     override func subscribeToPaginationStateUpdates(listener: ThreadListPaginationStateListener) -> TaskHandle {
-        listener.onUpdate(state: .idle(endReached: true))
+        listener.onUpdate(state: .idle(endReached: remainingPages == 0))
         return FakeCancellableHandle(noHandle: .init())
     }
     func replaySnapshot() {
@@ -89,6 +95,7 @@ final class FakeThreadRoom: Room, @unchecked Sendable {
     let timelines: [String: FakeEventTimeline]
     let configurations = Recorder<TimelineConfiguration>()
     let receiptGate = Gate()
+    let timelineGate = Gate()
     private let lock = NSLock()
     private var storedReceipts: [ReceiptThread: UserReceipt]
     private var storedPrivateReceipts: [ReceiptThread: UserReceipt]
@@ -126,6 +133,7 @@ final class FakeThreadRoom: Room, @unchecked Sendable {
     }
     override func timelineWithConfiguration(configuration: TimelineConfiguration) async throws -> Timeline {
         configurations.append(configuration)
+        await timelineGate.wait()
         guard !fail, case .event(let eventID, _, _) = configuration.focus, let timeline = timelines[eventID] else {
             throw ClientError.Generic(msg: "preview unavailable", details: nil)
         }
