@@ -261,7 +261,8 @@ private fun WorkspaceThemeScope(
                 val selected = editingWorkspace == forWorkspace
                 Box(
                     modifier
-                        .heightIn(min = UiMetrics.SectionHeader)
+                        // Compact single row on standard screens; preserve full 48dp touch height when stacked so targets don't overlap.
+                        .heightIn(min = if (sideBySide) UiMetrics.SectionHeader else UiMetrics.Touch)
                         .clip(segmentShape)
                         .then(
                             if (selected) Modifier.background(colors.canvas).border(UiMetrics.Divider, colors.borderStrong, segmentShape)

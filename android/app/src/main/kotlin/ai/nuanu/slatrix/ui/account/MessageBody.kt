@@ -60,6 +60,7 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.ResolvedTextDirection
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
@@ -223,23 +224,30 @@ private fun buildStyledText(
                 }
                 val person = first.mention?.takeIf { it != "@room" }
                 val pillStart = length
-                fun AnnotatedString.Builder.appendPillBody() {
-                    append(PILL_PAD)
-                    for (run in group) {
-                        // A mention never breaks across lines, as a pill doesn't on the Mac.
-                        val shown = if (run.mention == null) run.text else run.text.replace(' ', '\u00A0').replace('-', '\u2011')
-                        withStyle(spanStyleFor(run, yours)) { append(shown) }
-                    }
-                    append(PILL_PAD)
-                }
+                append(PILL_PAD)
                 if (person != null && onMention != null) {
                     val linkColor = if (yours) colors.mentionYouText else colors.mentionText
+                    // Keep link annotation strictly on the mention text so accessibility labels exclude padding chars.
                     withLink(LinkAnnotation.Clickable(person, TextLinkStyles(SpanStyle(color = linkColor))) { onMention(person) }) {
-                        appendPillBody()
+                        for (run in group) {
+                            // A mention never breaks across lines, as a pill doesn't on the Mac.
+                            val shown = run.text.replace(' ', '\u00A0').replace('-', '\u2011')
+                            withStyle(spanStyleFor(run, yours)) { append(shown) }
+                        }
                     }
                 } else {
-                    appendPillBody()
+                    for (run in group) {
+                        val shown = if (run.mention == null) run.text else run.text.replace(' ', '\u00A0').replace('-', '\u2011')
+                        val runStyle = spanStyleFor(run, yours)
+                        val link = run.link
+                        if (link != null && run.mention == null) {
+                            withLink(LinkAnnotation.Url(link, TextLinkStyles(runStyle))) { append(shown) }
+                        } else {
+                            withStyle(runStyle) { append(shown) }
+                        }
+                    }
                 }
+                append(PILL_PAD)
                 val pillEnd = length
                 addStringAnnotation(PILL_ANNOTATION_TAG, kind.annotation, pillStart, pillEnd)
                 pills += TextPill(pillStart, pillEnd, kind, fill)
@@ -256,7 +264,9 @@ private fun buildStyledText(
     return StyledMessageText(text, pills)
 }
 
-/** Computes rounded pill rectangles per visual line segment, handling wrapped multi-line spans cleanly. */
+private class GlyphSpan(val left: Float, val right: Float, val startOffset: Int, val endOffset: Int)
+
+/** Computes rounded pill rectangles per disjoint visual run on each line, handling wrapped and mixed-direction BiDi text. */
 internal fun computePillRects(layout: TextLayoutResult, pills: List<TextPill>, wrapPadPx: Float): List<PillRect> {
     val text = layout.layoutInput.text
     if (pills.isEmpty() || layout.lineCount == 0 || text.isEmpty()) return emptyList()
@@ -275,28 +285,55 @@ internal fun computePillRects(layout: TextLayoutResult, pills: List<TextPill>, w
             var segEnd = minOf(end, lineEnd)
             while (segEnd > segStart && text[segEnd - 1] == ' ') segEnd--
             if (segStart >= segEnd) continue
-            var left = Float.POSITIVE_INFINITY
-            var right = Float.NEGATIVE_INFINITY
+
+            // Collect non-empty character boxes and merge touching visual boxes so BiDi reordering never paints over plain text.
+            val boxes = ArrayList<GlyphSpan>(segEnd - segStart)
             for (offset in segStart until segEnd) {
                 val box = layout.getBoundingBox(offset)
-                if (box.right > box.left) {
-                    if (box.left < left) left = box.left
-                    if (box.right > right) right = box.right
+                if (box.right > box.left) boxes += GlyphSpan(box.left, box.right, offset, offset + 1)
+            }
+            if (boxes.isEmpty()) continue
+            boxes.sortBy { it.left }
+
+            val merged = ArrayList<GlyphSpan>(2)
+            for (span in boxes) {
+                val prev = merged.lastOrNull()
+                if (prev != null && span.left <= prev.right + BidiMergeTolerancePx) {
+                    merged[merged.lastIndex] = GlyphSpan(
+                        left = prev.left,
+                        right = maxOf(prev.right, span.right),
+                        startOffset = minOf(prev.startOffset, span.startOffset),
+                        endOffset = maxOf(prev.endOffset, span.endOffset),
+                    )
+                } else {
+                    merged += span
                 }
             }
-            if (!left.isFinite() || !right.isFinite() || right <= left) continue
-            val padLeft = if (segStart > start) wrapPadPx else 0f
-            val padRight = if (segEnd < end) wrapPadPx else 0f
-            val clampedLeft = (left - padLeft).coerceAtLeast(0f)
-            val clampedRight = (right + padRight).coerceAtMost(maxWidth)
+
             val lineTop = layout.getLineTop(line)
             val lineBottom = layout.getLineBottom(line)
             val lineHeight = lineBottom - lineTop
             val vInset = (lineHeight * PillVerticalInsetRatio).coerceAtMost(lineHeight * 0.2f)
             val top = lineTop + vInset
             val bottom = lineBottom - vInset
-            if (clampedRight > clampedLeft && bottom > top) {
-                rects += PillRect(clampedLeft, top, clampedRight, bottom, pill.color)
+            if (bottom <= top) continue
+
+            val wrapsBefore = segStart > start
+            val wrapsAfter = segEnd < end
+            val startRtl = layout.getBidiRunDirection(segStart) == ResolvedTextDirection.Rtl
+            val endRtl = layout.getBidiRunDirection(segEnd - 1) == ResolvedTextDirection.Rtl
+            for (run in merged) {
+                val padLeft = if ((wrapsBefore && !startRtl && segStart in run.startOffset until run.endOffset) ||
+                    (wrapsAfter && endRtl && (segEnd - 1) in run.startOffset until run.endOffset)
+                ) wrapPadPx else 0f
+                val padRight = if ((wrapsAfter && !endRtl && (segEnd - 1) in run.startOffset until run.endOffset) ||
+                    (wrapsBefore && startRtl && segStart in run.startOffset until run.endOffset)
+                ) wrapPadPx else 0f
+                val clampedLeft = (run.left - padLeft).coerceAtLeast(0f)
+                val clampedRight = (run.right + padRight).coerceAtMost(maxWidth)
+                if (clampedRight > clampedLeft) {
+                    rects += PillRect(clampedLeft, top, clampedRight, bottom, pill.color)
+                }
             }
         }
     }
@@ -304,6 +341,7 @@ internal fun computePillRects(layout: TextLayoutResult, pills: List<TextPill>, w
 }
 
 private const val PillVerticalInsetRatio = 0.05f
+private const val BidiMergeTolerancePx = 1.5f
 
 /** A message's text as Slack shows it: formatting, links, mention pills, quotes, lists and code blocks. */
 @Composable

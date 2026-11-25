@@ -325,6 +325,9 @@ class LiveProfileScreenTest {
         val all = compose.onNode(hasText("All workspaces") and isSelectable()).performScrollTo().fetchSemanticsNode().boundsInRoot
         val workspace = compose.onNode(hasText("Nuanu AI Lab") and isSelectable()).fetchSemanticsNode().boundsInRoot
         assertTrue("Scope stacks vertically below 340dp", workspace.top >= all.bottom)
+        val minTouchPx = with(compose.density) { 48f * density } - 1f
+        assertTrue("Stacked scope segments keep 48dp touch height (${all.height}px >= ${minTouchPx}px)",
+            all.height >= minTouchPx && workspace.height >= minTouchPx)
     }
 
     // capability: app.themes

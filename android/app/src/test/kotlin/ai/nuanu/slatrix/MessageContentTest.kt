@@ -16,8 +16,10 @@ import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.TextLayoutResult
 import kotlin.math.abs
+import kotlin.math.ceil
 import org.robolectric.Shadows.shadowOf
 import java.io.File
 import androidx.test.core.app.ApplicationProvider
@@ -268,9 +270,9 @@ class MessageContentTest {
             val annotation = text.getStringAnnotations(PILL_ANNOTATION_TAG, 0, text.length).first { it.item == kindTag }
             val rect = computePillRects(layouts.single(), listOf(TextPill(annotation.start, annotation.end, PillKind.Mention, expectedFill)), 0f).single()
             var painted = 0
-            val leftPx = (bounds.left + rect.left).toInt().coerceIn(0, bitmap.width - 1)
+            val leftPx = ceil(bounds.left + rect.left).toInt().coerceIn(0, bitmap.width - 1)
             val rightPx = (bounds.left + rect.right).toInt().coerceIn(0, bitmap.width - 1)
-            val topPx = (bounds.top + rect.top).toInt().coerceIn(0, bitmap.height - 1)
+            val topPx = ceil(bounds.top + rect.top).toInt().coerceIn(0, bitmap.height - 1)
             val bottomPx = (bounds.top + rect.bottom).toInt().coerceIn(0, bitmap.height - 1)
             for (y in topPx..bottomPx) {
                 for (x in leftPx..rightPx) {
@@ -278,6 +280,7 @@ class MessageContentTest {
                 }
             }
             assertTrue("Expected painted rounded pill pixels for $query/$kindTag (found $painted)", painted > 20)
+            // Sample strictly inside the bounding box's top-left corner: a square fill would paint here, a 4dp radius leaves backdrop.
             val corner = Color(bitmap.getPixel(leftPx, topPx))
             assertTrue("Corner pixel of $query/$kindTag should stay backdrop $expectedBackdrop (got $corner)",
                 matches(corner, expectedBackdrop))
@@ -287,6 +290,38 @@ class MessageContentTest {
         assertRoundedPill("sshd", "code", inCodeComposite, bubbleIn)
         assertRoundedPill("@Sam", "mention", outMentionComposite, accentFill)
         assertRoundedPill("revit-work", "code", outCodeComposite, accentFill)
+    }
+
+    // capability: message.rich-text
+    @Test fun linkedInlineCodeKeepsItsUrlAndMentionLinkExcludesPaddingAndBidiPillSkipsPlainText() {
+        val linkedCode = message("api", html = "Call <a href=\"https://example.org/api\"><code>getRoom()</code></a> now")
+        val mentionMsg = message("hi", html = "<a href=\"https://matrix.to/#/@sam:example.org\">Sam</a> look")
+        val bidiMsg = message("bidi", html = "Run <code>cmd \u05D0\u05D1</code> \u05D2\u05D3\u05D4 now")
+        show(linkedCode, mentionMsg, bidiMsg)
+
+        val linkedText = compose.onNodeWithText("getRoom()", substring = true, useUnmergedTree = true).text()
+        val urls = linkedText.getLinkAnnotations(0, linkedText.length).filter { it.item is LinkAnnotation.Url }
+        assertEquals(listOf("https://example.org/api" to "getRoom()"),
+            urls.map { (it.item as LinkAnnotation.Url).url to linkedText.substring(it.start, it.end) })
+        val codePills = linkedText.getStringAnnotations(PILL_ANNOTATION_TAG, 0, linkedText.length)
+        assertEquals(listOf("code"), codePills.map { it.item })
+
+        val mentionText = compose.onNodeWithText("@Sam", substring = true, useUnmergedTree = true).text()
+        val clickable = mentionText.getLinkAnnotations(0, mentionText.length).single { it.item is LinkAnnotation.Clickable }
+        assertEquals("@Sam", mentionText.substring(clickable.start, clickable.end))
+
+        val bidiNode = compose.onNodeWithText("cmd", substring = true, useUnmergedTree = true)
+        val bidiText = bidiNode.text()
+        val bidiLayouts = mutableListOf<TextLayoutResult>()
+        bidiNode.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(bidiLayouts) }
+        val bidiLayout = bidiLayouts.single()
+        val bidiPill = bidiText.getStringAnnotations(PILL_ANNOTATION_TAG, 0, bidiText.length).single()
+        val bidiRects = computePillRects(bidiLayout, listOf(TextPill(bidiPill.start, bidiPill.end, PillKind.Code, Color.Gray)), 0f)
+        val plainHebrewIndex = bidiText.indexOf('\u05D2')
+        val plainHebrewBox = bidiLayout.getBoundingBox(plainHebrewIndex)
+        val plainCenter = (plainHebrewBox.left + plainHebrewBox.right) / 2f
+        assertTrue("BiDi pill rects ($bidiRects) must not paint across plain Hebrew center $plainCenter",
+            bidiRects.none { plainCenter > it.left && plainCenter < it.right })
     }
 
     // capability: message.reactions.show

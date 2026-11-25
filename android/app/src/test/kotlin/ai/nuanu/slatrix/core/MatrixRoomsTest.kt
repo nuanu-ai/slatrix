@@ -941,6 +941,22 @@ class MatrixRoomsTest {
         assertEquals("New fix_1 ready", previews["Sam"])
         rooms.close()
     }
+
+    @Test fun previewSanitizerPreservesCodeFencesIdentifiersUrlsAndHandlesLargeBacktickInput() {
+        assertEquals("See @sam", sanitizePreviewText("See https://matrix.to/#/@sam:example.org",
+            "<p>See https://matrix.to/#/@sam:example.org</p>", singleLine = true))
+        assertEquals("https://example.org/docs#/@alice:example.org",
+            sanitizePreviewText("https://example.org/docs#/@alice:example.org", null, singleLine = true))
+        assertEquals("foo__bar__baz Release [v2]",
+            sanitizePreviewText("foo__bar__baz [Release [v2]](https://example.org/v2)", null, singleLine = true))
+        assertEquals("> keep\n**literal**",
+            sanitizePreviewText("```\n> keep\n**literal**\n```", null, singleLine = false))
+        val pathological = (1..2_000).joinToString(" ") { "`".repeat((it % 5) + 1) }
+        val started = System.nanoTime()
+        val result = sanitizePreviewText(pathological, null, singleLine = true)
+        val elapsedMs = (System.nanoTime() - started) / 1_000_000
+        assertTrue("Bounded preview sanitization took $elapsedMs ms", elapsedMs < 250 && result.isNotEmpty())
+    }
 }
 
 // About three times the 14–38 ms measured locally; rebuilding the whole list per message took 400–750 ms.

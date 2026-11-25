@@ -727,64 +727,128 @@ private fun messagePreviewText(content: MessageContent, singleLine: Boolean): St
     }
 }
 
+private const val MAX_PREVIEW_INPUT = 4_096
 private val QUOTE_PREFIX = Regex("""^(\s*>\s?)+""")
 private val HEADING_PREFIX = Regex("""^#{1,6}\s+""")
-private val MARKDOWN_LINK = Regex("""!?\[([^\[\]]*)]\(<?((?:https?|matrix|mailto):[^\s<>()]*(?:\([^\s<>()]*\)[^\s<>()]*)*)>?(?:\s+"[^"]*")?\)""")
-private val BARE_MATRIX_USER_URL = Regex("""(?:https://matrix\.to/#/(?:@|%40)|matrix:u/)[^\s<>()]+""", RegexOption.IGNORE_CASE)
+private val MARKDOWN_LINK = Regex("""!?\[((?:[^\[\]]|\[[^\[\]]*\])*)]\(<?((?:https?|matrix|mailto):[^\s<>()]*(?:\([^\s<>()]*\)[^\s<>()]*)*)>?(?:\s+"[^"]*")?\)""")
+private val URL_OR_USER = Regex(
+    """(?:https?://|mailto:|matrix:)[^\s<>()]+|(?<![A-Za-z0-9_])(?:@[A-Za-z0-9._=/+\-]+:(?:\[[0-9A-Fa-f:]+\]|[A-Za-z0-9](?:[A-Za-z0-9.\-]*[A-Za-z0-9])?)(?::[0-9]{1,5})?|@room(?![A-Za-z0-9_:]))""",
+    RegexOption.IGNORE_CASE,
+)
+private val SPLIT_MATRIX_PREFIX = Regex("""(?:https://matrix\.to/#/|matrix:u/)$""", RegexOption.IGNORE_CASE)
 private val INLINE_MARKERS = listOf(
-    Regex("""\*\*(.+?)\*\*"""),
-    Regex("""__(.+?)__"""),
-    Regex("""~~(.+?)~~"""),
-    Regex("""(?<![\p{L}\p{N}*])\*(?!\s)(.+?)(?<!\s)\*(?![\p{L}\p{N}*])"""),
-    Regex("""(?<![\p{L}\p{N}_])_(?!\s)(.+?)(?<!\s)_(?![\p{L}\p{N}_])"""),
+    Regex("""\*\*([^\n]+?)\*\*"""),
+    Regex("""(?<![\p{L}\p{N}_])__(?!\s)([^\n]+?)(?<!\s)__(?![\p{L}\p{N}_])"""),
+    Regex("""~~([^\n]+?)~~"""),
+    Regex("""(?<![\p{L}\p{N}*])\*(?!\s)([^\n]+?)(?<!\s)\*(?![\p{L}\p{N}*])"""),
+    Regex("""(?<![\p{L}\p{N}_])_(?!\s)([^\n]+?)(?<!\s)_(?![\p{L}\p{N}_])"""),
 )
 private val WHITESPACE_RUN = Regex("""\s+""")
 private val HORIZONTAL_SPACE = Regex("""[ \t]+""")
 
 /** Turns a message's HTML or Markdown body into clean human-readable preview text without raw markup or matrix.to URLs. */
 internal fun sanitizePreviewText(body: String, html: String?, singleLine: Boolean = true): String {
+    val boundedBody = boundPreviewInput(dropReplyFallback(body))
     val raw = if (!html.isNullOrBlank()) {
-        // Pre-sanitize the plain fallback so unsupported HTML tags still yield clean Markdown-free preview text.
-        val fallback = stripMarkdown(body)
-        MessageBodyRenderer.render(fallback, html).joinToString("") { run ->
+        // Pre-sanitize the bounded plain fallback so unsupported HTML tags still yield clean Markdown-free preview text.
+        val fallback = stripMarkdown(boundedBody)
+        val runs = MessageBodyRenderer.render(fallback, html)
+        val out = StringBuilder()
+        runs.forEachIndexed { index, run ->
+            val next = runs.getOrNull(index + 1)
             when {
-                run.mention != null || MessageTextStyle.Code in run.styles -> run.text
-                else -> scrubMarkdownLinks(run.text)
+                run.mention != null || MessageTextStyle.Code in run.styles -> out.append(run.text)
+                else -> {
+                    var piece = run.text
+                    // MessageBodyRenderer splits bare "https://matrix.to/#/@user:server" into URL prefix + mention run.
+                    if (next?.mention != null) piece = piece.replace(SPLIT_MATRIX_PREFIX, "")
+                    out.append(scrubMarkdownLinks(piece))
+                }
             }
         }
+        out.toString()
     } else {
-        stripMarkdown(body)
+        stripMarkdown(boundedBody)
     }
     return normalizePreviewWhitespace(raw, singleLine).ifEmpty {
-        normalizePreviewWhitespace(scrubMarkdownLinks(body), singleLine)
+        normalizePreviewWhitespace(scrubMarkdownLinks(boundedBody), singleLine)
     }
+}
+
+private fun boundPreviewInput(text: String): String {
+    if (text.length <= MAX_PREVIEW_INPUT) return text
+    val cut = text.substring(0, MAX_PREVIEW_INPUT)
+    return if (cut.last().isHighSurrogate()) cut.dropLast(1) else cut
 }
 
 private fun stripMarkdown(body: String): String {
-    val withoutReply = dropReplyFallback(body)
-    val lines = withoutReply.split('\n')
-        .filterNot { val trimmed = it.trimStart(); trimmed.startsWith("```") || trimmed.startsWith("~~~") }
-        .joinToString("\n") { line ->
-            line.replace(QUOTE_PREFIX, "").replace(HEADING_PREFIX, "")
+    val result = StringBuilder(body.length)
+    var inFence = false
+    var fenceChar = '`'
+    var fenceLen = 0
+    val plainBlock = StringBuilder()
+
+    fun flushPlainBlock() {
+        if (plainBlock.isEmpty()) return
+        result.append(unwrapInlineCode(plainBlock.toString()))
+        plainBlock.setLength(0)
+    }
+
+    var start = 0
+    while (start <= body.length) {
+        val end = body.indexOf('\n', start).let { if (it < 0) body.length else it }
+        val line = body.substring(start, end)
+        val trimmed = line.trimStart()
+        val markerChar = trimmed.firstOrNull()?.takeIf { it == '`' || it == '~' }
+        val markerLen = if (markerChar != null) trimmed.takeWhile { it == markerChar }.length else 0
+        when {
+            !inFence && markerLen >= 3 -> {
+                flushPlainBlock()
+                inFence = true
+                fenceChar = markerChar!!
+                fenceLen = markerLen
+            }
+            inFence && markerChar == fenceChar && markerLen >= fenceLen && trimmed.substring(markerLen).isBlank() -> {
+                inFence = false
+            }
+            inFence -> {
+                // Keep code inside fenced blocks verbatim instead of stripping > or ** from code.
+                if (result.isNotEmpty() && result.last() != '\n') result.append('\n')
+                result.append(line)
+                if (end < body.length) result.append('\n')
+            }
+            else -> {
+                plainBlock.append(line.replace(QUOTE_PREFIX, "").replace(HEADING_PREFIX, ""))
+                if (end < body.length) plainBlock.append('\n')
+            }
         }
-    return unwrapInlineCode(lines)
+        if (end == body.length) break
+        start = end + 1
+    }
+    flushPlainBlock()
+    return result.toString()
 }
 
 private fun dropReplyFallback(body: String): String {
-    val lines = body.split('\n')
-    val firstNonQuote = lines.indexOfFirst { !it.startsWith(">") }
-    return if (lines.firstOrNull()?.startsWith("> <") == true &&
-        firstNonQuote >= 0 && lines[firstNonQuote].isEmpty() && firstNonQuote + 1 < lines.size
-    ) {
-        lines.drop(firstNonQuote + 1).joinToString("\n")
-    } else {
-        body
+    if (!body.startsWith("> <")) return body
+    var cursor = 0
+    while (cursor < body.length) {
+        val next = body.indexOf('\n', cursor)
+        if (next < 0) return body
+        val lineEnd = next
+        if (lineEnd == cursor) {
+            return if (next + 1 < body.length) body.substring(next + 1) else body
+        }
+        if (body[cursor] != '>') return body
+        cursor = next + 1
     }
+    return body
 }
 
-/** Strips matched backtick code delimiters while applying Markdown formatting cleanup only outside code spans. */
+/** Strips matched backtick code delimiters in O(n) time while applying Markdown formatting cleanup only outside code spans. */
 private fun unwrapInlineCode(text: String): String {
     val out = StringBuilder(text.length)
+    val unmatchedLengths = HashSet<Int>()
     var plainStart = 0
     var i = 0
     while (i < text.length) {
@@ -794,7 +858,7 @@ private fun unwrapInlineCode(text: String): String {
         }
         var ticks = 0
         while (i + ticks < text.length && text[i + ticks] == '`') ticks++
-        val close = findClosingBackticks(text, i + ticks, ticks)
+        val close = if (ticks in unmatchedLengths) -1 else findClosingBackticks(text, i + ticks, ticks)
         if (close >= 0) {
             if (i > plainStart) out.append(scrubPlainMarkdown(text.substring(plainStart, i)))
             val inner = text.substring(i + ticks, close)
@@ -805,6 +869,7 @@ private fun unwrapInlineCode(text: String): String {
             i = close + ticks
             plainStart = i
         } else {
+            unmatchedLengths += ticks
             i += ticks
         }
     }
@@ -848,14 +913,18 @@ private fun scrubMarkdownLinks(text: String): String {
             else -> ""
         }
     }
-    val withoutBareMatrixUrls = BARE_MATRIX_USER_URL.replace(withoutLinks) { match ->
+    // Match complete URLs alongside bare user IDs so ordinary URLs never have their fragments rewritten as mentions.
+    return URL_OR_USER.replace(withoutLinks) { match ->
         val full = match.value
-        val candidate = full.trimEnd('.', ',', ';', ':', '!', '?', ']')
-        val suffix = full.substring(candidate.length)
-        val userId = ComposerFormat.mentionedUser(candidate)
-        if (userId != null) "@${DisplayNames.localpart(userId)}$suffix" else full
+        if (full.startsWith("@")) {
+            if (full == "@room") full else DisplayNames.mention(DisplayNames.localpart(full))
+        } else {
+            val candidate = full.trimEnd('.', ',', ';', ':', '!', '?', ']')
+            val suffix = full.substring(candidate.length)
+            val userId = ComposerFormat.mentionedUser(candidate)
+            if (userId != null) "@${DisplayNames.localpart(userId)}$suffix" else full
+        }
     }
-    return DisplayNames.mentions(withoutBareMatrixUrls, emptyMap())
 }
 
 private fun normalizePreviewWhitespace(text: String, singleLine: Boolean): String = if (singleLine) {

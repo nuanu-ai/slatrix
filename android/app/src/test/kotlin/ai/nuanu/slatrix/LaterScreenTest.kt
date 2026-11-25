@@ -8,9 +8,13 @@ import ai.nuanu.slatrix.core.SavedPreview
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LaterActions
 import ai.nuanu.slatrix.ui.account.LaterScreen
-import ai.nuanu.slatrix.ui.account.timeLabel
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.test.core.app.ApplicationProvider
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.Date
 import ai.nuanu.slatrix.core.LaterState
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -71,7 +75,8 @@ class LaterScreenTest {
         val zone = ZoneId.systemDefault()
         val now = LocalDate.of(2026, 11, 25).atTime(15, 0).atZone(zone).toInstant().toEpochMilli()
         val yesterday = LocalDate.of(2026, 11, 24).atTime(14, 24).atZone(zone).toInstant().toEpochMilli()
-        val expectedTime = "Yesterday, ${timeLabel(yesterday)}"
+        val formattedTime = android.text.format.DateFormat.getTimeFormat(ApplicationProvider.getApplicationContext()).format(Date(yesterday))
+        val expectedTime = "Yesterday, $formattedTime"
         val name = "Alexandra Whitfield-Montgomery"
         compose.setContent {
             SlatrixTheme {
@@ -93,6 +98,29 @@ class LaterScreenTest {
     }
 
     // capability: message.save
+    @Config(qualifiers = "w320dp-h704dp-xxxhdpi")
+    @Test fun atLargeFontScaleLaterStacksTimestampBelowSenderSoNeitherClips() {
+        val zone = ZoneId.systemDefault()
+        val now = LocalDate.of(2026, 11, 25).atTime(15, 0).atZone(zone).toInstant().toEpochMilli()
+        val yesterday = LocalDate.of(2026, 11, 24).atTime(14, 24).atZone(zone).toInstant().toEpochMilli()
+        val formattedTime = android.text.format.DateFormat.getTimeFormat(ApplicationProvider.getApplicationContext()).format(Date(yesterday))
+        val expectedTime = "Yesterday, $formattedTime"
+        compose.setContent {
+            val base = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(base.density, fontScale = 1.5f)) {
+                SlatrixTheme {
+                    LaterScreen(SavedList(listOf(SavedMessage("!design:example.org", "\$one", 1_000))), rooms,
+                        { SavedPreview("@dmitry:example.org", "Dmitry Ukhanov", "Ship it", yesterday) }, LaterActions({}), now = { now })
+                }
+            }
+        }
+        val senderBounds = compose.onNodeWithText("Dmitry Ukhanov", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val timeBounds = compose.onNodeWithText(expectedTime, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue("Sender keeps visible width (${senderBounds.width})", senderBounds.width > 100f)
+        assertTrue("Timestamp stacks below sender at 1.5x font scale", timeBounds.top >= senderBounds.bottom - 1f)
+    }
+
+    // capability: message.save
     @Test fun laterShowsConciseDatesWithoutTruncatingBesideSenderName() {
         val zone = ZoneId.systemDefault()
         val now = LocalDate.of(2026, 11, 25).atTime(15, 0).atZone(zone).toInstant().toEpochMilli()
@@ -111,7 +139,8 @@ class LaterScreenTest {
                 LaterScreen(saved, rooms, { previews[it.eventId] }, LaterActions({}), now = { now })
             }
         }
-        val yesterdayLabel = "Yesterday, ${timeLabel(yesterday)}"
+        val formattedTime = android.text.format.DateFormat.getTimeFormat(ApplicationProvider.getApplicationContext()).format(Date(yesterday))
+        val yesterdayLabel = "Yesterday, $formattedTime"
         for (label in listOf(yesterdayLabel, "Nov 23")) {
             val layouts = mutableListOf<TextLayoutResult>()
             compose.onNodeWithText(label, useUnmergedTree = true)

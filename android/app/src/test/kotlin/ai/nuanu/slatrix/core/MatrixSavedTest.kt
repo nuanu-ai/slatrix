@@ -29,6 +29,13 @@ class MatrixSavedTest {
         assertEquals("@Dmitry Ukhanov [Spoiler hidden] sshd", preview?.body)
     }
 
+    @Test fun aSavedMessageHidesSpoilersNestedInsideMentions() = runTest {
+        val html = "<p><a href=\"https://matrix.to/#/@alice:example.org\"><span data-mx-spoiler>top-secret</span></a></p>"
+        val room = SavedRoom(Membership.JOINED, body = "hidden", html = html)
+        val preview = MatrixSaved(SavedClient(room)).preview(SavedMessage("!design:example.org", "\$spoiler", 0))
+        assertEquals("[Spoiler hidden]", preview?.body)
+    }
+
     @Test fun aConversationYouLeftHasNothingToShow() = runTest {
         assertNull(MatrixSaved(SavedClient(SavedRoom(Membership.LEFT))).preview(SavedMessage("!design:example.org", "\$one", 0)))
     }
