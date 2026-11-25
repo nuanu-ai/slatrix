@@ -19,8 +19,12 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import ai.nuanu.slatrix.core.AccountState
 import ai.nuanu.slatrix.core.MatrixWorkspace
 import ai.nuanu.slatrix.core.RoomListState
@@ -33,6 +37,7 @@ private const val LAUNCH_HOLD_MILLIS = 600L
 class MainActivity : ComponentActivity() {
     private val accountModel: AccountViewModel by viewModels()
     private var launchPreDraw: Pair<View, ViewTreeObserver.OnPreDrawListener>? = null
+    @Volatile private var launchComposed = false
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -45,6 +50,18 @@ class MainActivity : ComponentActivity() {
             val search by accountModel.search.collectAsState()
             val people by accountModel.people.collectAsState()
             val notification by accountModel.notificationTarget.collectAsState()
+            var waitingForFirstFrame by remember { mutableStateOf(true) }
+            if (waitingForFirstFrame) {
+                val accountState by accountModel.account.state.collectAsState()
+                val roomListState = rooms?.state?.collectAsState()?.value
+                val ready = isLaunchReady(accountState, roomListState)
+                SideEffect {
+                    if (ready) {
+                        launchComposed = true
+                        waitingForFirstFrame = false
+                    }
+                }
+            }
             SlatrixApp(accountModel.account, identity, rooms, workspace, notification, threads, activity, search, people) { target ->
                 accountModel.notificationHandled(target)
                 if (intent.getStringExtra(PushNotifications.USER_ID) == target.userId &&
@@ -55,13 +72,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
-        // Hold the system splash briefly until cached session and rooms land so Home never flashes an empty shell.
+        // Hold the system splash briefly until Compose has composed the first populated Home frame.
         val content = findViewById<View>(android.R.id.content)
         val deadline = SystemClock.uptimeMillis() + LAUNCH_HOLD_MILLIS
         val listener = object : ViewTreeObserver.OnPreDrawListener {
             override fun onPreDraw(): Boolean {
-                val ready = isLaunchReady(accountModel.account.state.value, accountModel.rooms.value?.state?.value) ||
-                    SystemClock.uptimeMillis() >= deadline
+                val ready = launchComposed || SystemClock.uptimeMillis() >= deadline
                 if (ready) {
                     content.viewTreeObserver.removeOnPreDrawListener(this)
                     launchPreDraw = null
@@ -118,7 +134,7 @@ class MainActivity : ComponentActivity() {
 /** Whether the first frame has enough state to drop the launch splash without flashing an empty Home shell. */
 internal fun isLaunchReady(account: AccountState, rooms: RoomListState?): Boolean = when (account) {
     is AccountState.Connecting -> !account.restoring
-    is AccountState.Connected -> rooms != null && (!rooms.loading || rooms.rooms.isNotEmpty())
+    is AccountState.Connected -> rooms != null && !rooms.loading && rooms.spacesKnown
     else -> true
 }
 

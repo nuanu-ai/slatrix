@@ -379,23 +379,36 @@ class ThreadScreenTest {
     }
 
     // capability: thread.open
-    @Test fun aTallThreadRootInPreviewStartsBelowHeaderInsteadOfClippingBehindIt() {
+    @Test fun aTallThreadRootInPreviewStartsBelowHeaderAndStaysAlignedWhenTallerLiveRootArrives() {
         val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
-        val longRoot = ConversationMessage("thread-root", "\$root", "@sam:example.org", "Sam",
-            (1..60).joinToString("\n") { "Root line $it" }, null, 1_700_000_000_000L,
+        fun rootWithLines(count: Int) = ConversationMessage("thread-root", "\$root", "@sam:example.org", "Sam",
+            (1..count).joinToString("\n") { "Root line $it" }, null, 1_700_000_000_000L,
             MessageKind.Text, MessageSendState.Sent, false, "S", 0)
+        val state = mutableStateOf(ConversationState(listOf(rootWithLines(60)), loading = false, hasMore = true, preview = true, replies = 1))
         compose.setContent {
             SlatrixTheme {
-                LiveChannelScreen(room, ConversationState(listOf(longRoot), loading = false, hasMore = true, preview = true, replies = 1),
-                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, threadRoot = "\$root")
+                LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, threadRoot = "\$root")
             }
         }
         compose.waitForIdle()
         compose.onNodeWithText("Root line 1", substring = true, useUnmergedTree = true).assertIsDisplayed()
         val headerBottom = compose.onNodeWithContentDescription("Back").getUnclippedBoundsInRoot().bottom
-        val rootBounds = compose.onNodeWithText("Root line 1", substring = true, useUnmergedTree = true).getUnclippedBoundsInRoot()
-        assertTrue("Tall preview root starts below header ($rootBounds vs header $headerBottom)",
-            rootBounds.top >= headerBottom && rootBounds.top - headerBottom < 120.dp)
+        val previewBounds = compose.onNodeWithText("Root line 1", substring = true, useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("Tall preview root starts below header ($previewBounds vs header $headerBottom)",
+            previewBounds.top >= headerBottom && previewBounds.top - headerBottom < 120.dp)
+
+        // When the live batch replaces the preview with an even taller edited root plus a reply, the root top must not
+        // clip behind the header due to a stale preview scroll offset.
+        val reply = ConversationMessage("r-1", "\$r1", "@mira:example.org", "Mira", "Sounds good", null,
+            1_700_000_060_000L, MessageKind.Text, MessageSendState.Sent, false, "M", 1)
+        compose.runOnIdle {
+            state.value = ConversationState(listOf(rootWithLines(90), reply), loading = false, hasMore = false, preview = false, replies = 1)
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("Root line 1", substring = true, useUnmergedTree = true).assertIsDisplayed()
+        val liveBounds = compose.onNodeWithText("Root line 1", substring = true, useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("Taller live root must stay below header ($liveBounds vs header $headerBottom)",
+            liveBounds.top >= headerBottom && liveBounds.top - headerBottom < 120.dp)
     }
 }
 

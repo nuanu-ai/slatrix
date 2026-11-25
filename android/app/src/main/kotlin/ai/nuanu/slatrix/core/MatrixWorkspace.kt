@@ -84,6 +84,9 @@ class MatrixWorkspace(private val scope: CoroutineScope, private val client: Cli
     /** Lightweight last-known rows per room/thread so cold opens never slide in a blank screen. */
     private val snapshots = LinkedHashMap<String, TimelineSnapshot>()
     private var warmJob: Job? = null
+    private var warmTargets: List<String> = emptyList()
+    /** In-flight warmup held outside [recent] until settled so cancellation cleanly tears down abandoned SDK work. */
+    private var warming: Pair<String, Pair<MatrixConversation, Room>>? = null
     private val worker = scope.launch {
         try {
             for ((token, requested) in requests) {
@@ -216,14 +219,19 @@ class MatrixWorkspace(private val scope: CoroutineScope, private val client: Cli
 
     /**
      * Silently warms up to [WARM_LIMIT] idle rooms into [recent] so the very first tap after a cold restart opens on
-     * frame 0 with cached SDK rows. Yields immediately as soon as the reader opens a conversation.
+     * frame 0 with cached SDK rows. Yields immediately as soon as the reader opens a conversation, closing any
+     * in-flight warmup that wasn't the selected room so no abandoned SDK work races the opened channel.
      */
     fun warm(roomIds: List<String>) {
         if (!worker.isActive || mutableSelected.value != null) return
-        val targets = roomIds.asSequence().distinct().take(WARM_LIMIT).filter { it !in recent && it != current?.room?.id }.toList()
+        val targets = roomIds.asSequence().distinct().take(WARM_LIMIT)
+            .filter { it !in recent && it != current?.room?.id }.toList()
         if (targets.isEmpty()) return
-        warmJob?.cancel()
+        if (warmJob?.isActive == true && targets == warmTargets) return
+        warmTargets = targets
+        val previous = warmJob
         warmJob = scope.launch {
+            previous?.cancelAndJoin()
             for (roomId in targets) {
                 currentCoroutineContext().ensureActive()
                 if (mutableSelected.value != null || recent.size >= RECENT) break
@@ -234,19 +242,21 @@ class MatrixWorkspace(private val scope: CoroutineScope, private val client: Cli
                     continue
                 }
                 val timeline = MatrixConversation(session, room)
-                recent[roomId] = timeline to room
+                val entry = roomId to (timeline to room)
+                warming = entry
+                var promoted = false
                 try {
                     val settled = timeline.state.first { !it.loading || it.error != null }
-                    if (settled.error != null && recent[roomId]?.first === timeline) {
-                        recent.remove(roomId)
-                        closeKept(timeline)
+                    if (warming === entry && settled.error == null && mutableSelected.value == null &&
+                        roomId !in recent && current?.room?.id != roomId && recent.size < RECENT) {
+                        warming = null
+                        recent[roomId] = timeline to room
+                        promoted = true
                     }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    if (recent[roomId]?.first === timeline) {
-                        recent.remove(roomId)
-                        closeKept(timeline)
+                } finally {
+                    if (warming === entry) warming = null
+                    if (!promoted && recent[roomId]?.first !== timeline && conversation !== timeline) {
+                        withContext(NonCancellable) { closeKept(timeline) }
                     }
                 }
             }
@@ -256,8 +266,15 @@ class MatrixWorkspace(private val scope: CoroutineScope, private val client: Cli
     private fun select(requested: OpenChannel?) {
         if (!worker.isActive) return
         if (requested != null) {
+            // If the reader tapped the room currently warming, promote it into [recent] so attachKept reuses it on frame 0.
+            val inflight = warming
+            if (requested.threadRoot == null && inflight != null && inflight.first == requested.room.id) {
+                warming = null
+                if (inflight.first !in recent) recent[inflight.first] = inflight.second
+            }
             warmJob?.cancel()
             warmJob = null
+            warmTargets = emptyList()
         }
         // A jump to a message the open channel shows stays in it, as on the Mac, once nothing else is on its way; the
         // worker runs on this thread too, so what it published can't change underneath.
@@ -318,8 +335,9 @@ class MatrixWorkspace(private val scope: CoroutineScope, private val client: Cli
 
     suspend fun close() = withContext(NonCancellable) {
         generation.incrementAndGet()
-        warmJob?.cancel()
+        warmJob?.cancelAndJoin()
         warmJob = null
+        warmTargets = emptyList()
         mutableSelected.value = null
         worker.cancelAndJoin()
         sessionJob.cancelAndJoin()

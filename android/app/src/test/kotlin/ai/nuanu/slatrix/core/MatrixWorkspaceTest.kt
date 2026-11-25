@@ -622,16 +622,19 @@ class MatrixWorkspaceTest {
         assertSame(instant, workspace.selected.value?.conversation)
         assertEquals("Opening a warmed room must not build a second timeline", listOf(alpha.id, beta.id), started.toList())
 
-        // Warming yields immediately as soon as the reader opens another room.
+        // Warming yields immediately and cancels/closes abandoned in-flight warmups when the reader opens another room.
         workspace.back()
         workspace.selected.first { it == null }
         runCurrent()
         workspace.warm(listOf("!slow:example.org", gamma.id))
         slowStarted.await()
+        val slowHandle = client.handles.last { it.id() == "!slow:example.org" }
         assertFalse("Sequential warm must not start gamma while slow is pending", started.contains(gamma.id))
         workspace.open(gamma)
         workspace.selected.first { it?.room == gamma && it.composer != null }
         assertEquals(gamma, workspace.selected.value?.room)
+        runCurrent()
+        assertTrue("Opening another room must tear down the abandoned in-flight warmup immediately", slowHandle.uniffiIsDestroyed)
         gate.complete(Unit)
         runCurrent()
 

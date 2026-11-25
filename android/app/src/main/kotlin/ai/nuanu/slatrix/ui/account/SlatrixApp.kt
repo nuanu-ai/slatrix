@@ -233,8 +233,12 @@ internal fun SlatrixApp(
                     source.state.collect { list ->
                         if (list.rooms.isEmpty()) return@collect
                         val visible = list.rooms.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) }
-                        val priority = (visible.filter { it.starred } + visible.filter { !it.starred && !it.direct } +
-                            visible.filter { !it.starred && it.direct }).map { it.id }
+                        val collapsed = workspacePreferences.collapsedSections
+                        fun shownIn(section: String, items: List<RoomSummary>) =
+                            if (section !in collapsed) items else items.filter { it.unread != ai.nuanu.slatrix.core.UnreadBadge.None }
+                        val priority = (shownIn("Starred", visible.filter { it.starred }) +
+                            shownIn("Channels", visible.filter { !it.starred && !it.direct }) +
+                            shownIn("Direct", visible.filter { !it.starred && it.direct })).map { it.id }
                         targetWorkspace.warm(priority)
                     }
                 }

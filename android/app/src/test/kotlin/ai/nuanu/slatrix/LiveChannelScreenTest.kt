@@ -1164,7 +1164,7 @@ class LiveChannelScreenTest {
     }
 
     @Test fun olderHistoryPageMovesDayDividerImmediatelyWithoutSlidingOverMessages() {
-        val today = Instant.parse("2025-11-20T12:00:00Z").toEpochMilli()
+        val today = LocalDate.of(2025, 11, 20).atTime(12, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
         val state = mutableStateOf(ConversationState(
             rows = listOf(DayDivider("d-today", today), message("Newest", minutes = 10)),
             loading = false,
@@ -1204,6 +1204,19 @@ class LiveChannelScreenTest {
             dividerMidFlight.bottom <= older1MidFlight.top)
         assertEquals("DayDivider must land directly at its final position without placement animation drift",
             dividerSettled, dividerMidFlight)
+
+        // When the first live message arrives below, existing bubbles must stay near their prior Y position rather than
+        // sweeping in from the viewport edge due to missing prior placement offsets.
+        val beforeLive = compose.onNodeWithText("Newest", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        compose.runOnUiThread {
+            state.value = state.value.copy(rows = state.value.rows + message("Fresh live reply", minutes = 11))
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        }
+        compose.mainClock.advanceTimeByFrame()
+        val midLive = compose.onNodeWithText("Newest", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("Existing message must stay near its prior position on first live arrival ($midLive vs $beforeLive)",
+            midLive.top <= beforeLive.top && beforeLive.top - midLive.top < 120.dp)
+        compose.mainClock.advanceTimeBy(1_000)
     }
 
     private fun message(body: String, minutes: Int, sender: String = "Mira", state: MessageSendState = MessageSendState.Sent) =

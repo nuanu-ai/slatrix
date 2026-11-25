@@ -221,8 +221,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             }
         }.distinctUntilChanged().collect { visible -> if (visible) read(event) }
     }
-    LaunchedEffect(list, jumped) {
-        if (!jumped) return@LaunchedEffect
+    LaunchedEffect(list, jumped, ready) {
+        if (!jumped || !ready) return@LaunchedEffect
         snapshotFlow { list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset }.collect { (index, offset) ->
             place = if (list.atBottom()) null else rows.asReversed().getOrNull(index - 1)?.let { it.id to offset }
         }
@@ -510,13 +510,14 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 val forward = lifted?.message?.id
                 itemsIndexed(reversed, key = { _, row -> row.id }) { index, row ->
                     // Day dividers snap directly into place so backward history loads never slide date pills across bubbles.
-                    // Message rows animate placement only on live tail arrivals, never during initial opens or back-pagination.
+                    // Message rows keep placementSpec stable so Compose retains prior offsets and never sweeps existing
+                    // bubbles in from the viewport edge when the first live message arrives.
                     val itemModifier = if (row is DayDivider) {
                         Modifier
                     } else {
                         Modifier.animateItem(
                             fadeInSpec = if (row.id in liveFadeIds) Motion.gentle() else null,
-                            placementSpec = if (liveFadeIds.isNotEmpty()) Motion.snappy() else null,
+                            placementSpec = Motion.snappy(),
                             fadeOutSpec = null,
                         )
                     }
