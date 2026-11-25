@@ -337,12 +337,23 @@ struct MessageRowTests {
         let list = MessageBodyRenderer().render(body: "- item", formattedBody: "<ul><li>item</li></ul>")
         let heading = MessageBodyRenderer().render(body: "Title", formattedBody: "<h2>Title</h2>")
         let emoji = MessageBodyRenderer().render(body: "🎉", formattedBody: nil)
+        let leadingBlank = MessageBodyRenderer().render(body: "\nStarts after blank line", formattedBody: nil)
         #expect(NativeMessageBody.canFlowInlineSender(plain))
         #expect(!NativeMessageBody.canFlowInlineSender(codeBlock))
         #expect(!NativeMessageBody.canFlowInlineSender(quote))
         #expect(!NativeMessageBody.canFlowInlineSender(list))
         #expect(!NativeMessageBody.canFlowInlineSender(heading))
         #expect(!NativeMessageBody.canFlowInlineSender(emoji))
+        #expect(!NativeMessageBody.canFlowInlineSender(leadingBlank))
+
+        let textView = MessageTextView()
+        textView.string = "Alice  Body text"
+        textView.senderPrefixLength = ("Alice  " as NSString).length
+        #expect(
+            textView.copyableText(for: NSRange(location: 0, length: (textView.string as NSString).length))
+                == "Body text")
+        #expect(textView.copyableText(for: NSRange(location: 0, length: 0)) == "Body text")
+        #expect(textView.copyableText(for: NSRange(location: 7, length: 4)) == "Body")
     }
 
     @Test("Bookmarking a compact message does not narrow or rewrap its body text")

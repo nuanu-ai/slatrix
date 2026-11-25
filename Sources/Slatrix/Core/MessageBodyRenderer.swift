@@ -100,7 +100,7 @@ final class MessageBodyRenderer: @unchecked Sendable {
         let key = Key(body: body, html: formattedBody, revealSpoilers: revealSpoilers)
         if let entry = lock.withLock({ cache[key] }) { return entry.result }
         var result = Self.parse(body: body, html: formattedBody, revealSpoilers: revealSpoilers)
-        result.runs = Self.linkified(Self.mentioned(result.runs))
+        result.runs = Self.linkified(Self.mentioned(result.runs, markdownMentions: result.usedPlainTextFallback))
         let cost =
             body.utf8.count + (formattedBody?.utf8.count ?? 0) + result.runs.reduce(0) { $0 + $1.text.utf8.count + 128 }
         guard cost <= Self.maximumCacheBytes / 4 else { return result }
@@ -122,7 +122,7 @@ final class MessageBodyRenderer: @unchecked Sendable {
     /// For the composer: spoilers shown, typed IDs as mentions, addresses left as typed, and nothing cached.
     static func editable(body: String, html: String) -> RenderedMessageBody {
         var result = parse(body: body, html: html, revealSpoilers: true)
-        result.runs = mentioned(result.runs)
+        result.runs = mentioned(result.runs, markdownMentions: false)
         return result
     }
 
@@ -143,9 +143,6 @@ final class MessageBodyRenderer: @unchecked Sendable {
 
     private static let addresses = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
 
-    private static let markdownMention = try? NSRegularExpression(
-        pattern: #"\[((?:\\.|[^\\\[\]])*)\]\(([^)\s]+)\)"#)
-
     private static let mentions = try? NSRegularExpression(
         pattern: "(?<![A-Za-z0-9_])(?:" + MatrixID.userPattern + "|@room(?![A-Za-z0-9_:]))")
 
@@ -159,11 +156,9 @@ final class MessageBodyRenderer: @unchecked Sendable {
         }
     }
 
-    /// Element-style Markdown Matrix person links, bare user IDs and @room typed as plain text become mentions.
-    private static func mentioned(_ runs: [MessageBodyRun]) -> [MessageBodyRun] {
-        let links = split(runs, by: markdownMention, containing: "[") { match, source, style in
-            markdownMentionRun(match, in: source, style: style)
-        }
+    /// Element-style Markdown Matrix person links (in plain-text fallbacks), bare user IDs and @room become mentions.
+    private static func mentioned(_ runs: [MessageBodyRun], markdownMentions: Bool) -> [MessageBodyRun] {
+        let links = markdownMentions ? splitMarkdownMentions(runs) : runs
         return split(links, by: mentions, containing: "@") { match, source, style in
             let id = source.substring(with: match.range)
             return id == "@room"
@@ -176,36 +171,190 @@ final class MessageBodyRenderer: @unchecked Sendable {
 
     /// Replaces `[Name](https://matrix.to/#/@...)` and `[Name](matrix:u/...)` links with `@Name` for plain previews.
     static func replacingMarkdownMentions(in value: String) -> String {
-        guard value.contains("["), let expression = markdownMention else { return value }
-        let source = value as NSString
-        let matches = expression.matches(in: value, range: NSRange(location: 0, length: source.length))
+        let matches = scanMarkdownMentions(in: value, style: [])
         guard !matches.isEmpty else { return value }
         var result = ""
-        var cursor = 0
-        for match in matches {
-            guard let run = markdownMentionRun(match, in: source, style: []) else { continue }
-            if match.range.location > cursor {
-                result += source.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
-            }
+        var cursor = value.startIndex
+        for (range, run) in matches {
+            if range.lowerBound > cursor { result += value[cursor..<range.lowerBound] }
             result += run.text
-            cursor = NSMaxRange(match.range)
+            cursor = range.upperBound
         }
-        if cursor == 0 { return value }
-        if cursor < source.length { result += source.substring(from: cursor) }
+        if cursor < value.endIndex { result += value[cursor...] }
         return result
     }
 
-    private static func markdownMentionRun(
-        _ match: NSTextCheckingResult, in source: NSString, style: MessageTextStyle
-    ) -> MessageBodyRun? {
-        guard let url = safeLink(source.substring(with: match.range(at: 2))), let id = mentionedUser(url) else {
-            return nil
+    private static func splitMarkdownMentions(_ runs: [MessageBodyRun]) -> [MessageBodyRun] {
+        var result: [MessageBodyRun] = []
+        for run in runs {
+            guard run.link == nil, run.mention == nil, !run.marker, !run.style.contains(.code) else {
+                result.append(run)
+                continue
+            }
+            let matches = scanMarkdownMentions(in: run.text, style: run.style)
+            guard !matches.isEmpty else {
+                result.append(run)
+                continue
+            }
+            var cursor = run.text.startIndex
+            for (range, var replaced) in matches {
+                if range.lowerBound > cursor {
+                    result.append(
+                        MessageBodyRun(
+                            text: String(run.text[cursor..<range.lowerBound]), style: run.style, block: run.block))
+                }
+                replaced.block = run.block
+                result.append(replaced)
+                cursor = range.upperBound
+            }
+            if cursor < run.text.endIndex {
+                result.append(MessageBodyRun(text: String(run.text[cursor...]), style: run.style, block: run.block))
+            }
         }
-        let label = source.substring(with: match.range(at: 1))
-            .replacingOccurrences(of: #"\\(.)"#, with: "$1", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let shown = label.isEmpty || label == id ? MatrixID.localpart(id) : String(label.drop { $0 == "@" })
-        return MessageBodyRun(text: "@" + shown, style: style, link: url, mention: id)
+        return result
+    }
+
+    /// Single-pass O(n) scan for Element-style `[Name](https://matrix.to/#/@...)` and `[Name](matrix:u/...)` links.
+    /// Honors `\[` escapes and skips inline `` `...` `` spans on the same line without backtracking.
+    private static func scanMarkdownMentions(
+        in text: String, style: MessageTextStyle
+    ) -> [(range: Range<String.Index>, run: MessageBodyRun)] {
+        guard text.contains("["), text.contains(")") else { return [] }
+        var results: [(Range<String.Index>, MessageBodyRun)] = []
+        var i = text.startIndex
+        var noClosingTickUntil: String.Index?
+        while i < text.endIndex {
+            let ch = text[i]
+            if ch == "`" {
+                let afterTick = text.index(after: i)
+                if noClosingTickUntil.map({ i < $0 }) == true {
+                    i = afterTick
+                    continue
+                }
+                var scan = afterTick
+                var foundClose: String.Index?
+                while scan < text.endIndex && text[scan] != "\n" && text[scan] != "\r" {
+                    if text[scan] == "`" {
+                        foundClose = scan
+                        break
+                    }
+                    scan = text.index(after: scan)
+                }
+                if let close = foundClose {
+                    i = text.index(after: close)
+                } else {
+                    noClosingTickUntil = scan
+                    i = afterTick
+                }
+                continue
+            }
+            guard ch == "[" else {
+                i = text.index(after: i)
+                continue
+            }
+            var backslashes = 0
+            var back = i
+            while back > text.startIndex {
+                let prev = text.index(before: back)
+                if text[prev] == "\\" {
+                    backslashes += 1
+                    back = prev
+                } else {
+                    break
+                }
+            }
+            if backslashes % 2 == 1 {
+                i = text.index(after: i)
+                continue
+            }
+            let openBracket = i
+            var cursor = text.index(after: openBracket)
+            var closeBracket: String.Index?
+            var restarted = false
+            var labelUnits = 0
+            while cursor < text.endIndex && labelUnits < 512 {
+                let current = text[cursor]
+                if current == "\\" {
+                    let next = text.index(after: cursor)
+                    guard next < text.endIndex else { break }
+                    cursor = text.index(after: next)
+                    labelUnits += 2
+                    continue
+                }
+                if current == "[" {
+                    i = cursor
+                    restarted = true
+                    break
+                }
+                if current == "]" {
+                    closeBracket = cursor
+                    break
+                }
+                if current == "\n" || current == "\r" { break }
+                cursor = text.index(after: cursor)
+                labelUnits += 1
+            }
+            if restarted { continue }
+            guard let close = closeBracket else {
+                i = cursor
+                continue
+            }
+            let openParen = text.index(after: close)
+            guard openParen < text.endIndex, text[openParen] == "(" else {
+                i = openParen
+                continue
+            }
+            var urlCursor = text.index(after: openParen)
+            var closeParen: String.Index?
+            var urlUnits = 0
+            while urlCursor < text.endIndex && urlUnits < 4_096 {
+                let current = text[urlCursor]
+                if current == ")" {
+                    closeParen = urlCursor
+                    break
+                }
+                if current.isWhitespace || current == "[" || current == "(" { break }
+                urlCursor = text.index(after: urlCursor)
+                urlUnits += 1
+            }
+            guard let endParen = closeParen else {
+                if urlCursor == text.endIndex { break }
+                i = text[urlCursor] == "[" ? urlCursor : text.index(after: urlCursor)
+                continue
+            }
+            let rawLabel = String(text[text.index(after: openBracket)..<close])
+            let rawURL = String(text[text.index(after: openParen)..<endParen])
+            let after = text.index(after: endParen)
+            if let url = safeLink(rawURL), let id = mentionedUser(url) {
+                let unescaped = unescapeMarkdownLabel(rawLabel).trimmingCharacters(in: .whitespacesAndNewlines)
+                let shown =
+                    unescaped.isEmpty || unescaped == id
+                    ? MatrixID.localpart(id) : String(unescaped.drop { $0 == "@" })
+                results.append(
+                    (openBracket..<after, MessageBodyRun(text: "@" + shown, style: style, link: url, mention: id)))
+            }
+            i = after
+        }
+        return results
+    }
+
+    private static func unescapeMarkdownLabel(_ raw: String) -> String {
+        guard raw.contains("\\") else { return raw }
+        var result = ""
+        result.reserveCapacity(raw.count)
+        var escaped = false
+        for ch in raw {
+            if escaped {
+                result.append(ch)
+                escaped = false
+            } else if ch == "\\" {
+                escaped = true
+            } else {
+                result.append(ch)
+            }
+        }
+        if escaped { result.append("\\") }
+        return result
     }
 
     private static func split(

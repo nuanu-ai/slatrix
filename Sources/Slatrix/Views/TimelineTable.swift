@@ -736,6 +736,16 @@ struct TimelineTable: NSViewRepresentable {
             ])
     }
 
+    /// A thread pane holding only its root opens at the top so a tall root is never cut off.
+    private var startsAtTop: Bool {
+        guard configuration?.context.isThread == true else { return false }
+        let rootID = configuration?.context.threadRootID
+        return !rows.contains {
+            if case .message(let row) = $0.kind { return row.message.eventID != rootID }
+            return false
+        }
+    }
+
     private func open() {
         guard let configuration else { return }
         let hasContent = rows.contains {
@@ -750,15 +760,8 @@ struct TimelineTable: NSViewRepresentable {
             applying = false
             afterScroll()
         }
-        let startsAtTop =
-            configuration.context.isThread
-            && !rows.contains {
-                if case .message(let row) = $0.kind {
-                    return row.message.eventID != configuration.context.threadRootID
-                }
-                return false
-            }
-        let fallback: Policy.Position = startsAtTop ? .top : .bottom
+        let openAtTop = startsAtTop
+        let fallback: Policy.Position = openAtTop ? .top : .bottom
         guard hasContent && configuration.canOpen else {
             scroll(to: fallback)
             return settle(keeping: fallback)
@@ -769,7 +772,7 @@ struct TimelineTable: NSViewRepresentable {
         let remembered = configuration.live || restoresReadingPosition ? rememberedPosition : nil
         let opening = Policy.opening(
             focusedRowID: restoresReadingPosition ? nil : focused, unreadRowID: index["unread"] == nil ? nil : "unread",
-            startsAtUnread: configuration.startsAtUnread, remembered: remembered, startsAtTop: startsAtTop,
+            startsAtUnread: configuration.startsAtUnread, remembered: remembered, startsAtTop: openAtTop,
             contains: { index[$0] != nil })
         let held = known.count
         scroll(to: opening)
@@ -1019,6 +1022,12 @@ struct TimelineTable: NSViewRepresentable {
             let eventID = rows[row].messageEventID
         {
             TimelineMemory.positions[key] = TimelineMemory.Anchor(eventID: eventID, offset: offset)
+        } else if startsAtTop, viewport.top >= 1, let row = visibleRows(excluding: []).first,
+            let eventID = rows[row].messageEventID, let rowFrame = frame(rows[row].id)
+        {
+            // A standalone root defaults to top when unremembered, so persist a scrolled-to-bottom offset.
+            TimelineMemory.positions[key] = TimelineMemory.Anchor(
+                eventID: eventID, offset: rowFrame.top - viewport.top)
         } else {
             TimelineMemory.positions[key] = nil
         }

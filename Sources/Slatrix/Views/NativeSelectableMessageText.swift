@@ -185,6 +185,7 @@ struct NativeSelectableMessageText: NSViewRepresentable {
             let attributed = NSMutableAttributedString(
                 attributedString: Self.attributed(
                     runs, fontSize: fontSize, textColor: textColor, linkColor: linkColor, mentions: mentions))
+            var prefixLength = 0
             if let senderPrefix {
                 let style =
                     (attributed.length > 0
@@ -203,12 +204,28 @@ struct NativeSelectableMessageText: NSViewRepresentable {
                     NSAttributedString(
                         string: "  ",
                         attributes: [.font: NSFont.systemFont(ofSize: fontSize), .paragraphStyle: style]))
+                prefixLength = prefix.length
                 attributed.insert(prefix, at: 0)
             }
             if let suffix { attributed.append(suffix) }
-            let selection =
-                view.string == attributed.string
-                ? view.selectedRanges : [NSValue(range: NSRange(location: 0, length: 0))]
+            let oldText = view.string as NSString
+            let oldPrefix = min(view.senderPrefixLength, oldText.length)
+            let newText = attributed.string as NSString
+            let sameBody = oldText.substring(from: oldPrefix) == newText.substring(from: prefixLength)
+            let delta = prefixLength - oldPrefix
+            let selection: [NSValue] =
+                if sameBody {
+                    view.selectedRanges.map { value in
+                        let range = value.rangeValue
+                        if range.length == 0 { return NSValue(range: NSRange(location: 0, length: 0)) }
+                        let start = min(max(0, range.location + delta), newText.length)
+                        let length = min(range.length, newText.length - start)
+                        return NSValue(range: NSRange(location: start, length: length))
+                    }
+                } else {
+                    [NSValue(range: NSRange(location: 0, length: 0))]
+                }
+            view.senderPrefixLength = prefixLength
             view.textStorage?.setAttributedString(attributed)
             view.selectedRanges = selection
             context.coordinator.runs = runs
@@ -344,6 +361,28 @@ struct NativeSelectableMessageText: NSViewRepresentable {
 
 final class MessageTextView: NSTextView {
     var menuCommands: () -> [MessageMenuCommand] = { [] }
+    /// UTF-16 length of the compact inline sender prefix ("Name  "), excluded when copying body text.
+    var senderPrefixLength = 0
+
+    func copyableText(for range: NSRange) -> String {
+        let text = string as NSString
+        let prefix = min(senderPrefixLength, text.length)
+        if range.length == 0 { return text.substring(from: prefix) }
+        let end = min(NSMaxRange(range), text.length)
+        guard range.location < end else { return "" }
+        let start = (prefix > 0 && range.location < prefix && end > prefix) ? prefix : range.location
+        return text.substring(with: NSRange(location: start, length: end - start))
+    }
+
+    override func copy(_ sender: Any?) {
+        guard senderPrefixLength > 0 else { return super.copy(sender) }
+        let range = selectedRange()
+        guard range.location != NSNotFound, range.length > 0 else { return super.copy(sender) }
+        let copied = copyableText(for: range)
+        guard !copied.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(copied, forType: .string)
+    }
 
     /// A message never scrolls the timeline: AppKit asks a resized text view to reveal its selection, which would
     /// pull a resizing conversation away from its newest message.
@@ -424,7 +463,7 @@ final class MessageTextView: NSTextView {
             proposedRange.location != NSNotFound && NSMaxRange(proposedRange) <= (string as NSString).length
             ? proposedRange : NSRange(location: 0, length: 0)
         if range.length > 0 || commands.isEmpty {
-            let selection = range.length > 0 ? (string as NSString).substring(with: range) : string
+            let selection = copyableText(for: range)
             let copy = MessageMenuCommand(
                 id: "native-copy-selection", title: range.length > 0 ? "Copy selection" : "Copy text",
                 isEnabled: !selection.isEmpty

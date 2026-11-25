@@ -490,6 +490,15 @@ enum MatrixMapping {
         return rendered.usedPlainTextFallback ? DesktopMessageNotification.stripMarkdown(text) : text
     }
 
+    /// Full sanitized text of a `ChatMessage` (without Activity's 4,096-character cap), for search snippets and feeds.
+    static func messagePreviewText(_ message: ChatMessage, names: [String: String] = [:]) -> String {
+        if message.isRedacted { return ChatMessage.deletedBody }
+        let source =
+            message.replyToID != nil ? DesktopMessageNotification.withoutReplyFallback(message.body) : message.body
+        return previewText(
+            source, formatted: message.formattedBody.map { FormattedBody(format: .html, body: $0) }, names: names)
+    }
+
     /// A conversation's newest event, for the DMs page; nil when it has none.
     static func latestMessage(_ value: LatestEventValue) -> LatestMessage? {
         let (timestamp, isOwn, content): (Timestamp, Bool, TimelineItemContent)
@@ -653,7 +662,7 @@ enum MatrixMapping {
             message.isRedacted = true
             message.replyToID = nil
             message.replyPreview = nil
-            message.replyCount = nil
+            // Keep `replyCount` from the SDK's thread summary so an open thread still counts surviving replies.
             message.lastReply = nil
             message.repliedToThread = false
         case .unableToDecrypt(let encrypted):
@@ -2398,10 +2407,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
         let token = ahead?.token ?? UUID()
         selection = token
-        updateSubscriptions(id)
         // A conversation goes up as it is chosen and its rows follow, so the one being left is never redrawn in
         // between. Checking whether the conversation on screen holds a message changes nothing on screen.
         if anchor == nil || selectedRoomID != id { showConversation(id, eventID: eventID, token: token) }
+        updateSubscriptions(id)
         do {
             let client = try requireClient()
             var pendingRoom = try client.getRoom(roomId: id)

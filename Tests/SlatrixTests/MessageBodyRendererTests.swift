@@ -309,7 +309,7 @@ struct MessageBodyRendererTests {
         #expect(mention?.link != nil)
     }
 
-    @Test("Non-Matrix Markdown links and Markdown mentions inside code stay literal")
+    @Test("Non-Matrix Markdown links, escaped brackets, plain backticks, HTML text and composer drafts stay literal")
     func nonMatrixMarkdownLinksStayLiteral() {
         let web = render(nil, body: "[Docs](https://example.org)")
         #expect(web.plainText == "[Docs](https://example.org)")
@@ -317,6 +317,24 @@ struct MessageBodyRendererTests {
         let code = render("<p><code>[Alice](https://matrix.to/#/@alice:example.org)</code></p>")
         #expect(code.plainText == "[Alice](https://matrix.to/#/@alice:example.org)")
         #expect(code.runs.allSatisfy { $0.mention == nil })
+        let escaped = render(nil, body: #"\[Alice](matrix:u/alice:example.org)"#)
+        #expect(escaped.runs.allSatisfy { $0.mention == nil })
+        let ticks = render(nil, body: "`[Alice](matrix:u/alice:example.org)`")
+        #expect(ticks.runs.allSatisfy { $0.mention == nil })
+        let htmlText = render("<p>[Alice](matrix:u/alice:example.org)</p>")
+        #expect(htmlText.runs.allSatisfy { $0.mention == nil })
+        let draft = ComposerFormat.message(draft: #"\[Alice](matrix:u/alice:example.org)"#)
+        #expect(draft.mentions.isEmpty)
+    }
+
+    @Test("Malformed repeated link openers scan in linear time without freezing")
+    func malformedMarkdownMentionsStayLinear() {
+        let hostile = String(repeating: "[a](x", count: 4_000) + "[Bob](matrix:u/bob:example.org)"
+        let start = ContinuousClock.now
+        let rendered = render(nil, body: hostile)
+        let elapsed = ContinuousClock.now - start
+        #expect(elapsed < .milliseconds(500), "Scanner took \(elapsed)")
+        #expect(rendered.runs.contains { $0.mention == "@bob:example.org" && $0.text == "@Bob" })
     }
 
     @Test("Mentions in code, and addresses that only look like mentions, stay text")

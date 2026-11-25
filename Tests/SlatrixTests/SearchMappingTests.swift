@@ -56,5 +56,10 @@ struct SearchMappingTests {
         #expect(MessageResultRow.snippetBody(for: mention) == "@Dmitry Ukhanov check deploy\nNow")
         mention.formattedBody = "<span data-mx-spoiler>top secret</span>"
         #expect(MessageResultRow.snippetBody(for: mention) == "[Spoiler hidden]")
+        let long = ChatMessage(
+            id: "$long", roomID: "!r:example.org", senderID: "@a:example.org", senderName: "Alice",
+            body: String(repeating: "padding ", count: 700) + "needle-after-4096",
+            timestamp: .distantPast)
+        #expect(MessageResultRow.snippetBody(for: long).contains("needle-after-4096"))
     }
 }

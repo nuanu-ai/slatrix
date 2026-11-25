@@ -939,6 +939,22 @@ struct TimelineHostedTests {
             frame.maxY <= harness.headerBottom + 1 && harness.clip.bounds.minY + Self.insets.top < 1,
             "Tall thread root top should sit under header (\(harness.headerBottom)), got maxY=\(frame.maxY) scrollTop=\(harness.clip.bounds.minY + Self.insets.top)"
         )
+
+        // Scrolling to the bottom of the standalone root and reopening restores the bottom instead of jumping to top.
+        let table = try #require(harness.scrollView?.documentView as? NSTableView)
+        let bottomTop = table.rect(ofRow: table.numberOfRows - 1).maxY - screenHeight - Self.insets.top
+        harness.scroll(toTop: bottomTop)
+        try #require(harness.clip.bounds.minY + Self.insets.top > 100)
+        var reopened = harness.fixture(Self.room)
+        reopened.thread = true
+        reopened.threadRootID = root.eventID
+        reopened.timeline = 1
+        harness.hosting.rootView = reopened
+        await settle(harness) { harness.cell(showing: root.eventID) != nil }
+        #expect(
+            abs(harness.distanceFromBottom) <= TimelineScrollPolicy.bottomTolerance,
+            "Reopened standalone root should stay at the remembered bottom, distanceFromBottom=\(harness.distanceFromBottom)"
+        )
     }
 
     @Test("A thread loading indicator appearing under a short thread's root never pushes the root under the header")

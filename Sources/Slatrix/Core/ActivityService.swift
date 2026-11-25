@@ -182,10 +182,7 @@ enum ActivityBadge {
     }
 
     nonisolated static func previewBody(for message: ChatMessage, names: [String: String] = [:]) -> String {
-        if message.isRedacted { return ChatMessage.deletedBody }
-        return previewBody(
-            message.body, formatted: message.formattedBody.map { FormattedBody(format: .html, body: $0) },
-            names: names, reply: message.replyToID != nil)
+        String(MatrixMapping.messagePreviewText(message, names: names).prefix(4096))
     }
 
     /// The people a message notification mentions, so their names can be looked up before it shows.

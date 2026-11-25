@@ -750,6 +750,7 @@ struct MessageRow: View {
                     VStack(alignment: .leading, spacing: m.sp2) {
                         compactBody
                     }.frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.trailing, isThread ? m(4) : 0)
                 }
                 .overlay(alignment: .topLeading) {
                     if isSaved || effectiveWaitStatus != nil {
@@ -772,7 +773,7 @@ struct MessageRow: View {
                         ReadTicks(read: seen.read).help(seen.tooltip ?? "")
                             .fixedSize()
                             .frame(width: 0, alignment: .leading)
-                            .offset(x: m(4), y: m.sp2)
+                            .offset(x: isThread ? -m(2) : m(2), y: m.sp2)
                     }
                 }
                 if !message.isRedacted {

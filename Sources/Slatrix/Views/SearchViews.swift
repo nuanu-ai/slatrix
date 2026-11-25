@@ -596,8 +596,8 @@ struct MessageResultRow: View {
     }
 
     /// Sanitizes mentions, Markdown markers, spoilers and reply fallback before highlighting a search hit.
-    static func snippetBody(for message: ChatMessage, names: [String: String] = [:]) -> String {
-        ActivityService.previewBody(for: message, names: names).replacing(#/\n\s*\n/#, with: "\n")
+    nonisolated static func snippetBody(for message: ChatMessage, names: [String: String] = [:]) -> String {
+        MatrixMapping.messagePreviewText(message, names: names).replacing(#/\n\s*\n/#, with: "\n")
     }
 
     /// The message from a little before its first match, so the match shows in three lines.

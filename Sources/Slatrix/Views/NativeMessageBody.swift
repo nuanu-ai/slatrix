@@ -55,7 +55,7 @@ struct NativeMessageBody: View {
 
     static func canFlowInlineSender(_ rendered: RenderedMessageBody) -> Bool {
         guard !rendered.isJumbomoji, let first = rendered.runs.first else { return false }
-        return first.block == MessageBlock() && !first.marker
+        return first.block == MessageBlock() && !first.marker && !first.text.hasPrefix("\n")
     }
 
     private var source: SourceKey { SourceKey(body: messageBody, html: formattedBody) }

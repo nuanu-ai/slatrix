@@ -54,7 +54,8 @@ struct MatrixMappingTests {
 
     // capability: message.deleted
     @Test(
-        "A deleted timeline item strips reactions, reply previews and thread summaries while keeping thread membership")
+        "A deleted timeline item strips reactions, reply previews and lastReply while keeping thread membership and reply count"
+    )
     func redactedDropsStaleExtras() {
         final class FakeSummary: ThreadSummary, @unchecked Sendable {
             override func numReplies() -> UInt64 { 3 }
@@ -80,7 +81,7 @@ struct MatrixMappingTests {
         #expect(mapped?.threadRootID == "$root")
         #expect(mapped?.reactions.isEmpty == true)
         #expect(mapped?.replyToID == nil && mapped?.replyPreview == nil)
-        #expect(mapped?.replyCount == nil && mapped?.lastReply == nil)
+        #expect(mapped?.replyCount == 3 && mapped?.lastReply == nil)
         #expect(mapped?.attachment == nil && mapped?.formattedBody == nil)
     }
 
