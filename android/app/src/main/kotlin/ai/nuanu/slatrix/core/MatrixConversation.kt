@@ -2,6 +2,7 @@ package ai.nuanu.slatrix.core
 
 import java.time.Instant
 import java.time.ZoneId
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.abs
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -190,6 +192,8 @@ fun groupsUnder(previous: ConversationMessage, message: ConversationMessage): Bo
 private const val MAX_BLANK_PAGES = 5
 private const val MAX_TARGET_PAGES = 5
 private const val ROOT_KEY = "thread-root"
+/** Process-wide prefix counter so cached snapshot rows never collide with a newly opened timeline's row keys. */
+private val timelineGeneration = AtomicLong()
 
 // Its own key, as the Mac gives the root its event ID: the channel's row key could match one of the thread's rows.
 private fun ConversationMessage.asThreadRoot() = copy(id = ROOT_KEY, grouped = false)
@@ -292,8 +296,6 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     private var pendingAnchor: String? = null
     /** Whether this conversation can stay warm in cache: live, healthy, and without an in-flight focused jump. */
     internal val canKeep: Boolean get() = !mutableState.value.focused && mutableState.value.error == null && pending == null
-    /** Each timeline numbers its rows from zero, so each gets its own prefix and a swap never reuses a row's key. */
-    private var opened = 0
     /**
      * Pages asked for since an older message last showed. Joins, topic changes and other hidden events can fill page
      * after page, so history stops loading on its own after a few of those, as on the Mac.
@@ -405,10 +407,13 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     threadRoot != null && view == ConversationView.Timeline && !initialThreadPaged &&
                         (mutableState.value.hasMore || reset || swapped) && !resume && !source.holds(it)
                 }
+                val willAutoPageThread = threadRoot != null && view == ConversationView.Timeline && !initialThreadPaged &&
+                    (mutableState.value.hasMore || reset || swapped) && seekTarget == null &&
+                    rows.none { it is ConversationMessage && it.eventId != threadRoot }
                 mutableState.update {
                     val foundHighlight = it.highlight ?: jumpTarget?.takeIf { id -> !resume && source.holds(id) }
-                    it.copy(rows = nextRows, loading = false, preview = false, hasMore = it.hasMore || reset || swapped, focused = source.focused,
-                        highlight = foundHighlight, firstUnread = unread,
+                    it.copy(rows = nextRows, loading = false, preview = willAutoPageThread, hasMore = it.hasMore || reset || swapped,
+                        focused = source.focused, highlight = foundHighlight, firstUnread = unread,
                         ackToken = if (needsAck) it.ackToken + 1 else it.ackToken,
                         seekingTarget = if (foundHighlight != null) false else it.seekingTarget || seekTarget != null).counted()
                 }
@@ -416,7 +421,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                     if (seekTarget != null) {
                         initialThreadPaged = true
                         loadOlderForTarget(seekTarget)
-                    } else if (rows.none { it is ConversationMessage && it.eventId != threadRoot }) {
+                    } else if (willAutoPageThread) {
                         initialThreadPaged = true
                         loadOlder()
                     }
@@ -427,7 +432,10 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         } catch (failure: Exception) {
             currentCoroutineContext().ensureActive()
             ready.completeExceptionally(failure)
-            mutableState.update { it.copy(loading = false, preview = false, error = "Couldn’t load this conversation.") }
+            mutableState.update {
+                it.copy(rows = if (it.preview) listOfNotNull(this@MatrixConversation.root) else it.rows,
+                    loading = false, preview = false, error = "Couldn’t load this conversation.")
+            }
         } finally {
             ready.completeExceptionally(CancellationException())
             updates.close()
@@ -440,7 +448,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
     /** [role] places the timeline before it can send its first update, which the SDK may do at once. */
     private suspend fun open(focus: TimelineFocus, role: (Source) -> Unit): Source {
         val timeline = room.timelineWithConfiguration(TimelineConfiguration(
-            focus = focus, filter = TimelineFilter.All, internalIdPrefix = "${++opened}-", dateDividerMode = DateDividerMode.DAILY,
+            focus = focus, filter = TimelineFilter.All, internalIdPrefix = "${timelineGeneration.incrementAndGet()}-", dateDividerMode = DateDividerMode.DAILY,
             trackReadReceipts = TimelineReadReceiptTracking.MESSAGE_LIKE_EVENTS, reportUtds = false,
         ))
         val source = Source(timeline, focus is TimelineFocus.Event)
@@ -511,7 +519,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 currentCoroutineContext().ensureActive()
                 mutableState.update { it.copy(error = "Couldn’t load older messages.") }
             } finally {
-                if (lifetime.isActive) mutableState.update { it.copy(loadingHistory = false) }
+                if (lifetime.isActive) mutableState.update { it.copy(loadingHistory = false, preview = false) }
                 pageLock.unlock()
             }
         }
@@ -642,12 +650,17 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
      */
     suspend fun followRoot(channel: Flow<ConversationState>) {
         val id = threadRoot ?: return
-        channel.map { state -> state.rows.firstOrNull { (it as? ConversationMessage)?.eventId == id } as? ConversationMessage }
+        channel.filter { !it.preview }
+            .map { state -> state.rows.firstOrNull { (it as? ConversationMessage)?.eventId == id } as? ConversationMessage }
             .distinctUntilChanged().collect { copy ->
                 operations.launch {
+                    val hadMirror = mirror != null
                     mirror = copy
                     rootSummary = copy?.thread?.replies
                     if (copy != null) root = copy.asThreadRoot()
+                    if (copy == null && hadMirror) {
+                        shown?.let { updates.trySend(Update.Batch(it, emptyList())) }
+                    }
                     mutableState.update { state ->
                         val nextRows = if (copy == null) state.rows else {
                             val rootIndex = state.rows.indexOfFirst { it is ConversationMessage && it.id == ROOT_KEY }
@@ -1011,9 +1024,11 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         if (needsReset) operations.launch { readLock.withLock { heldUnread = false; lastRead = null } }
     }
 
-    /** Highlights [eventId] where it is when the rows on screen hold it, so a jump within the conversation doesn't reload it. */
+    /** Highlights [eventId] where it is when the live rows on screen hold it, so a jump within the conversation doesn't reload it. */
     fun show(eventId: String): Boolean {
-        if (mutableState.value.rows.none { (it as? ConversationMessage)?.eventId == eventId }) return false
+        val current = mutableState.value
+        if (current.loading || current.preview) return false
+        if (current.rows.none { (it as? ConversationMessage)?.eventId == eventId }) return false
         mutableState.update { it.copy(highlight = eventId, jump = it.jump + 1, startsAtUnread = false) }
         return true
     }

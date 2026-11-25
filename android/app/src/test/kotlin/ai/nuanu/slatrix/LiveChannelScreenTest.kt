@@ -69,7 +69,10 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotEquals
+import ai.nuanu.slatrix.ui.account.lastReplyLabel
 import ai.nuanu.slatrix.ui.account.timeLabel
+import java.time.Instant
+import java.util.Locale
 import ai.nuanu.slatrix.ui.designsystem.bubbleShape
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import androidx.compose.ui.unit.dp
@@ -1012,6 +1015,28 @@ class LiveChannelScreenTest {
         assertTrue("Live new message settles at full opacity", drawn("Live arrival", accent))
     }
 
+    @Test fun firstHistoryPageAfterAnEmptyInitialResetAppearsAtFullOpacity() {
+        val state = mutableStateOf(ConversationState(emptyList(), loading = false, hasMore = true, loadingHistory = true))
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            screen = LocalView.current
+            SlatrixTheme {
+                bubble = SlatrixTheme.colors.bubbleIn.toArgb()
+                LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.mainClock.advanceTimeByFrame()
+
+        val firstPage = (1..20).map { message("Message $it", minutes = it) }
+        compose.runOnUiThread {
+            state.value = ConversationState(firstPage, loading = false, hasMore = false, loadingHistory = false)
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeBy(16)
+        assertTrue("First history page arriving into an empty initial reset must not fade in as ghosts", drawn("Message 20"))
+    }
+
     // capability: conversation.unread-line
     @Test fun oldestUnreadMessageStartsAtTopWithoutOverscrollingAndShortUnreadChannelStaysAboveComposer() {
         val tall = (1..25).map { message("Message $it", minutes = it) }
@@ -1026,15 +1051,17 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Message 1").assertIsDisplayed()
         val header = compose.onNodeWithContentDescription("Back").fetchSemanticsNode().boundsInRoot
         val newLine = compose.onNodeWithText("New").fetchSemanticsNode().boundsInRoot
-        assertTrue("The New line clears the header ($newLine vs $header)", newLine.top >= header.bottom)
+        assertTrue("The New line sits at the top below the header ($newLine vs $header)",
+            newLine.top >= header.bottom && newLine.top - header.bottom < with(compose.density) { 80.dp.toPx() })
     }
 
     @Test fun aShortUnreadChannelWithHistoryIndicatorStaysAnchoredAboveTheComposer() {
         val shortRows = listOf(message("Hello", minutes = 0), message("Unread follow-up", minutes = 1))
+        val state = mutableStateOf(ConversationState(shortRows, loading = false, hasMore = true, loadingHistory = true,
+            firstUnread = "\$Hello", startsAtUnread = true))
         compose.setContent {
             SlatrixTheme {
-                LiveChannelScreen(room, ConversationState(shortRows, loading = false, hasMore = true,
-                    firstUnread = "\$Hello", startsAtUnread = true), ComposerState(loading = false),
+                LiveChannelScreen(room, state.value, ComposerState(loading = false),
                     {}, {}, {}, {}, {}, {}, {}, {})
             }
         }
@@ -1042,12 +1069,18 @@ class LiveChannelScreenTest {
         compose.onNodeWithText("Hello").assertIsDisplayed()
         compose.onNodeWithText("Unread follow-up").assertIsDisplayed()
         val composerTop = compose.onNodeWithContentDescription("Message #design").getUnclippedBoundsInRoot().top
-        val lastBottom = compose.onNodeWithText("Unread follow-up", useUnmergedTree = true).getUnclippedBoundsInRoot().bottom
-        assertTrue("Short unread channel sits near the composer ($lastBottom vs $composerTop)",
-            composerTop - lastBottom < 64.dp)
+        val before = compose.onNodeWithText("Unread follow-up", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("Short unread channel sits right above the composer ($before vs $composerTop)",
+            before.bottom <= composerTop && composerTop - before.bottom < 64.dp)
+
+        // Switching from HistoryProgress to ConversationIntro must not shift the short unread channel.
+        compose.runOnIdle { state.value = state.value.copy(hasMore = false, loadingHistory = false) }
+        compose.waitForIdle()
+        assertEquals(before, compose.onNodeWithText("Unread follow-up", useUnmergedTree = true).getUnclippedBoundsInRoot())
     }
 
     @Test fun aDeletedMessageShowsPlaceholderAndHidesReactionsQuoteRepliesBarAndAttachment() {
+        val original = message("Confidential note", minutes = 1)
         val deleted = message("This message was deleted", minutes = 0).copy(
             kind = MessageKind.Deleted,
             reactions = listOf(MessageReaction("🤷‍♂️", 1, false, listOf("@sam:example.org"))),
@@ -1056,17 +1089,31 @@ class LiveChannelScreenTest {
             attachment = MessageAttachment(MessageAttachment.Kind.File, "secret.pdf", "application/pdf", 1_024L,
                 null, null, TestMediaSource("mxc://example.org/secret")),
         )
+        val state = mutableStateOf(ConversationState(listOf(deleted, original), loading = false, hasMore = false))
+        var quoted: String? = null
         compose.setContent {
             SlatrixTheme {
-                LiveChannelScreen(room, ConversationState(listOf(deleted), loading = false, hasMore = false),
-                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, onOpenThread = {})
+                LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                    actions = MessageActions(onQuote = { quoted = it.body }), onOpenThread = {})
             }
         }
+        // Deleted message keeps placeholder, hides reactions/quote/replies/attachment, and blocks swipe-to-reply.
         compose.onNodeWithText("This message was deleted.").assertIsDisplayed()
         compose.onNodeWithText("🤷‍♂️", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithText("Quoted parent", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithText("2 replies", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithText("secret.pdf", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("This message was deleted.").performTouchInput { swipeRight(startX = left + width / 10f, endX = right) }
+        compose.runOnIdle { assertNull("Deleted message must not swipe-to-reply", quoted) }
+
+        // Long-press a live message, then redact it while its sheet is open: Copy text must disappear immediately.
+        compose.onNodeWithText("Confidential note").performTouchInput { longClick() }
+        compose.onNodeWithText("Copy text").assertIsDisplayed()
+        compose.runOnIdle {
+            state.value = state.value.copy(rows = listOf(deleted, original.copy(kind = MessageKind.Deleted, body = "This message was deleted")))
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("Copy text").assertDoesNotExist()
     }
 
     // capability: message.thread-summary
@@ -1098,6 +1145,22 @@ class LiveChannelScreenTest {
         assertNoEllipsis("25m ago")
         assertNoEllipsis("2d ago")
         assertNoEllipsis("Just now")
+
+        // Deterministic boundary coverage: future clock skew, minute/hour/day thresholds, 7+ day same/prior year, locale.
+        val utc = ZoneId.of("UTC")
+        val ref = Instant.parse("2026-06-15T12:00:00Z").toEpochMilli()
+        assertEquals("Just now", lastReplyLabel(ref + 30_000L, ref, Locale.US, utc))
+        assertEquals("Just now", lastReplyLabel(ref - 59_000L, ref, Locale.US, utc))
+        assertEquals("1m ago", lastReplyLabel(ref - 60_000L, ref, Locale.US, utc))
+        assertEquals("59m ago", lastReplyLabel(ref - 59 * 60_000L, ref, Locale.US, utc))
+        assertEquals("1h ago", lastReplyLabel(ref - 3_600_000L, ref, Locale.US, utc))
+        assertEquals("23h ago", lastReplyLabel(ref - 23 * 3_600_000L, ref, Locale.US, utc))
+        assertEquals("1d ago", lastReplyLabel(ref - 86_400_000L, ref, Locale.US, utc))
+        assertEquals("6d ago", lastReplyLabel(ref - 6 * 86_400_000L, ref, Locale.US, utc))
+        assertEquals("Jun 8", lastReplyLabel(ref - 7 * 86_400_000L, ref, Locale.US, utc))
+        assertEquals("Oct 23, 2024", lastReplyLabel(Instant.parse("2024-10-23T12:00:00Z").toEpochMilli(), ref, Locale.US, utc))
+        val german = lastReplyLabel(ref - 7 * 86_400_000L, ref, Locale.GERMANY, utc)
+        assertTrue("German locale orders day before month: $german", german.startsWith("8"))
     }
 
     private fun message(body: String, minutes: Int, sender: String = "Mira", state: MessageSendState = MessageSendState.Sent) =

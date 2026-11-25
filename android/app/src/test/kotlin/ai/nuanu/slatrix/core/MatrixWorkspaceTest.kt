@@ -451,6 +451,52 @@ class MatrixWorkspaceTest {
         workspace.close()
     }
 
+    @Test fun aJumpDuringCachedSnapshotSkipsShowShortcutAndFailedReopenClearsStaleRows() = runTest {
+        var gate: CompletableDeferred<Unit>? = null
+        var failOpen = false
+        val client = WorkspaceClient(beforeTimeline = {
+            gate?.await()
+            if (failOpen) error("Timeline unavailable")
+        })
+        val workspace = MatrixWorkspace(backgroundScope, client)
+        val alpha = workspaceRoom("!alpha:example.org", "Alpha")
+
+        workspace.open(alpha)
+        val first = workspace.selected.first { it?.room?.id == alpha.id && it.conversation != null }!!.conversation!!
+        first.state.first { !it.loading }
+        client.emit(listOf(TimelineDiff.Reset(listOf(conversationItem("m1", "\$m1", "Sensitive photo")))))
+        first.state.first { it.rows.size == 1 }
+        workspace.back()
+        runCurrent()
+
+        // Reopen as unread while holding the live timeline so the attached conversation shows only cached preview rows.
+        val openGate = CompletableDeferred<Unit>()
+        gate = openGate
+        workspace.open(alpha.copy(unread = UnreadBadge.Bold, resumeAt = "\$m2"))
+        runCurrent()
+        val cached = requireNotNull(workspace.selected.value?.conversation)
+        assertTrue(cached.state.value.preview)
+        assertFalse("show() must reject cached preview rows so jumps open properly", cached.show("\$m1"))
+
+        workspace.jumpTo(alpha, "\$m1", threadRoot = null)
+        assertEquals("Jump must not short-circuit against cached preview rows", "\$m1", workspace.selected.value?.at)
+        assertNotSame(cached, workspace.selected.value?.conversation)
+        openGate.complete(Unit)
+        runCurrent()
+
+        // A failed reopen clears stale cached rows on error instead of leaving deleted/stale content visible.
+        workspace.back()
+        runCurrent()
+        failOpen = true
+        gate = null
+        workspace.open(alpha.copy(unread = UnreadBadge.Bold, resumeAt = "\$m2"))
+        val failed = workspace.selected.first { it?.room?.id == alpha.id && it.conversation != null }!!.conversation!!
+        val errored = failed.state.first { it.error != null }
+        assertTrue("Failed reopen must clear cached preview rows", errored.rows.isEmpty())
+        assertFalse(errored.preview)
+        workspace.close()
+    }
+
     @Test fun leavingBeforeDraftLoadsNeverFlashesPreviousChannelOverTheNextOne() = runTest {
         val client = WorkspaceClient().also { it.failLoads = true }
         val workspace = MatrixWorkspace(backgroundScope, client)
@@ -572,7 +618,7 @@ private class WorkspaceClient(private val threadRoots: Map<String, String> = emp
                 override suspend fun addListener(listener: TimelineListener): TaskHandle {
                     listeners += listener
                     listener.onUpdate(listOf(TimelineDiff.Reset(emptyList())))
-                    return object : TaskHandle(NoHandle) { override fun cancel() = Unit }
+                    return object : TaskHandle(NoHandle) { override fun cancel() { listeners -= listener } }
                 }
                 override suspend fun paginateBackwards(numEvents: UShort): Boolean = true
                 override fun createMessageContent(msgType: MessageType): RoomMessageEventContentWithoutRelation =

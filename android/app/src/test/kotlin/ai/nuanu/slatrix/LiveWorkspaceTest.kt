@@ -413,24 +413,35 @@ class LiveWorkspaceTest {
     @Test fun inactiveGlassSkipsHazeSourceAndEffectRegistrations() {
         val active = mutableStateOf(true)
         lateinit var glassState: HazeState
+        var barModifier: Modifier = Modifier
+        var capsuleModifier: Modifier = Modifier
+        fun Modifier.hasHazeEffect() = foldIn(false) { acc, element ->
+            acc || element.javaClass.name.startsWith("dev.chrisbanes.haze.")
+        }
         compose.setContent {
             SlatrixTheme {
                 CompositionLocalProvider(LocalGlassActive provides active.value) {
                     val glass = rememberGlass()
                     glassState = glass
+                    barModifier = Modifier.size(48.dp).glassBar(glass)
+                    capsuleModifier = Modifier.size(48.dp).glass(glass, SlatrixTheme.colors.glass, CircleShape)
                     Box(Modifier.fillMaxSize()) {
                         Box(Modifier.fillMaxSize().glassSource(glass))
-                        Box(Modifier.size(48.dp).glassBar(glass))
-                        Box(Modifier.size(48.dp).glass(glass, SlatrixTheme.colors.glass, CircleShape))
+                        Box(barModifier)
+                        Box(capsuleModifier)
                     }
                 }
             }
         }
         compose.waitForIdle()
         assertTrue("Active glass registers its Haze source area", glassState.areas.isNotEmpty())
+        assertTrue("Active glassBar attaches Haze effect", barModifier.hasHazeEffect())
+        assertTrue("Active glass attaches Haze effect", capsuleModifier.hasHazeEffect())
 
         compose.runOnIdle { active.value = false }
         compose.waitForIdle()
-        assertTrue("Inactive glass unregisters Haze areas and falls back to solid translucent tint", glassState.areas.isEmpty())
+        assertTrue("Inactive glass unregisters Haze areas", glassState.areas.isEmpty())
+        assertFalse("Inactive glassBar falls back to translucent tint without Haze effect", barModifier.hasHazeEffect())
+        assertFalse("Inactive glass falls back to translucent tint without Haze effect", capsuleModifier.hasHazeEffect())
     }
 }

@@ -368,9 +368,11 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             liftedTop = null
         }
     }
+    fun livePressed(pressed: Pressed): Pressed =
+        (state.rows.find { it.id == pressed.message.id } as? ConversationMessage)?.let { pressed.copy(message = it) } ?: pressed
     // Inside a thread, Reply has nowhere further to go.
     menu?.let { pressed ->
-        MessageActionsHost(pressed.message, actions, onReplyInThread.takeIf { threadRoot == null }, onRetrySend, onDeleteUnsent,
+        MessageActionsHost(livePressed(pressed).message, actions, onReplyInThread.takeIf { threadRoot == null }, onRetrySend, onDeleteUnsent,
             { sheetTop = it }) { menu = null }
     }
     var reacted by remember { mutableStateOf<ConversationMessage?>(null) }
@@ -451,13 +453,13 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             val jumpRoom = if (state.focused) UiMetrics.Touch + UiMetrics.GapLarge else UiMetrics.GapSmall
             val listPadding = remember(bars, jumpRoom) { bars.deferred(topExtra = UiMetrics.GapSmall, bottomExtra = jumpRoom) }
             val arrivals = remember { ArrivalTracker() }
-            val liveFadeIds = remember(rows, ready, jumped, state.focused, state.loadingHistory) {
+            val liveFadeIds = remember(rows, ready, jumped, state.focused, state.loadingHistory, state.hasMore) {
                 when {
                     !ready || !jumped || state.focused -> emptySet()
                     !arrivals.initialized || arrivals.wasFocused -> emptySet()
                     rows === arrivals.prevRows -> arrivals.liveIds
                     arrivals.prevRows.isEmpty() -> {
-                        if (state.loadingHistory) emptySet()
+                        if (state.loadingHistory || arrivals.wasHasMore) emptySet()
                         else rows.mapTo(HashSet()) { it.id }
                     }
                     else -> {
@@ -477,12 +479,14 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 if (!ready) {
                     arrivals.initialized = false
                     arrivals.wasFocused = false
+                    arrivals.wasHasMore = true
                     arrivals.prevRows = emptyList()
                     arrivals.prevIds = emptySet()
                     arrivals.liveIds = emptySet()
                 } else if (jumped) {
                     arrivals.initialized = true
                     arrivals.wasFocused = state.focused
+                    arrivals.wasHasMore = state.hasMore
                     arrivals.prevRows = rows
                     arrivals.prevIds = rows.mapTo(HashSet()) { it.id }
                     arrivals.liveIds = liveFadeIds
@@ -558,10 +562,10 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     }
     }
     // As in Slack, the pressed message stands sharp just above the sheet and glides smoothly back down on dismiss.
-    val pressed = lifted
+    val pressed = lifted?.let(::livePressed)
     val top = liftedTop
     if (pressed != null && top != null) {
-        var height by remember(pressed) { mutableIntStateOf(0) }
+        var height by remember(pressed.message.id) { mutableIntStateOf(0) }
         val gap = with(LocalDensity.current) { UiMetrics.GapMedium.toPx() }
         Box(Modifier.fillMaxWidth().onSizeChanged { height = it.height }.graphicsLayer {
             val from = pressed.y - origin
@@ -583,6 +587,7 @@ private fun LazyListLayoutInfo.inViewport() =
 private class ArrivalTracker {
     var initialized = false
     var wasFocused = false
+    var wasHasMore = true
     var prevRows: List<ConversationRow> = emptyList()
     var prevIds: Set<String> = emptySet()
     var liveIds: Set<String> = emptySet()

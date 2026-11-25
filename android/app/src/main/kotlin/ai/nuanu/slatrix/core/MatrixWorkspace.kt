@@ -238,7 +238,7 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
         if (requested.at != null && !requested.resume) return requested
         val key = cacheKey(requested.room.id, requested.threadRoot)
         val keptState = cacheFor(requested.threadRoot)[key]?.first?.state?.value
-        val snapshot = keptState?.takeIf { !it.loading && !it.preview && !it.focused && it.rows.isNotEmpty() }
+        val snapshot = keptState?.takeIf { !it.loading && !it.preview && !it.focused && it.error == null && it.rows.isNotEmpty() }
             ?.let { TimelineSnapshot(snapshotRows(it.rows, requested.threadRoot != null), it.ownUserId) }
             ?: snapshots[key]
             ?: return requested
@@ -261,7 +261,7 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
 
     private fun saveSnapshot(key: String, isThread: Boolean, conversation: MatrixConversation) {
         val state = conversation.state.value
-        if (state.loading || state.preview || state.focused || state.rows.isEmpty()) return
+        if (state.loading || state.preview || state.focused || state.error != null || state.rows.isEmpty()) return
         snapshots.remove(key)
         snapshots[key] = TimelineSnapshot(snapshotRows(state.rows, isThread), state.ownUserId)
         while (snapshots.size > SNAPSHOT_LIMIT) {

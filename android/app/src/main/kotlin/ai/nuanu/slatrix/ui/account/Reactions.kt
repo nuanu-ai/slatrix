@@ -14,6 +14,7 @@ import ai.nuanu.slatrix.ui.designsystem.Motion
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import ai.nuanu.slatrix.ui.designsystem.isMotionReduced
+import android.text.format.DateFormat
 import android.text.format.DateUtils
 import java.time.Instant
 import java.time.ZoneId
@@ -124,7 +125,10 @@ internal fun ThreadReplies(thread: MessageThread, onOpen: (() -> Unit)?) {
                 color = colors.accent, maxLines = 1)
             thread.lastReplyAt?.let { at ->
                 val now = System.currentTimeMillis()
-                Text(remember(at) { lastReplyLabel(at, now) }, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.labelSmall,
+                val spoken = remember(at) { lastReplySpoken(at, now) }
+                Text(remember(at) { lastReplyLabel(at, now) },
+                    Modifier.weight(1f, fill = false).semantics { contentDescription = spoken },
+                    style = MaterialTheme.typography.labelSmall,
                     color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (onOpen != null) Icon(SlackIcons.ChevronRight, null, Modifier.size(UiMetrics.Icon), tint = colors.textSecondary)
@@ -132,8 +136,8 @@ internal fun ThreadReplies(thread: MessageThread, onOpen: (() -> Unit)?) {
     }
 }
 
-/** Concise relative time ("Just now", "5m ago", "2h ago", "3d ago", or "Oct 23") so the thread bar never truncates. */
-internal fun lastReplyLabel(at: Long, now: Long): String {
+/** Concise relative time ("Just now", "5m ago", "2h ago", "3d ago", or a short date) so the thread bar never truncates. */
+internal fun lastReplyLabel(at: Long, now: Long, locale: Locale = Locale.getDefault(), zone: ZoneId = ZoneId.systemDefault()): String {
     val diff = (now - at).coerceAtLeast(0L)
     return when {
         diff < DateUtils.MINUTE_IN_MILLIS -> "Just now"
@@ -141,14 +145,18 @@ internal fun lastReplyLabel(at: Long, now: Long): String {
         diff < DateUtils.DAY_IN_MILLIS -> "${diff / DateUtils.HOUR_IN_MILLIS}h ago"
         diff < 7 * DateUtils.DAY_IN_MILLIS -> "${diff / DateUtils.DAY_IN_MILLIS}d ago"
         else -> {
-            val zone = ZoneId.systemDefault()
             val date = Instant.ofEpochMilli(at).atZone(zone).toLocalDate()
             val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
-            val pattern = if (date.year == today.year) "MMM d" else "MMM d, yyyy"
-            date.format(DateTimeFormatter.ofPattern(pattern, Locale.getDefault()))
+            val skeleton = if (date.year == today.year) "MMMd" else "yMMMd"
+            val pattern = DateFormat.getBestDateTimePattern(locale, skeleton)
+            date.format(DateTimeFormatter.ofPattern(pattern, locale))
         }
     }
 }
+
+private fun lastReplySpoken(at: Long, now: Long): String =
+    if (now - at < DateUtils.MINUTE_IN_MILLIS) "Last reply just now"
+    else "Last reply " + DateUtils.getRelativeTimeSpanString(at, now, DateUtils.MINUTE_IN_MILLIS)
 
 /** Who reacted with each emoji, by the [names] the room knows them by, with you as "You". */
 @Composable

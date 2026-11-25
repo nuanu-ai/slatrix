@@ -316,6 +316,67 @@ class ThreadScreenTest {
         assertTrue("Tall thread positions root below header ($rootBounds vs header $headerBottom)",
             rootBounds.top >= headerBottom && rootBounds.top - headerBottom < 120.dp)
     }
+
+    // capability: thread.open
+    @Test fun aTallColdThreadWhoseInitialResetIsEmptyStillOpensAtRootTopOnceAutoPagedRepliesArrive() {
+        val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
+        val rootRow = ConversationMessage("ch-root", "\$root", "@sam:example.org", "Sam", "Release plan?", null,
+            1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "S", 0)
+        val pageStarted = CompletableDeferred<Unit>()
+        val allowPage = CompletableDeferred<Unit>()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+        val reads = mutableListOf<String>()
+        val fakeRoom = object : Room(NoHandle) {
+            override fun id(): String = room.id
+            override fun ownUserId(): String = "@me:example.org"
+            override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline = object : Timeline(NoHandle) {
+                private var listener: TimelineListener? = null
+                override suspend fun addListener(listener: TimelineListener): TaskHandle {
+                    this.listener = listener
+                    // SDK publishes an empty initial Reset before MatrixConversation auto-pages the first reply batch.
+                    listener.onUpdate(listOf(TimelineDiff.Reset(emptyList())))
+                    return object : TaskHandle(NoHandle) { override fun cancel() = Unit }
+                }
+                override suspend fun paginateBackwards(numEvents: UShort): Boolean {
+                    pageStarted.complete(Unit)
+                    allowPage.await()
+                    val at = 1_700_000_000_000uL
+                    val items = listOf(conversationItem("t-root", "\$root", "Release plan?", timestamp = at)) +
+                        (1..40).map { conversationItem("t-$it", "\$r$it", "Reply $it", timestamp = at + it.toULong() * 60_000uL) }
+                    listener?.onUpdate(listOf(TimelineDiff.Reset(items)))
+                    return true
+                }
+            }
+        }
+        val conversation = ai.nuanu.slatrix.core.MatrixConversation(scope, fakeRoom, threadRoot = "\$root", root = rootRow, openedWith = 40)
+        try {
+            compose.setContent {
+                SlatrixTheme {
+                    val state = conversation.state.collectAsState().value
+                    LiveChannelScreen(room, state, ComposerState(loading = false), {}, {}, {}, { conversation.loadOlder() },
+                        { reads += it }, {}, {}, {}, threadRoot = "\$root")
+                }
+            }
+            // Wait until the empty Reset has rendered root-only state and auto-pagination is blocked in flight.
+            compose.waitUntil(5_000) { pageStarted.isCompleted }
+            compose.onNodeWithText("Release plan?", useUnmergedTree = true).assertIsDisplayed()
+
+            allowPage.complete(Unit)
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText("Reply 1", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.waitForIdle()
+            compose.onNodeWithText("Release plan?", useUnmergedTree = true).assertIsDisplayed()
+            compose.onNodeWithText("Reply 1", useUnmergedTree = true).assertIsDisplayed()
+            val headerBottom = compose.onNodeWithContentDescription("Back").getUnclippedBoundsInRoot().bottom
+            val rootBounds = compose.onNodeWithText("Release plan?", useUnmergedTree = true).getUnclippedBoundsInRoot()
+            assertTrue("Auto-paged tall thread aligns root below header ($rootBounds vs header $headerBottom)",
+                rootBounds.top >= headerBottom && rootBounds.top - headerBottom < 120.dp)
+            assertTrue("Opening at root top must not prematurely mark newest Reply 40 read: $reads", "\$r40" !in reads)
+        } finally {
+            scope.cancel()
+        }
+    }
 }
 
 /** One room with a thread of five replies, whose timeline waits for [page]; the room's other calls answer nothing. */
