@@ -300,7 +300,7 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
      * Pages asked for since an older message last showed. Joins, topic changes and other hidden events can fill page
      * after page, so history stops loading on its own after a few of those, as on the Mac.
      */
-    private var retryPage: () -> Unit = ::loadOlder
+    private var retryPage: () -> Unit = { loadOlder() }
     @Volatile private var blankPages = 0
     /**
      * The server's count for each recent thread, by its root, for the channel to show on a root whose own summary counts
@@ -496,13 +496,12 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
         return checkNotNull(shown).timeline
     }
 
-    fun loadOlder() {
-        operations.launch {
+    fun loadOlder(): Job = operations.launch {
             if (!pageLock.tryLock()) return@launch
             try {
                 caughtUp()
                 if (!mutableState.value.hasMore || blankPages >= MAX_BLANK_PAGES) return@launch
-                retryPage = ::loadOlder
+                retryPage = { loadOlder() }
                 mutableState.update { it.copy(loadingHistory = true, error = null) }
                 do {
                     val endReached = timeline().paginateBackwards(50u)
@@ -522,7 +521,6 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                 if (lifetime.isActive) mutableState.update { it.copy(loadingHistory = false, preview = false) }
                 pageLock.unlock()
             }
-        }
     }
 
     /** Paginates a long thread backwards (bounded) until a jumped-to older reply lands or history ends. */
