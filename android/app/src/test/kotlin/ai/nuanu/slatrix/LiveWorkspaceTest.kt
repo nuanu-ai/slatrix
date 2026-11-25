@@ -445,9 +445,10 @@ class LiveWorkspaceTest {
         assertFalse("Inactive glass falls back to translucent tint without Haze effect", capsuleModifier.hasHazeEffect())
     }
 
-    @Test fun pushingAPageDisablesLiveGlassUntilTheSlideSettles() {
+    @Test fun pushingAPageKeepsLiveGlassActiveFromFrameZeroSoTheHeaderNeverPopsOnSettle() {
         val stack = mutableStateOf(emptyList<String>())
-        var channelGlass = true
+        var homeGlass = true
+        var channelGlass = false
         compose.setContent {
             SlatrixTheme {
                 LiveWorkspace(stack.value.map { key ->
@@ -455,7 +456,10 @@ class LiveWorkspaceTest {
                         channelGlass = LocalGlassActive.current
                         Text("Channel")
                     }
-                }) { Text("Home") }
+                }) {
+                    homeGlass = LocalGlassActive.current
+                    Text("Home")
+                }
             }
         }
         compose.waitForIdle()
@@ -463,11 +467,12 @@ class LiveWorkspaceTest {
         compose.mainClock.autoAdvance = false
         compose.runOnUiThread { stack.value = listOf("channel"); Snapshot.sendApplyNotifications() }
         compose.mainClock.advanceTimeByFrame()
-        assertFalse("Pushing page disables live blur on its first layout frame before the spring starts", channelGlass)
+        assertFalse("Covered Home disables live blur immediately on push", homeGlass)
+        assertTrue("Pushing page keeps live blur active on frame 0 so the header never snaps on settle", channelGlass)
         compose.mainClock.advanceTimeByFrame()
-        assertFalse("Pushing page must disable live blur while sliding in", channelGlass)
+        assertTrue("Pushing page keeps live blur steady while sliding in", channelGlass)
 
         compose.mainClock.advanceTimeBy(1_000)
-        assertTrue("Top page activates live blur once the slide settles", channelGlass)
+        assertTrue("Top page stays on live blur once the slide settles", channelGlass)
     }
 }
