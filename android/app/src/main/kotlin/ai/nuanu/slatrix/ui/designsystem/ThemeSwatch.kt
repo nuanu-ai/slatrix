@@ -7,8 +7,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -65,9 +67,13 @@ fun ThemeSwatchRow(
         }
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
             choices.chunked(columns).forEach { rowChoices ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
+                Row(
+                    Modifier.fillMaxWidth().height(IntrinsicSize.Max),
+                    horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall),
+                ) {
                     rowChoices.forEach { choice ->
-                        ThemeSwatch(choice, selected == choice, dark, increaseContrast, { onSelect(choice) }, Modifier.weight(1f))
+                        ThemeSwatch(choice, selected == choice, dark, increaseContrast, { onSelect(choice) },
+                            Modifier.weight(1f).fillMaxHeight())
                     }
                     repeat(columns - rowChoices.size) { Spacer(Modifier.weight(1f)) }
                 }
@@ -148,18 +154,24 @@ fun ThemeSwatch(
                 }
             }
         }
-        Text(
-            choice.label,
+        Box(
             Modifier
                 .fillMaxWidth()
+                .fillMaxHeight()
                 .padding(horizontal = LabelInsetHorizontal, vertical = LabelInsetVertical),
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-            color = if (selected) colors.accent else colors.textPrimary,
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                choice.label,
+                Modifier.fillMaxWidth(),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                color = if (selected) colors.accent else colors.textPrimary,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 

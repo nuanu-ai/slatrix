@@ -30,7 +30,6 @@ import androidx.compose.material.icons.outlined.Wallpaper
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import kotlin.math.roundToInt
 import ai.nuanu.slatrix.ui.designsystem.Motion
@@ -244,15 +243,8 @@ private fun WorkspaceThemeScope(
 ) {
     val colors = SlatrixTheme.colors
     val segmentShape = MaterialTheme.shapes.small
-    val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
-    val labelStyle = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold)
     val options = listOf("All workspaces" to false, workspaceName to true)
-    val widestLabel = remember(workspaceName, measurer, labelStyle, density) {
-        with(density) {
-            options.maxOf { measurer.measure(it.first, labelStyle).size.width }.toDp()
-        }
-    }
     Column(Modifier.padding(start = PreferenceInset, end = UiMetrics.GapLarge, top = UiMetrics.GapSmall)) {
         BoxWithConstraints(
             Modifier
@@ -262,20 +254,22 @@ private fun WorkspaceThemeScope(
                 .padding(UiMetrics.GapTiny)
                 .selectableGroup(),
         ) {
-            val sideBySide = (maxWidth - UiMetrics.GapTiny) / 2 >= widestLabel + UiMetrics.GapSmall * 2
+            // Keep both segments on one compact row on standard phones; stack only at large font scales or narrow widths (< 340dp).
+            val sideBySide = density.fontScale < ScopeStackFontScale && maxWidth >= UiMetrics.NarrowPhone - PreferenceInset - UiMetrics.GapTiny
             @Composable
             fun Segment(label: String, forWorkspace: Boolean, modifier: Modifier) {
                 val selected = editingWorkspace == forWorkspace
                 Box(
                     modifier
-                        .heightIn(min = UiMetrics.Touch)
+                        // Compact single row on standard screens; preserve full 48dp touch height when stacked so targets don't overlap.
+                        .heightIn(min = if (sideBySide) UiMetrics.SectionHeader else UiMetrics.Touch)
                         .clip(segmentShape)
                         .then(
                             if (selected) Modifier.background(colors.canvas).border(UiMetrics.Divider, colors.borderStrong, segmentShape)
                             else Modifier,
                         )
                         .selectable(selected = selected, role = Role.Tab) { onEditingWorkspace(forWorkspace) }
-                        .padding(horizontal = UiMetrics.GapSmall, vertical = UiMetrics.GapTiny),
+                        .padding(horizontal = UiMetrics.GapSmall, vertical = UiMetrics.GapSmall),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
@@ -285,14 +279,14 @@ private fun WorkspaceThemeScope(
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                         color = if (selected) colors.textPrimary else colors.textSecondary,
                         textAlign = TextAlign.Center,
-                        maxLines = 2,
+                        maxLines = if (sideBySide) 1 else 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
             }
             if (sideBySide) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
-                    options.forEach { (label, forWorkspace) -> Segment(label, forWorkspace, Modifier.weight(1f)) }
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Max), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
+                    options.forEach { (label, forWorkspace) -> Segment(label, forWorkspace, Modifier.weight(1f).fillMaxHeight()) }
                 }
             } else {
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
@@ -316,6 +310,8 @@ private fun WorkspaceThemeScope(
         }
     }
 }
+
+private const val ScopeStackFontScale = 1.5f
 
 @Composable
 private fun ThemePaletteGrid(

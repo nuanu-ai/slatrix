@@ -5,7 +5,21 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import ai.nuanu.slatrix.ui.account.PILL_ANNOTATION_TAG
+import ai.nuanu.slatrix.ui.account.PillKind
+import ai.nuanu.slatrix.ui.account.TextPill
+import ai.nuanu.slatrix.ui.account.computePillRects
 import ai.nuanu.slatrix.ui.account.dayLabel
+import android.graphics.Canvas
+import android.view.View
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.TextLayoutResult
+import kotlin.math.abs
+import kotlin.math.ceil
 import org.robolectric.Shadows.shadowOf
 import java.io.File
 import androidx.test.core.app.ApplicationProvider
@@ -142,11 +156,12 @@ class MessageContentTest {
     @Test fun aMentionOfYouStandsOutFromOtherMentions() {
         show(message("@me @sam", html = "<a href=\"https://matrix.to/#/@me:example.org\">Me</a> " +
             "<a href=\"https://matrix.to/#/@sam:example.org\">Sam</a>"))
-        val text = compose.onNodeWithText("@Me @Sam", useUnmergedTree = true).text()
-        fun fill(name: String) = text.spanStyles.single { text.substring(it.start, it.end) == name }.item.background
-        val tokens = DesignTokens.colors(false)
-        assertEquals(tokens.getValue("mentionYouFill"), fill("@Me"))
-        assertEquals(tokens.getValue("mentionFill"), fill("@Sam"))
+        val text = compose.onNodeWithText("@Me", substring = true, useUnmergedTree = true).text()
+        assertTrue("Mentions draw rounded pills instead of flat background spans",
+            text.spanStyles.none { it.item.background != Color.Unspecified })
+        val pills = text.getStringAnnotations("slatrix.pill", 0, text.length).sortedBy { it.start }
+        assertEquals(listOf("mention_you" to "@Me", "mention" to "@Sam"),
+            pills.map { it.item to text.substring(it.start, it.end).trim('\u202F', '\u2009', '\u2006') })
     }
 
     // capability: message.mention-pills
@@ -154,13 +169,159 @@ class MessageContentTest {
         show(message("three", html = "<a href=\"https://matrix.to/#/@sam:example.org\">Sam Okafor</a>" +
             "<a href=\"https://matrix.to/#/@wanda:example.org\">wanda-moss</a><a href=\"https://matrix.to/#/@lee:example.org\">Lee</a> hi"))
         val text = compose.onNodeWithText("Okafor", substring = true, useUnmergedTree = true).text()
-        val pills = text.spanStyles.filter { it.item.background != Color.Unspecified }.sortedBy { it.start }
+        assertTrue("Mentions use rounded pill ranges, not flat SpanStyle backgrounds",
+            text.spanStyles.none { it.item.background != Color.Unspecified })
+        val pills = text.getStringAnnotations("slatrix.pill", 0, text.length).sortedBy { it.start }
         assertEquals(3, pills.size)
         for (pill in pills) {
             val name = text.substring(pill.start, pill.end)
             assertFalse("\"$name\" can break at a space or hyphen", name.any { it == ' ' || it == '-' })
         }
         pills.zipWithNext { first, next -> assertTrue("Two mentions touch", first.end < next.start) }
+    }
+
+    // capability: message.rich-text
+    @Test fun inlineCodeAndMentionsRenderRoundedPillsAcrossWrappedLinesAndOutgoingBubbles() {
+        val longCode = "very-long-inline-command-name-that-wraps-cleanly-across-multiple-visual-lines-in-a-bubble"
+        val incoming = message("code", html = "Check <code>b7f6a3f</code>, <code>sshd</code>, and <code>$longCode</code>.")
+        val outgoing = message("own", html = "<a href=\"https://matrix.to/#/@sam:example.org\">alex-salomatov</a> check <code>revit-work</code>")
+            .copy(own = true, senderId = "@me:example.org", senderName = "Me")
+        val codeBlock = message("block", html = "<pre><code>./gradlew test</code></pre>")
+        show(incoming, outgoing, codeBlock)
+
+        val incomingText = compose.onNodeWithText("b7f6a3f", substring = true, useUnmergedTree = true).text()
+        assertTrue("Inline code uses rounded pill ranges, not flat SpanStyle backgrounds",
+            incomingText.spanStyles.none { it.item.background != Color.Unspecified })
+        val codePills = incomingText.getStringAnnotations("slatrix.pill", 0, incomingText.length).sortedBy { it.start }
+        assertEquals(listOf("code" to "b7f6a3f", "code" to "sshd", "code" to longCode),
+            codePills.map { it.item to incomingText.substring(it.start, it.end).trim('\u202F', '\u2009', '\u2006') })
+
+        val outgoingText = compose.onNodeWithText("revit-work", substring = true, useUnmergedTree = true).text()
+        assertTrue("Outgoing pills omit flat SpanStyle backgrounds",
+            outgoingText.spanStyles.none { it.item.background != Color.Unspecified })
+        val outPills = outgoingText.getStringAnnotations("slatrix.pill", 0, outgoingText.length).sortedBy { it.start }
+        assertEquals(listOf("mention" to "@alex\u2011salomatov", "code" to "revit-work"),
+            outPills.map { it.item to outgoingText.substring(it.start, it.end).trim('\u202F', '\u2009', '\u2006') })
+
+        val blockText = compose.onNodeWithText("./gradlew test", useUnmergedTree = true).text()
+        assertTrue("Code blocks do not emit inline code pills",
+            blockText.getStringAnnotations(PILL_ANNOTATION_TAG, 0, blockText.length).isEmpty())
+
+        // Verify wrapped multi-line inline code computes multiple non-overlapping pill rectangles within layout width.
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText("b7f6a3f", substring = true, useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val layout = layouts.single()
+        val longAnnotation = codePills.last()
+        val rects = computePillRects(
+            layout,
+            listOf(TextPill(longAnnotation.start, longAnnotation.end, PillKind.Code, Color.Gray)),
+            wrapPadPx = 4f,
+        )
+        assertTrue("Wrapped inline code spans multiple pill segments (got ${rects.size})", rects.size >= 2)
+        for (rect in rects) {
+            assertTrue("Pill left >= 0 (${rect.left})", rect.left >= 0f)
+            assertTrue("Pill right <= width (${rect.right} <= ${layout.size.width})", rect.right <= layout.size.width.toFloat())
+            assertTrue("Pill has positive area", rect.right > rect.left && rect.bottom > rect.top)
+        }
+        rects.zipWithNext { upper, lower ->
+            assertTrue("Wrapped pill lines keep vertical separation (${upper.bottom} < ${lower.top})", upper.bottom < lower.top)
+        }
+        // Verify thin padding char inside pills renders with positive width smaller than a normal space.
+        val padBox = layout.getBoundingBox(codePills.first().start)
+        val spaceIndex = incomingText.indexOf(' ')
+        val spaceBox = layout.getBoundingBox(spaceIndex)
+        assertTrue("Pill pad width (${padBox.width}) > 0", padBox.width > 0f)
+        assertTrue("Pill pad width (${padBox.width}) <= regular space (${spaceBox.width})", padBox.width <= spaceBox.width + 0.5f)
+    }
+
+    // capability: message.mention-pills
+    @Test fun roundedPillFillsPaintInsideIncomingAndOutgoingBubbles() {
+        lateinit var view: View
+        val incoming = message("me", html = "<a href=\"https://matrix.to/#/@me:example.org\">Me</a> check <code>sshd</code>")
+        val outgoing = message("out", html = "<a href=\"https://matrix.to/#/@sam:example.org\">Sam</a> check <code>revit-work</code>")
+            .copy(own = true, senderId = "@me:example.org", senderName = "Me")
+        compose.setContent {
+            view = LocalView.current
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(incoming, outgoing), loading = false, hasMore = false, ownUserId = "@me:example.org"),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.waitForIdle()
+        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888).also { view.draw(Canvas(it)) }
+        val tokens = DesignTokens.colors(false)
+        val bubbleIn = tokens.getValue("bubbleIn")
+        val accentFill = tokens.getValue("accentFill")
+        val mentionYouComposite = tokens.getValue("mentionYouFill").compositeOver(bubbleIn)
+        val inCodeComposite = tokens.getValue("textBody").copy(alpha = 0.08f).compositeOver(bubbleIn)
+        val outMentionComposite = Color.Black.copy(alpha = 0.18f).compositeOver(accentFill)
+        val outCodeComposite = Color.Black.copy(alpha = 0.16f).compositeOver(accentFill)
+
+        fun matches(a: Color, b: Color) =
+            abs(a.red - b.red) < 0.04f && abs(a.green - b.green) < 0.04f && abs(a.blue - b.blue) < 0.04f
+
+        fun assertRoundedPill(query: String, kindTag: String, expectedFill: Color, expectedBackdrop: Color) {
+            val node = compose.onNodeWithText(query, substring = true, useUnmergedTree = true)
+            val bounds = node.fetchSemanticsNode().boundsInRoot
+            val layouts = mutableListOf<TextLayoutResult>()
+            node.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            val text = node.text()
+            val annotation = text.getStringAnnotations(PILL_ANNOTATION_TAG, 0, text.length).first { it.item == kindTag }
+            val rect = computePillRects(layouts.single(), listOf(TextPill(annotation.start, annotation.end, PillKind.Mention, expectedFill)), 0f).single()
+            var painted = 0
+            val leftPx = ceil(bounds.left + rect.left).toInt().coerceIn(0, bitmap.width - 1)
+            val rightPx = (bounds.left + rect.right).toInt().coerceIn(0, bitmap.width - 1)
+            val topPx = ceil(bounds.top + rect.top).toInt().coerceIn(0, bitmap.height - 1)
+            val bottomPx = (bounds.top + rect.bottom).toInt().coerceIn(0, bitmap.height - 1)
+            for (y in topPx..bottomPx) {
+                for (x in leftPx..rightPx) {
+                    if (matches(Color(bitmap.getPixel(x, y)), expectedFill)) painted++
+                }
+            }
+            assertTrue("Expected painted rounded pill pixels for $query/$kindTag (found $painted)", painted > 20)
+            // Sample strictly inside the bounding box's top-left corner: a square fill would paint here, a 4dp radius leaves backdrop.
+            val corner = Color(bitmap.getPixel(leftPx, topPx))
+            assertTrue("Corner pixel of $query/$kindTag should stay backdrop $expectedBackdrop (got $corner)",
+                matches(corner, expectedBackdrop))
+        }
+
+        assertRoundedPill("@Me", "mention_you", mentionYouComposite, bubbleIn)
+        assertRoundedPill("sshd", "code", inCodeComposite, bubbleIn)
+        assertRoundedPill("@Sam", "mention", outMentionComposite, accentFill)
+        assertRoundedPill("revit-work", "code", outCodeComposite, accentFill)
+    }
+
+    // capability: message.rich-text
+    @Test fun linkedInlineCodeKeepsItsUrlAndMentionLinkExcludesPaddingAndBidiPillSkipsPlainText() {
+        val linkedCode = message("api", html = "Call <a href=\"https://example.org/api\"><code>getRoom()</code></a> now")
+        val mentionMsg = message("hi", html = "<a href=\"https://matrix.to/#/@sam:example.org\">Sam</a> look")
+        val bidiMsg = message("bidi", html = "Run <code>cmd \u05D0\u05D1</code> \u05D2\u05D3\u05D4 now")
+        show(linkedCode, mentionMsg, bidiMsg)
+
+        val linkedText = compose.onNodeWithText("getRoom()", substring = true, useUnmergedTree = true).text()
+        val urls = linkedText.getLinkAnnotations(0, linkedText.length).filter { it.item is LinkAnnotation.Url }
+        assertEquals(listOf("https://example.org/api" to "getRoom()"),
+            urls.map { (it.item as LinkAnnotation.Url).url to linkedText.substring(it.start, it.end) })
+        val codePills = linkedText.getStringAnnotations(PILL_ANNOTATION_TAG, 0, linkedText.length)
+        assertEquals(listOf("code"), codePills.map { it.item })
+
+        val mentionText = compose.onNodeWithText("@Sam", substring = true, useUnmergedTree = true).text()
+        val clickable = mentionText.getLinkAnnotations(0, mentionText.length).single { it.item is LinkAnnotation.Clickable }
+        assertEquals("@Sam", mentionText.substring(clickable.start, clickable.end))
+
+        val bidiNode = compose.onNodeWithText("cmd", substring = true, useUnmergedTree = true)
+        val bidiText = bidiNode.text()
+        val bidiLayouts = mutableListOf<TextLayoutResult>()
+        bidiNode.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(bidiLayouts) }
+        val bidiLayout = bidiLayouts.single()
+        val bidiPill = bidiText.getStringAnnotations(PILL_ANNOTATION_TAG, 0, bidiText.length).single()
+        val bidiRects = computePillRects(bidiLayout, listOf(TextPill(bidiPill.start, bidiPill.end, PillKind.Code, Color.Gray)), 0f)
+        val plainHebrewIndex = bidiText.indexOf('\u05D2')
+        val plainHebrewBox = bidiLayout.getBoundingBox(plainHebrewIndex)
+        val plainCenter = (plainHebrewBox.left + plainHebrewBox.right) / 2f
+        assertTrue("BiDi pill rects ($bidiRects) must not paint across plain Hebrew center $plainCenter",
+            bidiRects.none { plainCenter > it.left && plainCenter < it.right })
     }
 
     // capability: message.reactions.show
@@ -294,14 +455,19 @@ class MessageContentTest {
         compose.onNode(hasText(dayLabel(1_700_000_000_000L), substring = true) and hasAnyAncestor(isDialog())).assertIsDisplayed()
 
         // FileProvider keeps each authority's folders for the process, and each Robolectric test gets its own cache folder.
-        FileProvider::class.java.getDeclaredField("sCache").apply { isAccessible = true }.let { (it.get(null) as MutableMap<*, *>).clear() }
-        compose.onNodeWithContentDescription("Share").performClick()
-        compose.waitUntil { shadowOf(context).peekNextStartedActivity() != null }
-        val shared = shadowOf(context).nextStartedActivity.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)!!
-        assertEquals(Intent.ACTION_SEND, shared.action)
-        assertEquals("image/jpeg", shared.type)
-        val uri = shared.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)!!
-        assertEquals("pixels", context.contentResolver.openInputStream(uri)!!.reader().readText())
+        val cache = FileProvider::class.java.getDeclaredField("sCache").apply { isAccessible = true }.get(null) as MutableMap<*, *>
+        cache.clear()
+        try {
+            compose.onNodeWithContentDescription("Share").performClick()
+            compose.waitUntil { shadowOf(context).peekNextStartedActivity() != null }
+            val shared = shadowOf(context).nextStartedActivity.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)!!
+            assertEquals(Intent.ACTION_SEND, shared.action)
+            assertEquals("image/jpeg", shared.type)
+            val uri = shared.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)!!
+            assertEquals("pixels", context.contentResolver.openInputStream(uri)!!.reader().readText())
+        } finally {
+            cache.clear()
+        }
 
         compose.onNodeWithContentDescription("Save to device").performClick()
         // Held, since the notice leaves on its own after a moment.

@@ -60,7 +60,7 @@ class PeopleScreenTest {
     // capability: people.profile
     @Test fun aMentionOpensTheProfileOfWhoItNames() {
         show(channel, message("@sam look", html = "<a href=\"https://matrix.to/#/@sam:example.org\">Sam</a> look"))
-        compose.onNodeWithText("@Sam look", useUnmergedTree = true).performFirstLinkClick()
+        compose.onNodeWithText("@Sam", substring = true, useUnmergedTree = true).performFirstLinkClick()
         compose.runOnIdle { assertEquals(listOf("@sam:example.org"), opened) }
     }
 
