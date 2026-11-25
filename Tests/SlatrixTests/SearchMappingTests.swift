@@ -44,4 +44,17 @@ struct SearchMappingTests {
         let hits = [hit("$one", kind: text("One")), hit("$two", kind: text("Two"), room: "!two:example.org")]
         #expect(MatrixMapping.searchMessages(hits, roomID: "!two:example.org").map(\.id) == ["$two"])
     }
+
+    @Test("Search snippets sanitize Matrix Markdown mentions, backticks, reply fallbacks and spoilers")
+    func sanitizesSnippets() {
+        var mention = ChatMessage(
+            id: "$m", roomID: "!r:example.org", senderID: "@a:example.org", senderName: "Alice",
+            body:
+                "> <@bob:example.org> Old\n\n"
+                + "[Dmitry Ukhanov](https://matrix.to/#/@dmitry.ukhanov:example.org) check `deploy`\n\nNow",
+            timestamp: .distantPast, replyToID: "$old")
+        #expect(MessageResultRow.snippetBody(for: mention) == "@Dmitry Ukhanov check deploy\nNow")
+        mention.formattedBody = "<span data-mx-spoiler>top secret</span>"
+        #expect(MessageResultRow.snippetBody(for: mention) == "[Spoiler hidden]")
+    }
 }

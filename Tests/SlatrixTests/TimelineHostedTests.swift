@@ -352,6 +352,42 @@ struct TimelineHostedTests {
         #expect(table.rect(ofRow: table.numberOfRows - 1).maxY == between)
     }
 
+    @Test(
+        "A short channel stays anchored on the composer while history ends and welcome loads, with or without a New line",
+        arguments: [false, true])
+    func shortChannelStaysOnComposerWhenHistoryEnds(withUnreadLine: Bool) async throws {
+        let items = (0..<3).map { index in
+            FakeTimelineItem(textEvent("$short-\(index)", body: "Short \(index)", sender: "@other:example.org"))
+        }
+        let room = FakeOpenRoom(Self.room.id, cached: items)
+        room.pageGate.arm()
+        defer { room.pageGate.release() }
+        let harness = Harness(height: 800, opening: room)
+        defer { harness.close() }
+        var fixture = harness.fixture(Self.room)
+        if withUnreadLine { fixture.unreadAnchor = "$short-0" }
+        harness.hosting.rootView = fixture
+        if withUnreadLine {
+            await harness.service.resumeRoom(Self.room.id, at: "$short-0")
+        } else {
+            await harness.service.selectRoom(Self.room.id)
+        }
+        try #require(await eventually { room.pageGate.isWaiting })
+        await settle(harness) { harness.cell(showing: "$short-2") != nil }
+        let newestBefore = try #require(harness.cell(showing: "$short-2"))
+        let before = newestBefore.convert(newestBefore.bounds, to: nil)
+        #expect(before.minY >= harness.composerTop && before.minY - harness.composerTop < before.height)
+
+        try #require(room.timelines.all.first).startReached = true
+        room.pageGate.release()
+        #expect(await eventually { !harness.service.hasMoreHistory && harness.showsWelcome })
+        harness.layout()
+        let newestAfter = try #require(harness.cell(showing: "$short-2"))
+        let after = newestAfter.convert(newestAfter.bounds, to: nil)
+        #expect(after.minY >= harness.composerTop && after.minY - harness.composerTop < after.height)
+        #expect(abs(after.minY - before.minY) < 1)
+    }
+
     private struct UnderBarsFixture: View {
         let service: MatrixService
         let room: ChatRoom
@@ -886,6 +922,57 @@ struct TimelineHostedTests {
         #expect(abs(try #require(harness.top(of: "Reply 1")) - replyOpened) < 0.5)
     }
 
+    @Test("Opening a thread whose root is taller than the pane starts at the top of the root instead of cutting it off")
+    func tallThreadRootOpensAtTop() async throws {
+        var root = Self.longMessage(0)
+        root.id = root.eventID
+        let harness = Harness(width: 400, height: 420)
+        defer { harness.close() }
+        let thread = threadPane(harness, root: root, replies: []) { true }
+        defer { thread.gate.release() }
+        await settle(harness) { harness.cell(showing: root.eventID) != nil }
+        let cell = try #require(harness.cell(showing: root.eventID))
+        let screenHeight = harness.headerBottom - harness.composerTop
+        try #require(cell.frame.height > screenHeight, "Root must exceed pane height to test top anchoring")
+        let frame = cell.convert(cell.bounds, to: nil)
+        #expect(
+            frame.maxY <= harness.headerBottom + 1 && harness.clip.bounds.minY + Self.insets.top < 1,
+            "Tall thread root top should sit under header (\(harness.headerBottom)), got maxY=\(frame.maxY) scrollTop=\(harness.clip.bounds.minY + Self.insets.top)"
+        )
+    }
+
+    @Test("A thread loading indicator appearing under a short thread's root never pushes the root under the header")
+    func threadOlderIndicatorKeepsRootAtTop() async throws {
+        var root = Self.messages(0..<1, prefix: "Root")[0]
+        root.id = root.eventID
+        let replies = Self.messages(1..<7, prefix: "Reply")
+        let harness = Harness(width: 400, height: 558)
+        defer { harness.close() }
+        let thread = threadPane(harness, root: root, replies: replies) { true }
+        defer { thread.gate.release() }
+        await settle(harness) { harness.cell(showing: root.eventID) != nil && harness.cell(showing: "Reply-6") != nil }
+        let table = try #require(harness.scrollView?.documentView as? NSTableView)
+        let screenHeight = harness.headerBottom - harness.composerTop
+        let contentBefore = table.rect(ofRow: table.numberOfRows - 1).maxY
+        try #require(
+            contentBefore <= screenHeight && contentBefore + 40 > screenHeight,
+            "Thread (\(contentBefore)) must fit in \(screenHeight) and overflow once the 40 pt loading row appears")
+        let rootBefore = try #require(harness.top(of: root.body))
+        #expect(await eventually { thread.gate.isWaiting })
+        #expect(
+            await eventually(timeout: .seconds(2)) {
+                harness.layout()
+                return Harness.views(in: harness.hosting).contains {
+                    ($0 as? TimelineCell)?.entry?.id == "older" && $0.window != nil
+                }
+            })
+        harness.layout()
+        let rootAfter = try #require(harness.top(of: root.body))
+        #expect(
+            abs(rootAfter - rootBefore) < 0.5,
+            "Root jumped from \(rootBefore) to \(rootAfter) when older row appeared")
+    }
+
     /// A thread pane showing `root` and `replies`, more of them older, each older page landing as `onPage` says.
     private func threadPane(
         _ harness: Harness, root: ChatMessage, replies: [ChatMessage], onPage: @escaping @MainActor () -> Bool
@@ -1133,7 +1220,7 @@ struct TimelineHostedTests {
         }
         let room = FakeOpenRoom(Self.room.id, cached: Array(items.suffix(20)))
         room.focusedItems = items
-        let others = (0..<6).map { index in
+        let others = (0..<(RecentTimelines<Any>.capacity + 2)).map { index in
             FakeOpenRoom(
                 "!away-\(index):example.org",
                 cached: [FakeTimelineItem(textEvent("$away-\(index)", body: "Away \(index)"))])

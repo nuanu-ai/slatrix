@@ -24,6 +24,9 @@ struct NativeMessageBody: View {
     private var showsSpoilerControl: Bool
     /// Off where a placeholder holds the row at text size until the body arrives, such as a Threads preview.
     private var largeEmoji: Bool
+    /// Compact mode's sender name, flowed inline before plain/inline text or stacked above block elements.
+    private var senderName: String?
+    private var onOpenSender: (() -> Void)?
     private var menuCommands: () -> [MessageMenuCommand]
     @EnvironmentObject private var appearance: AppearanceStore
     @Environment(\.metrics) private var m
@@ -37,7 +40,7 @@ struct NativeMessageBody: View {
     }
     init(
         body: String, formattedBody: String?, edited: Bool = false, showsSpoilerControl: Bool = true,
-        largeEmoji: Bool = true,
+        largeEmoji: Bool = true, senderName: String? = nil, onOpenSender: (() -> Void)? = nil,
         menuCommands: @escaping () -> [MessageMenuCommand] = { [] }
     ) {
         messageBody = body
@@ -45,7 +48,14 @@ struct NativeMessageBody: View {
         self.edited = edited
         self.showsSpoilerControl = showsSpoilerControl
         self.largeEmoji = largeEmoji
+        self.senderName = senderName
+        self.onOpenSender = onOpenSender
         self.menuCommands = menuCommands
+    }
+
+    static func canFlowInlineSender(_ rendered: RenderedMessageBody) -> Bool {
+        guard !rendered.isJumbomoji, let first = rendered.runs.first else { return false }
+        return first.block == MessageBlock() && !first.marker
     }
 
     private var source: SourceKey { SourceKey(body: messageBody, html: formattedBody) }
@@ -57,14 +67,26 @@ struct NativeMessageBody: View {
         let rendered = MessageBodyRenderer.shared.render(
             body: messageBody, formattedBody: formattedBody, revealSpoilers: revealed)
         let colors = appearance.colors
+        let flowSender = senderName != nil && Self.canFlowInlineSender(rendered)
         let fontSize = m.size(largeEmoji && rendered.isJumbomoji ? .largeTitle : .reading)
-        VStack(alignment: .leading, spacing: m.sp4) {
+        VStack(alignment: .leading, spacing: m.sp2) {
+            if let senderName, !flowSender {
+                Button {
+                    onOpenSender?()
+                } label: {
+                    Text(senderName).font(m.font(.reading, .semibold)).foregroundStyle(colors.textPrimary)
+                        .lineLimit(1).truncationMode(.tail)
+                }.buttonStyle(.row).disabled(onOpenSender == nil).linkCursor().help("View profile")
+            }
             NativeSelectableMessageText(
                 runs: MessageBodyRenderer.named(rendered.runs) { id in mentions.members.first { $0.id == id }?.name },
                 fontSize: fontSize, textColor: NSColor(colors.textBody), linkColor: NSColor(colors.accent),
                 mentions: MentionPalette(
                     me: mentions.me, text: NSColor(colors.mentionText), fill: NSColor(colors.mentionFill),
                     ownText: NSColor(colors.mentionYouText), ownFill: NSColor(colors.mentionYouFill)),
+                senderPrefix: flowSender
+                    ? senderName.map { InlineSenderPrefix(name: $0, color: NSColor(colors.textPrimary)) } : nil,
+                onOpenSender: flowSender ? onOpenSender : nil,
                 suffix: edited
                     ? NSAttributedString(
                         string: " (edited)",

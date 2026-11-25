@@ -143,20 +143,30 @@ final class MessageBodyRenderer: @unchecked Sendable {
 
     private static let addresses = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
 
+    private static let markdownMention = try? NSRegularExpression(
+        pattern: #"\[((?:\\.|[^\\\[\]])*)\]\(([^)\s]+)\)"#)
+
     private static let mentions = try? NSRegularExpression(
         pattern: "(?<![A-Za-z0-9_])(?:" + MatrixID.userPattern + "|@room(?![A-Za-z0-9_:]))")
 
     /// Web and mail addresses typed as plain text become links, as in Slack. Code and existing links keep their text.
     private static func linkified(_ runs: [MessageBodyRun]) -> [MessageBodyRun] {
-        split(runs, by: addresses, containing: ".") { match, text, style in
-            match.url.flatMap { safeLink($0.absoluteString) }.map { MessageBodyRun(text: text, style: style, link: $0) }
+        split(runs, by: addresses, containing: ".") { match, source, style in
+            let text = source.substring(with: match.range)
+            return match.url.flatMap { safeLink($0.absoluteString) }.map {
+                MessageBodyRun(text: text, style: style, link: $0)
+            }
         }
     }
 
-    /// User IDs and @room typed as plain text become mentions, which read "@localpart" until a view names them.
+    /// Element-style Markdown Matrix person links, bare user IDs and @room typed as plain text become mentions.
     private static func mentioned(_ runs: [MessageBodyRun]) -> [MessageBodyRun] {
-        split(runs, by: mentions, containing: "@") { _, id, style in
-            id == "@room"
+        let links = split(runs, by: markdownMention, containing: "[") { match, source, style in
+            markdownMentionRun(match, in: source, style: style)
+        }
+        return split(links, by: mentions, containing: "@") { match, source, style in
+            let id = source.substring(with: match.range)
+            return id == "@room"
                 ? MessageBodyRun(text: id, style: style, mention: id)
                 : MessageBodyRun(
                     text: "@" + MatrixID.localpart(id), style: style, link: URL(string: MatrixID.permalink(id)),
@@ -164,9 +174,43 @@ final class MessageBodyRenderer: @unchecked Sendable {
         }
     }
 
+    /// Replaces `[Name](https://matrix.to/#/@...)` and `[Name](matrix:u/...)` links with `@Name` for plain previews.
+    static func replacingMarkdownMentions(in value: String) -> String {
+        guard value.contains("["), let expression = markdownMention else { return value }
+        let source = value as NSString
+        let matches = expression.matches(in: value, range: NSRange(location: 0, length: source.length))
+        guard !matches.isEmpty else { return value }
+        var result = ""
+        var cursor = 0
+        for match in matches {
+            guard let run = markdownMentionRun(match, in: source, style: []) else { continue }
+            if match.range.location > cursor {
+                result += source.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
+            }
+            result += run.text
+            cursor = NSMaxRange(match.range)
+        }
+        if cursor == 0 { return value }
+        if cursor < source.length { result += source.substring(from: cursor) }
+        return result
+    }
+
+    private static func markdownMentionRun(
+        _ match: NSTextCheckingResult, in source: NSString, style: MessageTextStyle
+    ) -> MessageBodyRun? {
+        guard let url = safeLink(source.substring(with: match.range(at: 2))), let id = mentionedUser(url) else {
+            return nil
+        }
+        let label = source.substring(with: match.range(at: 1))
+            .replacingOccurrences(of: #"\\(.)"#, with: "$1", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let shown = label.isEmpty || label == id ? MatrixID.localpart(id) : String(label.drop { $0 == "@" })
+        return MessageBodyRun(text: "@" + shown, style: style, link: url, mention: id)
+    }
+
     private static func split(
         _ runs: [MessageBodyRun], by expression: NSRegularExpression?, containing marker: Character,
-        replace: (NSTextCheckingResult, String, MessageTextStyle) -> MessageBodyRun?
+        replace: (NSTextCheckingResult, NSString, MessageTextStyle) -> MessageBodyRun?
     ) -> [MessageBodyRun] {
         guard let expression else { return runs }
         var result: [MessageBodyRun] = []
@@ -180,7 +224,7 @@ final class MessageBodyRenderer: @unchecked Sendable {
             let text = run.text as NSString
             var cursor = 0
             for match in expression.matches(in: run.text, range: NSRange(location: 0, length: text.length)) {
-                guard var replaced = replace(match, text.substring(with: match.range), run.style) else { continue }
+                guard var replaced = replace(match, text, run.style) else { continue }
                 if match.range.location > cursor {
                     let before = NSRange(location: cursor, length: match.range.location - cursor)
                     result.append(

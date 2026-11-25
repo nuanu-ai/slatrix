@@ -280,6 +280,45 @@ struct MessageBodyRendererTests {
         #expect(runs.compactMap(\.mention) == ["@room", "@alice:example.org"])
     }
 
+    @Test(
+        "A Markdown Matrix person link in plain text renders as a mention instead of a broken URL",
+        arguments: [
+            (
+                "[Dmitry Ukhanov](https://matrix.to/#/@dmitry.ukhanov:example.org) look",
+                "@Dmitry Ukhanov look", "@dmitry.ukhanov:example.org", "@Dmitry Ukhanov"
+            ),
+            (
+                "Hi [Alice](https://matrix.to/#/%40alice%3Aexample.org?via=example.org)!",
+                "Hi @Alice!", "@alice:example.org", "@Alice"
+            ),
+            (
+                "Ping [Bob](matrix:u/bob:example.org) now",
+                "Ping @Bob now", "@bob:example.org", "@Bob"
+            ),
+            (
+                #"See [Alice \[Team\]](https://matrix.to/#/@alice:example.org)"#,
+                "See @Alice [Team]", "@alice:example.org", "@Alice [Team]"
+            ),
+        ])
+    func markdownPersonLink(body: String, expectedText: String, expectedID: String, expectedMention: String) {
+        let rendered = render(nil, body: body)
+        #expect(rendered.plainText == expectedText)
+        let mention = rendered.runs.first { $0.mention != nil }
+        #expect(mention?.mention == expectedID)
+        #expect(mention?.text == expectedMention)
+        #expect(mention?.link != nil)
+    }
+
+    @Test("Non-Matrix Markdown links and Markdown mentions inside code stay literal")
+    func nonMatrixMarkdownLinksStayLiteral() {
+        let web = render(nil, body: "[Docs](https://example.org)")
+        #expect(web.plainText == "[Docs](https://example.org)")
+        #expect(web.runs.allSatisfy { $0.mention == nil })
+        let code = render("<p><code>[Alice](https://matrix.to/#/@alice:example.org)</code></p>")
+        #expect(code.plainText == "[Alice](https://matrix.to/#/@alice:example.org)")
+        #expect(code.runs.allSatisfy { $0.mention == nil })
+    }
+
     @Test("Mentions in code, and addresses that only look like mentions, stay text")
     func notMentions() {
         let runs = render(

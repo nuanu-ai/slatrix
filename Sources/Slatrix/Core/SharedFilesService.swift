@@ -127,7 +127,7 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
     private var observer: SharedFilesTimelineObserver?
     private var timelineHandle: TaskHandle?
     private var roomHandle: TaskHandle?
-    private var kept = RecentTimelines<Kept>()
+    private var kept = RecentTimelines<Kept>(capacity: 4)
     private var account = UUID()
     private var scope = UUID()
     private var revision = 0

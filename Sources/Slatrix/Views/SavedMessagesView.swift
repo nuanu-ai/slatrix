@@ -45,6 +45,7 @@ struct SavedMessagesView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity).background(appearance.colors.canvas)
+        .environment(\.mentions, MentionContext(me: matrix.user?.id))
         .modal(item: $custom) { reference in
             CustomReminder(
                 start: reference.remindAt ?? ReminderPreset.in1Hour.date(from: Date()), onCancel: { custom = nil },

@@ -215,7 +215,7 @@ private struct ThreadFeedRow: View {
                 .modifier(FeedRowHover())
                 .contentShape(Rectangle())
                 .accessibilityElement(children: .combine).accessibilityLabel(
-                    "Thread in \(item.roomName), \(rootMessage.senderName), \(Self.preview(rootMessage)), \(item.replyCount) replies"
+                    "Thread in \(item.roomName), \(rootMessage.senderName), \(Self.plainPreview(rootMessage)), \(item.replyCount) replies"
                 ).accessibilityValue(item.isUnread ? "Unread" : "")
         }.buttonStyle(.row)
             .task(id: item.id + (item.latest?.eventID ?? "")) { await hydrate(false) }
@@ -237,8 +237,9 @@ private struct ThreadFeedRow: View {
                 body: Self.preview(message), formattedBody: message.formattedBody, showsSpoilerControl: false,
                 largeEmoji: false
             ).allowsHitTesting(false)
-        case .failed: Text(Self.preview(message))
-        case .snapshot, .loading: Text(Self.preview(shape)).redacted(reason: .placeholder).accessibilityHidden(true)
+        case .failed: Text(Self.plainPreview(message))
+        case .snapshot, .loading:
+            Text(Self.plainPreview(shape)).redacted(reason: .placeholder).accessibilityHidden(true)
         }
     }
     private static func preview(_ message: ChatMessage) -> String {
@@ -247,5 +248,10 @@ private struct ThreadFeedRow: View {
             return "[Spoiler hidden]"
         }
         return message.body.isEmpty ? message.attachment?.name ?? "Message" : message.body
+    }
+    private static func plainPreview(_ message: ChatMessage) -> String {
+        if message.isRedacted { return ChatMessage.deletedBody }
+        let text = ActivityService.previewBody(for: message)
+        return text.isEmpty ? message.attachment?.name ?? "Message" : text
     }
 }

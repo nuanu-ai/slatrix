@@ -39,6 +39,7 @@ struct DirectMessagesColumn: View {
                         } label: {
                             DirectMessageRow(room: room, selected: room.id == openID, matrix: matrix)
                         }.buttonStyle(.row)
+                            .onHover { if $0 { matrix.prepareRoom(room.id) } }
                             .accessibilityAddTraits(room.id == openID ? .isSelected : [])
                     }
                 }.padding(.bottom, m.sp8)

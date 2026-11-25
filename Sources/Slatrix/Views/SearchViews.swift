@@ -555,7 +555,7 @@ struct SearchResultsView: View {
 }
 
 /// A search hit as Slack lists it: where it was said, then who said it and when, and the words that matched.
-private struct MessageResultRow: View {
+struct MessageResultRow: View {
     /// Characters of a long message shown before its first match.
     private static let lead = 32
     let matrix: MatrixService
@@ -595,10 +595,15 @@ private struct MessageResultRow: View {
         .buttonStyle(.row).onHover { hovering = $0 }
     }
 
+    /// Sanitizes mentions, Markdown markers, spoilers and reply fallback before highlighting a search hit.
+    static func snippetBody(for message: ChatMessage, names: [String: String] = [:]) -> String {
+        ActivityService.previewBody(for: message, names: names).replacing(#/\n\s*\n/#, with: "\n")
+    }
+
     /// The message from a little before its first match, so the match shows in three lines.
     private func snippet(_ colors: AppColors) -> AttributedString {
         // Blank lines would spend the three lines on nothing.
-        var body = message.body.replacing(#/\n\s*\n/#, with: "\n")
+        var body = Self.snippetBody(for: message)
         if let first = query.highlights(in: body).first,
             body.distance(from: body.startIndex, to: first.lowerBound) > Self.lead * 2
         {

@@ -181,6 +181,13 @@ enum ActivityBadge {
             ).prefix(4096))
     }
 
+    nonisolated static func previewBody(for message: ChatMessage, names: [String: String] = [:]) -> String {
+        if message.isRedacted { return ChatMessage.deletedBody }
+        return previewBody(
+            message.body, formatted: message.formattedBody.map { FormattedBody(format: .html, body: $0) },
+            names: names, reply: message.replyToID != nil)
+    }
+
     /// The people a message notification mentions, so their names can be looked up before it shows.
     nonisolated static func mentionedIDs(_ notification: NotificationItem) -> Set<String> {
         guard case .timeline(let event) = notification.event,

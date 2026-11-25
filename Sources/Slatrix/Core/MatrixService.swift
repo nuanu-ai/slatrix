@@ -480,12 +480,14 @@ enum MatrixMapping {
         return formatted.body
     }
 
-    /// A message summarized as text: mentions read "@Name", never a link or a raw ID, and a spoiler hides it all.
+    /// A message summarized as text: mentions read "@Name", never a link or a raw ID, plain-body Markdown markers are
+    /// stripped, and a spoiler hides it all.
     static func previewText(_ body: String, formatted: FormattedBody?, names: [String: String] = [:]) -> String {
         let html = htmlBody(formatted)
         if html?.localizedCaseInsensitiveContains("data-mx-spoiler") == true { return "[Spoiler hidden]" }
-        let runs = MessageBodyRenderer.shared.render(body: body, formattedBody: html).runs
-        return MessageBodyRenderer.named(runs) { names[$0] }.map(\.text).joined()
+        let rendered = MessageBodyRenderer.shared.render(body: body, formattedBody: html)
+        let text = MessageBodyRenderer.named(rendered.runs) { names[$0] }.map(\.text).joined()
+        return rendered.usedPlainTextFallback ? DesktopMessageNotification.stripMarkdown(text) : text
     }
 
     /// A conversation's newest event, for the DMs page; nil when it has none.
@@ -498,12 +500,17 @@ enum MatrixMapping {
         }
         var body: String?
         if case .msgLike(let like) = content {
+            let reply = like.inReplyTo != nil
             switch like.kind {
             case .message(let message):
+                func clean(_ formatted: FormattedBody?) -> String {
+                    let source = reply ? DesktopMessageNotification.withoutReplyFallback(message.body) : message.body
+                    return DesktopMessageNotification.oneLine(previewText(source, formatted: formatted))
+                }
                 switch message.msgType {
-                case .text(let text): body = previewText(message.body, formatted: text.formatted)
-                case .notice(let text): body = previewText(message.body, formatted: text.formatted)
-                case .emote(let text): body = previewText(message.body, formatted: text.formatted)
+                case .text(let text): body = clean(text.formatted)
+                case .notice(let text): body = clean(text.formatted)
+                case .emote(let text): body = clean(text.formatted)
                 default: body = message.body
                 }
             case .sticker(let text, _, _): body = text
@@ -644,6 +651,11 @@ enum MatrixMapping {
         case .redacted:
             message.body = ChatMessage.deletedBody
             message.isRedacted = true
+            message.replyToID = nil
+            message.replyPreview = nil
+            message.replyCount = nil
+            message.lastReply = nil
+            message.repliedToThread = false
         case .unableToDecrypt(let encrypted):
             let mapped = unableToDecrypt(encrypted)
             message.body = mapped.body
@@ -675,10 +687,12 @@ enum MatrixMapping {
             content, id: uniqueID ?? eventID, roomID: roomID, senderID: item.sender,
             senderName: profileName(item.senderProfile, userID: item.sender), timestamp: item.timestamp)
         if uniqueID != nil { result.timelineEventID = eventID }
-        result.reactions = item.reactions.map {
-            MessageReaction(
-                key: $0.key, count: $0.senders.count, mine: $0.senders.contains { $0.senderId == ownUserID },
-                senders: $0.senders.map(\.senderId))
+        if !result.isRedacted {
+            result.reactions = item.reactions.map {
+                MessageReaction(
+                    key: $0.key, count: $0.senders.count, mine: $0.senders.contains { $0.senderId == ownUserID },
+                    senders: $0.senders.map(\.senderId))
+            }
         }
         if case .ready(_, _, let avatar, _, _) = item.senderProfile { result.avatarURL = avatar }
         result.readBy = Array(item.readReceipts.keys)

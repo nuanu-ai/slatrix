@@ -109,14 +109,24 @@ class PillLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
     }
 }
 
+/// Compact mode's sender name flowing at the start of a plain or inline message.
+struct InlineSenderPrefix: Equatable {
+    var name: String
+    var color: NSColor
+}
+
 struct NativeSelectableMessageText: NSViewRepresentable {
     /// Layout width until SwiftUI proposes one; never seen on screen.
     private static let fallbackWidth: CGFloat = 480
+    fileprivate static let senderURL = URL(string: "slatrix-sender://profile")!
     var runs: [MessageBodyRun]
     var fontSize: Double
     var textColor: NSColor
     var linkColor: NSColor
     var mentions: MentionPalette? = nil
+    /// Compact mode's sender name flowing before the first word.
+    var senderPrefix: InlineSenderPrefix? = nil
+    var onOpenSender: (() -> Void)? = nil
     /// Muted text after the last word, such as "(edited)".
     var suffix: NSAttributedString? = nil
     var menuCommands: () -> [MessageMenuCommand]
@@ -158,9 +168,11 @@ struct NativeSelectableMessageText: NSViewRepresentable {
         let textChanged =
             context.coordinator.runs != runs || context.coordinator.fontSize != fontSize
             || context.coordinator.textColor != textColor || context.coordinator.linkColor != linkColor
-            || context.coordinator.mentions != mentions || context.coordinator.suffix != suffix
+            || context.coordinator.mentions != mentions || context.coordinator.senderPrefix != senderPrefix
+            || context.coordinator.senderLinkable != (onOpenSender != nil) || context.coordinator.suffix != suffix
         if textChanged || limitChanged { context.coordinator.sizes = [:] }
         context.coordinator.onOpenURL = onOpenURL
+        context.coordinator.onOpenSender = onOpenSender
         view.menuCommands = menuCommands
         if limitChanged {
             view.textContainer?.maximumNumberOfLines = maxLines
@@ -173,6 +185,26 @@ struct NativeSelectableMessageText: NSViewRepresentable {
             let attributed = NSMutableAttributedString(
                 attributedString: Self.attributed(
                     runs, fontSize: fontSize, textColor: textColor, linkColor: linkColor, mentions: mentions))
+            if let senderPrefix {
+                let style =
+                    (attributed.length > 0
+                        ? attributed.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle : nil)
+                    ?? MessageBlocks.paragraph(
+                        quote: false, list: 0, code: false, marker: 0, heading: false, fontSize: fontSize,
+                        lineSpacing: MessageBlocks.readingLineSpacing(fontSize))
+                var nameAttributes: [NSAttributedString.Key: Any] = [
+                    .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
+                    .foregroundColor: senderPrefix.color,
+                    .paragraphStyle: style,
+                ]
+                if onOpenSender != nil { nameAttributes[.link] = Self.senderURL }
+                let prefix = NSMutableAttributedString(string: senderPrefix.name, attributes: nameAttributes)
+                prefix.append(
+                    NSAttributedString(
+                        string: "  ",
+                        attributes: [.font: NSFont.systemFont(ofSize: fontSize), .paragraphStyle: style]))
+                attributed.insert(prefix, at: 0)
+            }
             if let suffix { attributed.append(suffix) }
             let selection =
                 view.string == attributed.string
@@ -184,6 +216,8 @@ struct NativeSelectableMessageText: NSViewRepresentable {
             context.coordinator.textColor = textColor
             context.coordinator.linkColor = linkColor
             context.coordinator.mentions = mentions
+            context.coordinator.senderPrefix = senderPrefix
+            context.coordinator.senderLinkable = onOpenSender != nil
             context.coordinator.suffix = suffix
         }
     }
@@ -214,15 +248,22 @@ struct NativeSelectableMessageText: NSViewRepresentable {
         var textColor: NSColor?
         var linkColor: NSColor?
         var mentions: MentionPalette?
+        var senderPrefix: InlineSenderPrefix?
+        var senderLinkable = false
         var maximumNumberOfLines: Int?
         var suffix: NSAttributedString?
         /// Laid-out sizes by width for the current text; a timeline row is measured at one or two widths, many times.
         var sizes: [CGFloat: CGSize] = [:]
         var onOpenURL: (URL) -> Void
+        var onOpenSender: (() -> Void)?
         init(onOpenURL: @escaping (URL) -> Void) { self.onOpenURL = onOpenURL }
 
         func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
             let source = (link as? URL)?.absoluteString ?? (link as? String) ?? ""
+            if source == NativeSelectableMessageText.senderURL.absoluteString {
+                onOpenSender?()
+                return true
+            }
             if let url = MessageBodyRenderer.safeLink(source) { onOpenURL(url) }
             return true
         }
