@@ -2581,6 +2581,37 @@ struct TimelinePointerTests {
             for: entry, rowWidth: 600, metrics: m, compact: true, isThread: false)
         #expect(comfortable - compact >= 20)
     }
+
+    @Test("Hover toolbar centers on an ungrouped comfortable row's top edge and stays above grouped rows' first line")
+    func toolbarOriginPlacement() {
+        let ungroupedY = TimelineTableCoordinator.toolbarOriginY(
+            rowTop: 200, toolbarHeight: 32, topInset: 12, grouped: false, compact: false,
+            visibleMinY: 0, visibleMaxY: 600, margin: 4)
+        #expect(ungroupedY == 184)
+
+        let groupedY = TimelineTableCoordinator.toolbarOriginY(
+            rowTop: 200, toolbarHeight: 32, topInset: 3, grouped: true, compact: false,
+            visibleMinY: 0, visibleMaxY: 600, margin: 4)
+        #expect(groupedY == 171)
+
+        let compactY = TimelineTableCoordinator.toolbarOriginY(
+            rowTop: 200, toolbarHeight: 32, topInset: 2, grouped: false, compact: true,
+            visibleMinY: 0, visibleMaxY: 600, margin: 4)
+        #expect(compactY == 170)
+    }
+
+    @Test("TimelineCell keeps its hosted row warm across clearCommands for same-frame reuse and drops it on clear")
+    func cellWarmReuseAndClear() {
+        let cell = TimelineCell(identifier: NSUserInterfaceItemIdentifier("test-row"))
+        let entry = TimelineEntry(id: "day", kind: .day("Today"))
+        let row = TimelineRow(entry: entry, hovered: false, context: TimelineRowContext())
+        cell.show(row, commands: { _ in [] })
+        #expect(cell.row == row)
+        cell.clearCommands()
+        #expect(cell.row == row)
+        cell.clear()
+        #expect(cell.row == nil)
+    }
 }
 
 @MainActor
