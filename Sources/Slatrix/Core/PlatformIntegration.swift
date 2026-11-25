@@ -49,7 +49,14 @@ final class PlatformIntegration: NSObject, ObservableObject, UNUserNotificationC
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development"
     }
 
-    var openAtLogin: Bool { SMAppService.mainApp.status == .enabled }
+    var openAtLogin: Bool { Self.readOpenAtLogin() }
+
+    nonisolated static func readOpenAtLogin() -> Bool { SMAppService.mainApp.status == .enabled }
+
+    /// Reads launch-at-login off the main actor: `SMAppService.mainApp.status` makes a synchronous XPC call to launchd.
+    func loadOpenAtLogin() async -> Bool {
+        await Task.detached(priority: .userInitiated) { Self.readOpenAtLogin() }.value
+    }
 
     /// Whether the reader can read what `window` shows: it is the key window, so Slatrix is the active app, and it is
     /// on screen, not minimized, behind others or under a sheet.

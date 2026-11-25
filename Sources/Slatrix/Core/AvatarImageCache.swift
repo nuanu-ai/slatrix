@@ -19,6 +19,11 @@ final class AvatarImageCache {
     /// A decoded avatar, if one is already in memory, for drawing it on a row's first frame.
     func cachedImage(for source: String) -> CGImage? { images.object(forKey: source as NSString) }
 
+    /// Inserts an already-decoded image into the memory cache.
+    func store(_ image: CGImage, for source: String) {
+        images.setObject(image, forKey: source as NSString, cost: image.bytesPerRow * image.height)
+    }
+
     /// `pixels` caps the decoded image's longer side: a row's avatar needs far less than the profile photo.
     func image(for source: String, pixels: Int = 128, load: @escaping @MainActor () async throws -> Data) async
         -> CGImage?

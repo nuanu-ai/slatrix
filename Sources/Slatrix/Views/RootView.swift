@@ -3305,7 +3305,7 @@ private struct TitleSearch<Field: View>: View {
     var body: some View {
         let fits = fits(widths)
         return Group {
-            if fits || open {
+            if fits || open || bar.menuOpen {
                 // Opened from the button, ⌘G or ⌘F: the field was not there to take the cursor, so it takes it now.
                 field().onAppear { if open { bar.focus() } }
             } else {

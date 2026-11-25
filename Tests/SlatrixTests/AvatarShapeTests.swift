@@ -66,4 +66,34 @@ struct AvatarShapeTests {
         }
         #expect(awayRingPixels >= 30, "Expected visible away ring (>= 30 px at 2x), got \(awayRingPixels)")
     }
+
+    @Test("An avatar draws a cached photo without staying stuck on initials")
+    func displaysCachedPhotoImmediately() throws {
+        // Solid sRGB green 8×8 image so its pixels are unmistakable over any initials background.
+        let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let context = try #require(
+            CGContext(
+                data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 32, space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        context.setFillColor(CGColor(colorSpace: colorSpace, components: [0, 1, 0, 1])!)
+        context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        let cgImage = try #require(context.makeImage())
+
+        let matrix = MatrixService.scratch()
+        matrix.user = ChatUser(id: "@me:example.org", name: "Dmitry Ukhanov", avatarURL: "mxc://example.org/me")
+        matrix.avatarImages.store(cgImage, for: "mxc://example.org/me")
+
+        let renderer = ImageRenderer(
+            content: AvatarView(
+                name: "Dmitry Ukhanov", size: 28, matrix: matrix, source: "mxc://example.org/me"
+            ).environmentObject(AppearanceStore()))
+        renderer.scale = 1
+        let rendered = try #require(renderer.cgImage)
+        let bitmap = NSBitmapImageRep(cgImage: rendered)
+        let color = try #require(
+            bitmap.colorAt(x: rendered.width / 2, y: rendered.height / 2)?.usingColorSpace(.sRGB))
+        #expect(
+            color.greenComponent > 0.9 && color.greenComponent - color.redComponent > 0.4
+                && color.greenComponent - color.blueComponent > 0.5)
+    }
 }

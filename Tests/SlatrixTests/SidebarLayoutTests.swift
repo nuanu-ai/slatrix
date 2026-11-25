@@ -88,9 +88,9 @@ struct SidebarLayoutTests {
     func searchField() {
         #expect(SidebarLayout.searchFits(availableWidth: 640))
         #expect(!SidebarLayout.searchFits(availableWidth: 639.5))
-        // A pane beside can leave the toolbar too narrow for the field beside the conversation's buttons.
-        #expect(SidebarLayout.searchFits(availableWidth: 980, toolbarWidth: 520))
-        #expect(!SidebarLayout.searchFits(availableWidth: 980, toolbarWidth: 519.5))
+        // A pane beside can leave the toolbar too narrow for the field beside the conversation's title and buttons.
+        #expect(SidebarLayout.searchFits(availableWidth: 980, toolbarWidth: 660))
+        #expect(!SidebarLayout.searchFits(availableWidth: 980, toolbarWidth: 659.5))
     }
 
     /// Dragging the window's edge back and forth over a threshold must not flicker, so as the width falls each part

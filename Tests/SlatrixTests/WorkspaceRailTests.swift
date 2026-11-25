@@ -85,14 +85,14 @@ struct WorkspaceRailTests {
     private static let test = Workspace(id: "!test", name: "Test space")
     private static let nested = Workspace(id: "!nested", name: "Design", isTopLevel: false)
 
-    @Test("The search field names the open workspace or space, and all conversations when none is open")
+    @Test("The search field names the open workspace or space, and stays short when none is open")
     func searchPrompt() {
         let workspaces = [Self.lab, Self.test, Self.nested]
         #expect(WorkspaceRail.searchPrompt(workspaceID: "!lab", workspaces: workspaces) == "Search Harbor")
         #expect(WorkspaceRail.searchPrompt(workspaceID: "!nested", workspaces: workspaces) == "Search Design")
-        #expect(WorkspaceRail.searchPrompt(workspaceID: nil, workspaces: workspaces) == "Search all conversations")
+        #expect(WorkspaceRail.searchPrompt(workspaceID: nil, workspaces: workspaces) == "Search")
         // Remembered from last time, before the workspaces have loaded.
-        #expect(WorkspaceRail.searchPrompt(workspaceID: "!lab", workspaces: []) == "Search all conversations")
+        #expect(WorkspaceRail.searchPrompt(workspaceID: "!lab", workspaces: []) == "Search")
     }
 
     @Test(

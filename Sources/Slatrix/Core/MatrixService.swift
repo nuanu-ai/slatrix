@@ -1526,6 +1526,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     @ObservationIgnored private var threadOrigins: [String: (root: ChatMessage, preview: String)] = [:]
     private var selection = UUID()
     private var sessionGeneration = UUID()
+    @ObservationIgnored private var warmStarredTask: Task<Void, Never>?
+    @ObservationIgnored private var warmedStarred = false
     @ObservationIgnored private lazy var roomListRefresher: RoomListRefresher = {
         let refresher = RoomListRefresher()
         refresher.onChange = { [weak self, weak refresher] in
@@ -1534,6 +1536,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             if self.workspaces != refresher.workspaces { self.workspaces = refresher.workspaces }
             if self.roomsLoaded != refresher.loaded { self.roomsLoaded = refresher.loaded }
             self.threadFeed.updateRooms(refresher.rooms)
+            if self.roomsLoaded, !self.warmedStarred,
+                self.rooms.contains(where: { $0.favorite && !$0.isSpace && $0.membership == "join" })
+            {
+                self.scheduleWarmStarredRooms()
+            }
         }
         refresher.onError = { [weak self] error in self?.errorMessage = Self.safeError(error) }
         return refresher
@@ -1887,6 +1894,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 let name = try await activeClient.displayName()
                 let avatar = try await activeClient.avatarUrl()
                 guard let self, self.sessionGeneration == generation, !Task.isCancelled else { return }
+                if let avatar {
+                    // Warm the own avatar before publishing `user.avatarURL` so the sidebar footer Menu label draws
+                    // the photo on its first render instead of sticking on initials.
+                    _ = await self.avatarImages.image(for: avatar, pixels: 128) {
+                        try await self.avatarThumbnail(avatar, side: 128)
+                    }
+                    guard self.sessionGeneration == generation, !Task.isCancelled else { return }
+                }
                 self.needsInitialProfileLoad = false
                 if self.profileRevision == loadedProfileRevision { self.user?.name = name }
                 if self.avatarRevision == loadedAvatarRevision { self.user?.avatarURL = avatar }
@@ -2016,6 +2031,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         for kept in recentTimelines.removeAll() { kept.listener.cancel() }
         dropPrepared()
         dropPreparedThread()
+        warmStarredTask?.cancel()
+        warmStarredTask = nil
+        warmedStarred = false
         liveTimeline = nil
         clearPendingEndReached()
         threadAnchorSearchTask?.cancel()
@@ -2385,6 +2403,76 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         self.prepared = nil
         prepared.task.cancel()
         Task { await prepared.task.value?.listener.cancel() }
+    }
+
+    /// Schedules a one-shot background warmup of top starred rooms once the initial room list lands, after a brief
+    /// settle so the opening conversation never competes with it.
+    private func scheduleWarmStarredRooms() {
+        guard !warmedStarred, warmStarredTask == nil, !isPreview else { return }
+        warmedStarred = true
+        let generation = sessionGeneration
+        warmStarredTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard let self, self.sessionGeneration == generation, !Task.isCancelled else { return }
+            await self.warmStarredRooms()
+        }
+    }
+
+    /// Pre-builds live timelines for up to five starred joined conversations into `recentTimelines`, so switching
+    /// between favourite channels after launch is instant from warm cache.
+    func warmStarredRooms(limit: Int = 5) async {
+        guard connectionStopTask == nil, let client, !isPreview, limit > 0 else { return }
+        let generation = sessionGeneration
+        let targets =
+            rooms
+            .filter {
+                $0.favorite && !$0.isSpace && $0.membership == "join"
+                    && $0.id != selectedRoomID && $0.id != liveTimeline?.roomID && recentTimelines.entry($0.id) == nil
+            }
+            .prefix(limit)
+            .map(\.id)
+        guard !targets.isEmpty else { return }
+        var warmedAny = false
+        for id in targets {
+            guard !Task.isCancelled, sessionGeneration == generation, connectionStopTask == nil else { return }
+            guard id != selectedRoomID, id != liveTimeline?.roomID, recentTimelines.entry(id) == nil,
+                let room = try? client.getRoom(roomId: id), room.membership() == .joined
+            else { continue }
+            let token = UUID()
+            let observer = mainObserver(roomID: id, token: token, focus: nil)
+            guard
+                let timeline = try? await room.timelineWithConfiguration(
+                    configuration: Self.timelineConfiguration(.live(hideThreadedEvents: true)))
+            else { continue }
+            let listener = await timeline.addListener(listener: observer)
+            guard !Task.isCancelled, sessionGeneration == generation, connectionStopTask == nil,
+                id != selectedRoomID, id != liveTimeline?.roomID, recentTimelines.entry(id) == nil
+            else {
+                listener.cancel()
+                continue
+            }
+            var hasMore = true
+            if observer.snapshot.items.count < 20,
+                let reachedStart = try? await timeline.paginateBackwards(numEvents: 30)
+            {
+                hasMore = !reachedStart
+            }
+            guard !Task.isCancelled, sessionGeneration == generation, connectionStopTask == nil,
+                id != selectedRoomID, id != liveTimeline?.roomID, recentTimelines.entry(id) == nil
+            else {
+                listener.cancel()
+                continue
+            }
+            let kept = KeptTimeline(
+                roomID: id, token: token, timeline: timeline, observer: observer, listener: listener)
+            kept.hasMoreHistory = hasMore
+            for closed in recentTimelines.keep(kept, for: id) { closed.listener.cancel() }
+            warmedAny = true
+            await Task.yield()
+        }
+        if warmedAny, let active = selectedRoomID, sessionGeneration == generation {
+            updateSubscriptions(active)
+        }
     }
 
     /// False, without showing the room, when its live timeline does not hold `anchor`.

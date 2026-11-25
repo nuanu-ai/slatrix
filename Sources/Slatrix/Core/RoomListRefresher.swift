@@ -21,13 +21,20 @@ final class RoomListRefresher {
     private var generation = UUID()
     private var state = State()
     private var task: Task<Void, Never>?
+    private var coalesceTask: Task<Void, Never>?
     private var full = false
     private var changed: [String: Room] = [:]
+    /// Short leading window that batches bursts of incremental `RoomInfo` callbacks after the initial room list loads.
+    private let coalesce: Duration
+
+    init(coalesce: Duration = .milliseconds(60)) { self.coalesce = coalesce }
 
     func attach(_ client: Client?) {
         generation = UUID()
         task?.cancel()
         task = nil
+        coalesceTask?.cancel()
+        coalesceTask = nil
         full = false
         changed = [:]
         for handle in state.handles.values { handle.cancel() }
@@ -41,32 +48,52 @@ final class RoomListRefresher {
     /// Rereads every room. Triggers that arrive during a pass coalesce into one follow-up pass instead of restarting it.
     func request() {
         full = true
+        coalesceTask?.cancel()
+        coalesceTask = nil
         run()
     }
 
     /// Reads the rooms the room list adds. A listed room's own info updates already report its changes; a reset
     /// rereads every room.
     func request(_ updates: [RoomListEntriesUpdate]) {
+        var addedAny = false
         for update in updates {
             switch update {
             case .reset: return request()
-            case .append(let values): for room in values { added(room) }
-            case .pushFront(let value), .pushBack(let value), .insert(_, let value), .set(_, let value): added(value)
+            case .append(let values):
+                for room in values where added(room) { addedAny = true }
+            case .pushFront(let value), .pushBack(let value), .insert(_, let value), .set(_, let value):
+                if added(value) { addedAny = true }
             case .clear, .popFront, .popBack, .remove, .truncate: continue
             }
         }
+        guard addedAny else { return }
+        coalesceTask?.cancel()
+        coalesceTask = nil
         run()
     }
 
-    private func added(_ room: Room) {
+    private func added(_ room: Room) -> Bool {
         let id = room.id()
-        if state.handles[id] == nil { changed[id] = room }
+        guard state.handles[id] == nil else { return false }
+        changed[id] = room
+        return true
     }
 
     private func roomChanged(_ room: Room, id: String, generation: UUID) {
         guard generation == self.generation else { return }
         changed[id] = room
-        run()
+        guard loaded, !full, task == nil, coalesce > .zero else {
+            run()
+            return
+        }
+        guard coalesceTask == nil else { return }
+        coalesceTask = Task { [weak self] in
+            try? await Task.sleep(for: self?.coalesce ?? .zero)
+            guard let self, self.generation == generation, !Task.isCancelled else { return }
+            self.coalesceTask = nil
+            self.run()
+        }
     }
 
     private func run() {

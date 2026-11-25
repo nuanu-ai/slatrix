@@ -149,7 +149,7 @@ struct TimelineTable: NSViewRepresentable {
     }
 
     func updateNSView(_ view: TimelineScrollView, context: Context) {
-        context.coordinator.update(self)
+        context.coordinator.update(self, covered: context.environment.isCovered)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: TimelineScrollView, context: Context) -> CGSize? {
@@ -194,6 +194,7 @@ struct TimelineTable: NSViewRepresentable {
     private var spacerHeight: CGFloat = 0
     private var insets = NSEdgeInsets()
     private var opened = false
+    private var covered = false
     private var pendingFocus: String?
     private var hoveredID: String?
     private let toolbar = TimelineToolbarView(rootView: nil)
@@ -255,11 +256,16 @@ struct TimelineTable: NSViewRepresentable {
         return scrollView
     }
 
-    func update(_ configuration: TimelineTable) {
+    func update(_ configuration: TimelineTable, covered: Bool = false) {
         let previous = self.configuration
         // The view this table leaves with may already describe the next timeline, which a table of its own shows.
         guard previous == nil || previous?.timelineID == configuration.timelineID else { return }
         self.configuration = configuration
+        if self.covered != covered {
+            self.covered = covered
+            scrollView.isCovered = covered
+            if covered { pointerMoved(nil) }
+        }
         if previous == nil, !opened {
             loading = Performance.begin(configuration.context.isThread ? .threadLoading : .timelineLoading)
             // A table shows one timeline; the view it leaves with may already describe the next.
@@ -492,7 +498,15 @@ struct TimelineTable: NSViewRepresentable {
 
     /// Rough, cheap and never shown: a row is measured before it is drawn.
     private func estimate(_ entry: TimelineEntry) -> CGFloat {
-        let m = configuration?.context.metrics ?? Metrics()
+        Self.estimateHeight(
+            for: entry, rowWidth: rowWidth, metrics: configuration?.context.metrics ?? Metrics(),
+            compact: configuration?.context.appearance?.density == .compact,
+            isThread: configuration?.context.isThread == true)
+    }
+
+    static func estimateHeight(
+        for entry: TimelineEntry, rowWidth: CGFloat, metrics m: Metrics, compact: Bool, isThread: Bool
+    ) -> CGFloat {
         switch entry.kind {
         case .spacer, .end, .loading: return m.sp40
         case .welcome: return m(220)
@@ -500,11 +514,14 @@ struct TimelineTable: NSViewRepresentable {
         case .unread: return m(40)
         case .message(let row):
             let line = m.lineHeight(.reading)
-            let perLine = max(20, (rowWidth - m(100)) / (m.size(.reading) * 0.5))
+            let inset = m.conversationInset(thread: isThread)
+            let chrome: CGFloat = compact ? m(52) + m.sp8 : m.avatar + m.sp12
+            let textWidth = max(m(120), rowWidth - 2 * inset - chrome)
+            let perLine = max(20, textWidth / (m.size(.reading) * 0.5))
             // Characters counted as UTF-8 lead bytes: a whole room is estimated at once, and grapheme breaking costs
-            // more than this guess is worth.
+            // more than this guess is worth. In compact mode the sender name flows inline on the first line.
             var lines: CGFloat = 0
-            var characters: CGFloat = 0
+            var characters: CGFloat = compact && !row.grouped ? CGFloat(row.message.senderName.count + 2) : 0
             for byte in row.message.body.utf8 {
                 if byte == 10 {
                     lines += max(1, ceil(characters / perLine))
@@ -514,7 +531,14 @@ struct TimelineTable: NSViewRepresentable {
                 }
             }
             lines += max(1, ceil(characters / perLine))
-            var height = (row.grouped ? (row.followsAttachment ? m(14) : m.sp4) : m(29)) + lines * line
+            let overhead: CGFloat =
+                if compact {
+                    MessageRow.topInset(
+                        m, grouped: row.grouped, compact: true, followsAttachment: row.followsAttachment) + m.sp2
+                } else {
+                    row.grouped ? (row.followsAttachment ? m(14) : m.sp4) : m(29)
+                }
+            var height = overhead + lines * line
             if !row.message.isRedacted {
                 if !row.message.reactions.isEmpty { height += m(30) }
                 if row.message.attachment != nil { height += m(300) }
@@ -808,21 +832,27 @@ struct TimelineTable: NSViewRepresentable {
         let largest = differences.max { abs($0) < abs($1) } ?? 0
         let newest = rows.lastIndex { if case .message = $0.kind { true } else { false } }
         let below = newest.map { viewport.contentHeight - table.rect(ofRow: $0).maxY } ?? 0
+        // A short top-aligned thread intentionally leaves empty space below its replies.
+        let past =
+            configuration?.bottomAligned == false && viewport.contentHeight <= viewport.height
+            ? 0 : Int(viewport.overshoot.rounded())
         Performance.event(
             .timelineFit,
             [
                 "misfit": differences.count, "px": Int(largest), "bottom": Int(viewport.distanceFromBottom.rounded()),
                 "opening": opening, "live": configuration?.live == false ? 0 : 1, "below": Int(below.rounded()),
-                "past": Int(viewport.overshoot.rounded()), "inset": Int(insets.bottom.rounded()),
+                "past": past, "inset": Int(insets.bottom.rounded()),
             ])
     }
 
-    /// Rows that fill the screen never leave space under the newest message. AppKit can leave the table taller than
-    /// its rows and the view at the table's end, past the newest message, over the composer.
+    /// Rows that fill the screen (or any bottom-aligned conversation) never leave space under the newest message.
+    /// AppKit can leave the table taller than its rows and the view at the table's end, past the newest message.
     private func closeGap() {
+        guard opened, !applying, !liveScrolling else { return }
+        let bottomAligned = configuration?.bottomAligned == true
+        table.tile()
         let viewport = viewport
-        guard opened, !applying, !liveScrolling, viewport.contentHeight > viewport.height, viewport.overshoot >= 1
-        else { return }
+        guard bottomAligned || viewport.contentHeight > viewport.height, viewport.overshoot >= 1 else { return }
         Performance.event(
             .timelineGap,
             [
@@ -831,6 +861,7 @@ struct TimelineTable: NSViewRepresentable {
             ])
         let wasApplying = applying
         applying = true
+        if bottomAligned { updateSpacer() }
         scroll(to: .bottom)
         applying = wasApplying
     }
@@ -876,6 +907,7 @@ struct TimelineTable: NSViewRepresentable {
     /// Conversations start at their composer: a spacer above short content keeps the newest message at the bottom.
     private func updateSpacer() {
         guard !rows.isEmpty, configuration?.bottomAligned == true else { return }
+        table.tile()
         let content = table.rect(ofRow: rows.count - 1).maxY - table.rect(ofRow: 0).height
         // Whole points, so every row below it stays on the pixel grid.
         let height = max(0, (viewportHeight - content).rounded(.down))
@@ -1093,8 +1125,8 @@ struct TimelineTable: NSViewRepresentable {
     // MARK: Hover
 
     private func pointerMoved(_ point: NSPoint?) {
-        // Over the header's or the composer's glass the pointer is on them, not on the rows passing under.
-        let point = point.flatMap { visible.contains(table.convert($0, from: nil)) ? $0 : nil }
+        // Under a modal or drawer, or over the header's/composer's glass, the pointer does not hover rows.
+        let point = covered ? nil : point.flatMap { visible.contains(table.convert($0, from: nil)) ? $0 : nil }
         pointer = point
         defer { placeTooltip() }
         // The toolbar hangs over the row above its own; the pointer on it still means its row.
@@ -1193,10 +1225,29 @@ final class TimelineScrollView: NSScrollView {
     var willTile: (() -> Void)?
     var onTile: (() -> Void)?
     var onPointer: ((NSPoint?) -> Void)?
+    /// True while a modal, drawer, or covering pane sits above this timeline.
+    var isCovered = false {
+        didSet {
+            guard isCovered != oldValue else { return }
+            if isCovered { onPointer?(nil) }
+            syncCoveredTextViews(in: self)
+            window?.invalidateCursorRects(for: self)
+        }
+    }
     /// One area for the view's life: `.inVisibleRect` follows every resize, and replacing it would send the hovered
     /// message an exit and an enter at each step of a live resize or a pane drag, blinking its highlight.
     private lazy var tracking = NSTrackingArea(
         rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self)
+
+    private func syncCoveredTextViews(in view: NSView) {
+        for subview in view.subviews {
+            if let textView = subview as? MessageTextView {
+                textView.syncCoveredCursor()
+            } else {
+                syncCoveredTextViews(in: subview)
+            }
+        }
+    }
 
     override func tile() {
         willTile?()
@@ -1211,11 +1262,13 @@ final class TimelineScrollView: NSScrollView {
 
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
+        guard !isCovered else { return }
         onPointer?(event.locationInWindow)
     }
 
     override func mouseEntered(with event: NSEvent) {
         super.mouseEntered(with: event)
+        guard !isCovered else { return }
         onPointer?(event.locationInWindow)
     }
 

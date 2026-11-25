@@ -12,12 +12,24 @@ import SwiftUI
     var current: Kind?
 }
 
+private struct CoveredKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// True while a modal, drawer, media viewer, or covering pane sits above this view hierarchy.
+    var isCovered: Bool {
+        get { self[CoveredKey.self] }
+        set { self[CoveredKey.self] = newValue }
+    }
+}
+
 extension View {
     /// Out of reach under something that covers it: no clicks, keys or drops, and VoiceOver can't activate it. VoiceOver
     /// still lists a stack's children, dimmed, as it does under a dialog: on the Mac a stack hides them only as an
     /// element of its own, which would put a group around every view this is on, covered or not.
     func covered(_ covered: Bool) -> some View {
-        disabled(covered).accessibilityHidden(covered)
+        disabled(covered).accessibilityHidden(covered).transformEnvironment(\.isCovered) { $0 = $0 || covered }
     }
 
     /// Shows `content` as a modal over the window while `item` is set, like `.sheet(item:)`. A click outside closes it

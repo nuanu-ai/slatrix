@@ -2515,6 +2515,72 @@ struct TimelinePointerTests {
         let areas = scrollView.trackingAreas.filter { $0.owner === scrollView }
         #expect(areas.count == 1 && areas.first === area)
     }
+
+    @Test("A covered timeline clears hover and ignores pointer movement and text cursor updates beneath a modal")
+    func coveredTimelineBlocksHoverAndCursor() throws {
+        let window = offscreenWindow(NSSize(width: 400, height: 300))
+        defer {
+            window.contentView = nil
+            window.close()
+        }
+        let scrollView = TimelineScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        let textView = MessageTextView(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
+        textView.textContainerInset = .zero
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textStorage?.setAttributedString(
+            NSAttributedString(
+                string: "https://example.org",
+                attributes: [
+                    .link: URL(string: "https://example.org")!,
+                    .font: NSFont.systemFont(ofSize: 14),
+                ]))
+        scrollView.documentView = textView
+        window.contentView = scrollView
+        scrollView.layoutSubtreeIfNeeded()
+
+        var lastPointer: NSPoint? = NSPoint(x: 10, y: 10)
+        scrollView.onPointer = { lastPointer = $0 }
+        let layout = try #require(textView.layoutManager)
+        let glyphPoint = textView.convert(NSPoint(x: 12, y: 8), to: nil)
+        let move = try #require(
+            NSEvent.mouseEvent(
+                with: .mouseMoved, location: glyphPoint, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
+
+        scrollView.isCovered = true
+        #expect(lastPointer == nil)
+        #expect(textView.effectivelyCovered)
+        scrollView.mouseMoved(with: move)
+        #expect(lastPointer == nil)
+        textView.mouseMoved(with: move)
+        #expect(layout.temporaryAttribute(.underlineStyle, atCharacterIndex: 0, effectiveRange: nil) == nil)
+
+        scrollView.isCovered = false
+        #expect(!textView.effectivelyCovered)
+        scrollView.mouseMoved(with: move)
+        #expect(lastPointer == glyphPoint)
+        textView.mouseMoved(with: move)
+        #expect(layout.temporaryAttribute(.underlineStyle, atCharacterIndex: 0, effectiveRange: nil) != nil)
+    }
+
+    @Test("Compact message row estimates omit comfortable mode's separate sender header line")
+    func compactEstimateMatchesDensity() {
+        let message = ChatMessage(
+            id: "$m1", roomID: "!r:example.org", senderID: "@a:example.org", senderName: "Alice",
+            body: "Short line", timestamp: Date(timeIntervalSince1970: 0))
+        let entry = TimelineEntry(
+            id: "$m1",
+            kind: .message(
+                TimelineMessageEntry(
+                    message: message, grouped: false, time: "10:00", saved: false, pinned: false, highlighted: false,
+                    sendFailure: nil, sendBusy: false)))
+        let m = Metrics()
+        let comfortable = TimelineTableCoordinator.estimateHeight(
+            for: entry, rowWidth: 600, metrics: m, compact: false, isThread: false)
+        let compact = TimelineTableCoordinator.estimateHeight(
+            for: entry, rowWidth: 600, metrics: m, compact: true, isThread: false)
+        #expect(comfortable - compact >= 20)
+    }
 }
 
 @MainActor

@@ -138,6 +138,34 @@ extension RoomListRefresherTests {
         #expect(quiet.infoReads == quietReads)
         #expect(client.spaces.lookups.all.count == lookups)
     }
+
+    @Test("A burst of room info updates after initial load coalesces into a single refresh publication")
+    func coalescesRoomChangeBursts() async {
+        let first = FakeRoom(roomInfo(id: "!first:example.org"))
+        let second = FakeRoom(roomInfo(id: "!second:example.org"))
+        let third = FakeRoom(roomInfo(id: "!third:example.org"))
+        let refresher = RoomListRefresher()
+        var publications = 0
+        refresher.onChange = { publications += 1 }
+        refresher.attach(FakeClient(rooms: [first, second, third]))
+        refresher.request()
+        #expect(await eventually { refresher.rooms.count == 3 && publications == 1 })
+        first.info = roomInfo(id: "!first:example.org", unread: 1)
+        second.info = roomInfo(id: "!second:example.org", unread: 2)
+        third.info = roomInfo(id: "!third:example.org", unread: 3)
+        first.notifyInfoChanged()
+        await Task.yield()
+        // An unchanged `.set` for an already-watched room must not break the coalescing window.
+        refresher.request([.set(index: 0, value: first)])
+        second.notifyInfoChanged()
+        await Task.yield()
+        third.notifyInfoChanged()
+        #expect(
+            await eventually {
+                refresher.rooms.map(\.unread) == [1, 2, 3]
+            })
+        #expect(publications == 2)
+    }
 }
 
 extension RoomListRefresherTests {
