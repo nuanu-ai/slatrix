@@ -274,7 +274,7 @@ final class RoomSubscriptionCoordinator {
     private nonisolated static let paginationConcurrency = 6
     private let paginationLimit = ConcurrencyLimit(slots: paginationConcurrency)
     private let previewLimit = ConcurrencyLimit(slots: 6)
-    @ObservationIgnored var hydrationTimeout: Duration = .milliseconds(800)
+    @ObservationIgnored var hydrationTimeout: Duration = .seconds(1.5)
     private var client: Client?
     private var workspaceID: String?
     private var ownUserID: String?
@@ -442,11 +442,12 @@ final class RoomSubscriptionCoordinator {
                     return
                 }
                 continuation = cont
-                timer = Task { @MainActor in
-                    try? await Task.sleep(for: timeout)
-                    finish()
-                }
                 worker = Task { @MainActor in
+                    guard !finished, !Task.isCancelled else { return }
+                    timer = Task(priority: .utility) {
+                        try? await Task.sleep(for: timeout)
+                        await MainActor.run { finish() }
+                    }
                     await operation()
                     finish()
                 }
