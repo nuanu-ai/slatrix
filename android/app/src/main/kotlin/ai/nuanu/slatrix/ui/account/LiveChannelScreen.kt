@@ -194,9 +194,13 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         }
     }
     val line = newLine.at
-    val opensAt = state.highlight ?: newLine.start ?: newLine.back?.first ?: newLine.threadTop
+    val previewThreadTop = threadRoot?.takeIf {
+        !newLine.decided && state.preview && state.highlight == null &&
+            state.rows.any { row -> (row as? ConversationMessage)?.eventId == it }
+    }
+    val opensAt = state.highlight ?: newLine.start ?: newLine.back?.first ?: newLine.threadTop ?: previewThreadTop
     fun opens(row: ConversationRow) = row.id == opensAt || (row as? ConversationMessage)?.eventId == opensAt
-    var jumped by remember(opensAt, state.jump) { mutableStateOf(opensAt == null) }
+    var jumped by remember(opensAt, state.jump, newLine.decided) { mutableStateOf(opensAt == null) }
     val latest = (state.rows.lastOrNull { it is ConversationMessage && it.eventId != null } as ConversationMessage?)
         ?.takeIf { it.kind != MessageKind.Encrypted }
     val connected = LocalConnection.current == ConnectionState.Connected
@@ -217,8 +221,8 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             }
         }.distinctUntilChanged().collect { visible -> if (visible) read(event) }
     }
-    LaunchedEffect(list, jumped) {
-        if (!jumped) return@LaunchedEffect
+    LaunchedEffect(list, jumped, ready) {
+        if (!jumped || !ready) return@LaunchedEffect
         snapshotFlow { list.firstVisibleItemIndex to list.firstVisibleItemScrollOffset }.collect { (index, offset) ->
             place = if (list.atBottom()) null else rows.asReversed().getOrNull(index - 1)?.let { it.id to offset }
         }
@@ -249,7 +253,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     // A jump shows its message a third of the way up and highlights it briefly, then fades the wash out smoothly.
     var lit by remember(opensAt, state.jump) { mutableStateOf<String?>(null) }
     val highlightAlpha = remember(opensAt, state.jump) { Animatable(0f) }
-    LaunchedEffect(opensAt, state.jump) {
+    LaunchedEffect(opensAt, state.jump, newLine.decided) {
         val target = opensAt ?: return@LaunchedEffect
         val index = snapshotFlow {
             val info = list.layoutInfo
@@ -266,7 +270,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                     list.scrollToItem(listIndex, offset)
                     return@LaunchedEffect
                 }
-                if (target == newLine.start || target == newLine.threadTop) {
+                if (target == newLine.start || target == newLine.threadTop || target == previewThreadTop) {
                     // Top-align only when content from target down exceeds the viewport; otherwise Arrangement.Bottom
                     // already shows everything cleanly above the composer without pulling short lists into blank space.
                     val info = list.layoutInfo
@@ -505,11 +509,19 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                 // The pressed message hides while its copy lifts over the sheet and glides back down on close.
                 val forward = lifted?.message?.id
                 itemsIndexed(reversed, key = { _, row -> row.id }) { index, row ->
-                    Box(Modifier.animateItem(
-                        fadeInSpec = if (row.id in liveFadeIds) Motion.gentle() else null,
-                        placementSpec = Motion.snappy(),
-                        fadeOutSpec = Motion.gentle(),
-                    ).alpha(if (row.id != forward) 1f else 0f)) {
+                    // Day dividers snap directly into place so backward history loads never slide date pills across bubbles.
+                    // Message rows keep placementSpec stable so Compose retains prior offsets and never sweeps existing
+                    // bubbles in from the viewport edge when the first live message arrives.
+                    val itemModifier = if (row is DayDivider) {
+                        Modifier
+                    } else {
+                        Modifier.animateItem(
+                            fadeInSpec = if (row.id in liveFadeIds) Motion.gentle() else null,
+                            placementSpec = Motion.snappy(),
+                            fadeOutSpec = null,
+                        )
+                    }
+                    Box(itemModifier.alpha(if (row.id != forward) 1f else 0f)) {
                     when (row) {
                         is DayDivider -> DayDividerRow(row.timestamp)
                         is ConversationMessage -> Column(if (lit != null && row.eventId == lit) Modifier.drawBehind {

@@ -225,6 +225,23 @@ internal fun SlatrixApp(
                 val chooseSpace: (String?) -> Unit = { id ->
                     (id ?: WorkspaceRail.AllToken).let { remembered = it; workspacePreferences.selectedSpaceId = it }
                 }
+                // Warm the top visible Home rooms while idle so the first tap after a cold restart opens on frame 0.
+                LaunchedEffect(workspace, rooms, selectedSpaceId, selected == null) {
+                    if (selected != null) return@LaunchedEffect
+                    val targetWorkspace = workspace ?: return@LaunchedEffect
+                    val source = rooms ?: return@LaunchedEffect
+                    source.state.collect { list ->
+                        if (list.rooms.isEmpty()) return@collect
+                        val visible = list.rooms.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) }
+                        val collapsed = workspacePreferences.collapsedSections
+                        fun shownIn(section: String, items: List<RoomSummary>) =
+                            if (section !in collapsed) items else items.filter { it.unread != ai.nuanu.slatrix.core.UnreadBadge.None }
+                        val priority = (shownIn("Starred", visible.filter { it.starred }) +
+                            shownIn("Channels", visible.filter { !it.starred && !it.direct }) +
+                            shownIn("Direct", visible.filter { !it.starred && it.direct })).map { it.id }
+                        targetWorkspace.warm(priority)
+                    }
+                }
                 val thread = threads?.selected?.collectAsState()?.value
                 // A thread's root follows the channel under it, which alone sees the root's edits.
                 LaunchedEffect(thread?.conversation, selected?.conversation) {

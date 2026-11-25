@@ -1163,6 +1163,62 @@ class LiveChannelScreenTest {
         assertTrue("German locale orders day before month: $german", german.startsWith("8"))
     }
 
+    @Test fun olderHistoryPageMovesDayDividerImmediatelyWithoutSlidingOverMessages() {
+        val today = LocalDate.of(2025, 11, 20).atTime(12, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val state = mutableStateOf(ConversationState(
+            rows = listOf(DayDivider("d-today", today), message("Newest", minutes = 10)),
+            loading = false,
+            hasMore = true,
+        ))
+        compose.setContent {
+            SlatrixTheme(dark = true) {
+                LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("Nov 20", substring = true, useUnmergedTree = true).assertIsDisplayed()
+
+        // Pause the clock when older same-day messages arrive above the newest message: the same DayDivider shifts up.
+        compose.mainClock.autoAdvance = false
+        compose.runOnUiThread {
+            state.value = state.value.copy(
+                rows = listOf(
+                    DayDivider("d-today", today),
+                    message("Older 1", minutes = 1),
+                    message("Older 2", minutes = 2),
+                    message("Newest", minutes = 10),
+                ),
+                hasMore = false,
+            )
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeByFrame()
+
+        val dividerMidFlight = compose.onNodeWithText("Nov 20", substring = true, useUnmergedTree = true).getUnclippedBoundsInRoot()
+        val older1MidFlight = compose.onNodeWithText("Older 1", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        compose.mainClock.advanceTimeBy(1_000)
+        val dividerSettled = compose.onNodeWithText("Nov 20", substring = true, useUnmergedTree = true).getUnclippedBoundsInRoot()
+
+        assertTrue("DayDivider must sit above Older 1 immediately instead of sliding across bubbles ($dividerMidFlight vs $older1MidFlight)",
+            dividerMidFlight.bottom <= older1MidFlight.top)
+        assertEquals("DayDivider must land directly at its final position without placement animation drift",
+            dividerSettled, dividerMidFlight)
+
+        // When the first live message arrives below, existing bubbles must stay near their prior Y position rather than
+        // sweeping in from the viewport edge due to missing prior placement offsets.
+        val beforeLive = compose.onNodeWithText("Newest", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        compose.runOnUiThread {
+            state.value = state.value.copy(rows = state.value.rows + message("Fresh live reply", minutes = 11))
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        }
+        compose.mainClock.advanceTimeByFrame()
+        val midLive = compose.onNodeWithText("Newest", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("Existing message must stay near its prior position on first live arrival ($midLive vs $beforeLive)",
+            midLive.top <= beforeLive.top && beforeLive.top - midLive.top < 120.dp)
+        compose.mainClock.advanceTimeBy(1_000)
+    }
+
     private fun message(body: String, minutes: Int, sender: String = "Mira", state: MessageSendState = MessageSendState.Sent) =
         ConversationMessage(body, "\$$body", "@${sender.lowercase()}:example.org", sender, body, null,
             1_700_000_000_000L + minutes * 600_000L, MessageKind.Text, state, sender == "Jordan", sender.take(1), 0)

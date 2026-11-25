@@ -222,6 +222,7 @@ fun LiveWorkspace(covers: List<WorkspaceCover>, home: @Composable () -> Unit) {
     }
     fun exitProgress(cover: ExitingCover): Float = (if (exitStarted === cover) exitSlide.value else cover.start).coerceIn(0f, 1f)
     val backingVisible by remember(slide, coordinator) { derivedStateOf { slide.value < 1f || coordinator.progress.floatValue > 0f } }
+    val pushing by remember(slide) { derivedStateOf { slide.value < 1f } }
     // Render active pages and any sliding-out cover in one unified list so the exiting page keeps its exact Compose subtree
     // (scroll position, loaded images, transient UI) without disposing and flashing during the exit slide.
     val rendered = if (activeExit != null) pages + activeExit.page else pages
@@ -280,7 +281,9 @@ fun LiveWorkspace(covers: List<WorkspaceCover>, home: @Composable () -> Unit) {
                     // Single composition branch keeps subtrees alive across depth and exit transitions; Home inherits outer coordinator.
                     val backCoordinator = if (index == 0) LocalBackProgress.current else coordinator.takeIf { depth == 0 }
                     val covered = leaving != null || depth > 0
-                    val glassActive = LocalGlassActive.current && !covered
+                    // Skip live backdrop blur only during push slide-in so initial layout frames don't stack GPU blur
+                    // passes, while keeping blur steady across short cancelled predictive-back gestures.
+                    val glassActive = LocalGlassActive.current && !covered && !(depth == 0 && pushing)
                     Covered(covered) {
                         CompositionLocalProvider(LocalBackProgress provides backCoordinator, LocalGlassActive provides glassActive) {
                             saved.SaveableStateProvider(stateKey, page.content)
