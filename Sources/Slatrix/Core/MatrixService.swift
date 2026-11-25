@@ -1244,6 +1244,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// The open conversation's live timeline; nil while it shows one opened at an older message.
     private var liveTimeline: KeptTimeline?
     private var recentTimelines = RecentTimelines<KeptTimeline>()
+    private var recentThreads = RecentTimelines<KeptThread>()
     /// A jump inside the conversation on screen, prepared aside by its own token while that conversation keeps
     /// `selection`.
     private var jumping: UUID?
@@ -1590,6 +1591,50 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             self.listener = listener
         }
     }
+    /// A thread timeline parked when switching away from its conversation, kept live so returning restores it in one frame.
+    @MainActor private final class KeptThread {
+        let roomID: String
+        let rootID: String
+        let token: UUID
+        let timeline: Timeline
+        let observer: TimelineObserver
+        let listener: TaskHandle
+        var revision: Int
+        var messages: [ChatMessage]
+        var hasMoreHistory: Bool
+        var holdsRoot: Bool
+        var media: [String: ShownMedia]
+        var forwardMedia: [String: ForwardMediaRevision]
+        var sendFailures: [SendQueueMessageKey: MessageSendFailure]
+        var projections: Projections
+        var revealed: Bool
+        var readReady: Bool
+        init(
+            roomID: String, rootID: String, token: UUID, timeline: Timeline, observer: TimelineObserver,
+            listener: TaskHandle, revision: Int, messages: [ChatMessage], hasMoreHistory: Bool, holdsRoot: Bool,
+            media: [String: ShownMedia], forwardMedia: [String: ForwardMediaRevision],
+            sendFailures: [SendQueueMessageKey: MessageSendFailure], projections: Projections, revealed: Bool,
+            readReady: Bool
+        ) {
+            self.roomID = roomID
+            self.rootID = rootID
+            self.token = token
+            self.timeline = timeline
+            self.observer = observer
+            self.listener = listener
+            self.revision = revision
+            self.messages = messages
+            self.hasMoreHistory = hasMoreHistory
+            self.holdsRoot = holdsRoot
+            self.media = media
+            self.forwardMedia = forwardMedia
+            self.sendFailures = sendFailures
+            self.projections = projections
+            self.revealed = revealed
+            self.readReady = readReady
+        }
+    }
+    private static func threadKey(roomID: String, rootID: String) -> String { "\(roomID)\0\(rootID)" }
     private var threadMedia: [String: ShownMedia] = [:]
     private let mediaFiles = MediaFileCache()
     private let savedPreviewLimit = ConcurrencyLimit(slots: 2)
@@ -2029,6 +2074,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         typingHandle?.cancel()
         threadHandle?.cancel()
         for kept in recentTimelines.removeAll() { kept.listener.cancel() }
+        for kept in recentThreads.removeAll() { kept.listener.cancel() }
         dropPrepared()
         dropPreparedThread()
         warmStarredTask?.cancel()
@@ -2305,6 +2351,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     /// Shows a conversation whose live timeline is still open, rows and all, in the frame of the click. False when
     /// none is open, or when it does not hold `anchor`.
+    /// Clears any in-flight or remembered message jump on a plain conversation visit.
+    func clearJump() {
+        jump = nil
+        jumping = nil
+    }
+
     func showRecentRoom(_ id: String, containing anchor: String? = nil) -> Bool {
         guard connectionStopTask == nil, client != nil, !isPreview else { return false }
         func holds(_ kept: KeptTimeline) -> Bool {
@@ -2312,6 +2364,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
         if let live = liveTimeline, live.roomID == id, holds(live) {
             // Already on screen; this drops any other conversation that was still opening, or jump being prepared.
+            if anchor == nil { jump = nil }
             jumping = nil
             selection = live.token
             if rooms.first(where: { $0.id == id })?.isMarkedUnread == true || locallyMarkedUnreadRooms.contains(id) {
@@ -2322,6 +2375,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             return true
         }
         guard let kept = recentTimelines.entry(id), holds(kept) else { return false }
+        if anchor == nil { jump = nil }
         jumping = nil
         _ = recentTimelines.take(id)
         selection = kept.token
@@ -2803,9 +2857,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         timelineHandle = nil
         typingHandle?.cancel()
         threadHandle?.cancel()
+        threadHandle = nil
+        threadSelection = UUID()
         timeline = nil
         timelineObserver = nil
         threadTimeline = nil
+        threadSnapshot = nil
         loadedThreadRootID = nil
     }
 
@@ -3257,12 +3314,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
 
     private func threadObserver(_ root: ChatMessage, token: UUID, threadToken: UUID) -> TimelineObserver {
-        TimelineObserver { [weak self] items, revision, deleted in
+        let session = sessionGeneration
+        return TimelineObserver { [weak self] items, revision, deleted in
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, self.sessionGeneration == session else { return }
                 self.messagesGone(Set(deleted.map { ActivityService.key(roomID: root.roomID, eventID: $0) }))
-                guard token == self.selection, threadToken == self.threadSelection,
-                    revision > self.threadRevision
+                guard self.selectedRoomID == root.roomID, self.loadedThreadRootID == root.eventID,
+                    threadToken == self.threadSelection, revision > self.threadRevision
                 else { return }
                 self.threadRevision = revision
                 self.showThread(items, root: root)
@@ -3380,12 +3438,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     }
     func loadThread(_ root: ChatMessage, openedWith: Int? = nil) async throws {
         try assertDestination(root.roomID)
+        if showRecentThread(root, openedWith: openedWith) { return }
         threadProjections = [:]
         if !threadMedia.isEmpty { threadMedia = [:] }
         threadForwardMedia = [:]
         readyThreadReadSelection = nil
         lastThreadReceipt = nil
         threadHandle?.cancel()
+        threadHandle = nil
         // The root keeps one identity in the pane from the moment it opens, whichever timeline it came from.
         let opening = Self.threadRootCopy(root, id: root.eventID)
         threadHoldsRoot = false
@@ -4015,8 +4075,112 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         } catch { threadFeed.unavailable(Self.safeError(error)) }
     }
 
+    /// Parks a settled, live thread timeline in `recentThreads` when switching away from its room so returning
+    /// restores it synchronously without a blank frame or incremental re-pagination. Threads still loading or with
+    /// a failed first page close cleanly instead so returning retries them normally.
+    func parkThread() {
+        guard let timeline = threadTimeline, let rootID = loadedThreadRootID, let roomID = selectedRoomID,
+            let observer = threadSnapshot, let listener = threadHandle,
+            readyThreadReadSelection == threadSelection, threadPageError == nil
+        else {
+            closeThread()
+            return
+        }
+        let kept = KeptThread(
+            roomID: roomID, rootID: rootID, token: threadSelection, timeline: timeline, observer: observer,
+            listener: listener, revision: threadRevision, messages: threadMessages,
+            hasMoreHistory: hasMoreThreadHistory, holdsRoot: threadHoldsRoot, media: threadMedia,
+            forwardMedia: threadForwardMedia, sendFailures: threadSendFailures, projections: threadProjections,
+            revealed: threadRevealedSelection == threadSelection, readReady: true
+        )
+        for closed in recentThreads.keep(kept, for: Self.threadKey(roomID: roomID, rootID: rootID)) {
+            closed.listener.cancel()
+        }
+        threadAnchorSearchTask?.cancel()
+        threadAnchorSearchTask = nil
+        threadBuildFailedSelection = nil
+        threadRevealedSelection = nil
+        threadAnchorSearchDoneSelection = nil
+        searchingThreadTargetSelection = nil
+        readyThreadReadSelection = nil
+        lastThreadReceipt = nil
+        wakeThreadDiffWaiters()
+        threadOpening = nil
+        threadPage = nil
+        threadPageError = nil
+        threadTimeline = nil
+        threadSnapshot = nil
+        threadHandle = nil
+        loadedThreadRootID = nil
+        threadRevision = 0
+        threadHoldsRoot = false
+        hasMoreThreadHistory = true
+        threadProjections = [:]
+        if !threadMedia.isEmpty { threadMedia = [:] }
+        threadForwardMedia = [:]
+        threadSendFailures = [:]
+        if mainSendFailures != sendFailures { sendFailures = mainSendFailures }
+        threadSelection = UUID()
+    }
+
+    /// Restores a parked thread timeline synchronously on the click frame, applying any replies that arrived while away.
+    @discardableResult
+    func showRecentThread(_ root: ChatMessage, openedWith: Int? = nil) -> Bool {
+        guard connectionStopTask == nil, client != nil, !isPreview, selectedRoomID == root.roomID,
+            let kept = recentThreads.take(Self.threadKey(roomID: root.roomID, rootID: root.eventID))
+        else { return false }
+        threadAnchorSearchTask?.cancel()
+        threadAnchorSearchTask = nil
+        wakeThreadDiffWaiters()
+        threadHandle?.cancel()
+        dropPreparedThread()
+        threadTimeline = kept.timeline
+        threadSnapshot = kept.observer
+        threadHandle = kept.listener
+        loadedThreadRootID = kept.rootID
+        threadSelection = kept.token
+        threadOpening = (kept.rootID, openedWith)
+        threadHoldsRoot = kept.holdsRoot
+        hasMoreThreadHistory = kept.hasMoreHistory
+        var restored = kept.messages
+        if !kept.holdsRoot {
+            let freshRoot = conversationRoot() ?? Self.threadRootCopy(root, id: root.eventID)
+            if restored.isEmpty { restored = [freshRoot] } else { restored[0] = freshRoot }
+        } else if let currentRoot = conversationRoot(), restored.first != currentRoot {
+            if restored.isEmpty { restored = [currentRoot] } else { restored[0] = currentRoot }
+        }
+        threadMessages = restored
+        threadMedia = kept.media
+        threadForwardMedia = kept.forwardMedia
+        threadProjections = kept.projections
+        threadSendFailures = kept.sendFailures
+        for item in kept.projections.values {
+            if let id = item.id, let key = item.eventOrTransactionId { eventIDs[id] = key }
+            if let id = item.id, let media = item.media { mediaSources[id] = media }
+            if let id = item.id, let thumb = item.thumbnail { thumbnailSources[id] = thumb }
+        }
+        let mergedFailures = mainSendFailures.merging(threadSendFailures) { _, thread in thread }
+        if mergedFailures != sendFailures { sendFailures = mergedFailures }
+        threadRevision = kept.revision
+        threadRevealedSelection = kept.revealed ? kept.token : nil
+        readyThreadReadSelection = kept.readReady ? kept.token : nil
+        threadBuildFailedSelection = nil
+        threadPageError = nil
+        threadPage = nil
+        lastThreadReceipt = nil
+        let snapshot = kept.observer.snapshot
+        if snapshot.revision > threadRevision {
+            threadRevision = snapshot.revision
+            showThread(snapshot.items, root: root)
+        }
+        return true
+    }
+
     /// The thread pane closed: nothing counts its replies, and nothing started for it lands, until another opens.
     func closeThread() {
+        if let roomID = selectedRoomID, let rootID = loadedThreadRootID ?? threadOpening?.rootID {
+            recentThreads.take(Self.threadKey(roomID: roomID, rootID: rootID))?.listener.cancel()
+        }
         guard threadOpening != nil || threadTimeline != nil || loadedThreadRootID != nil || threadPage != nil else {
             return
         }

@@ -1499,7 +1499,7 @@ struct RootView: View {
                         } else if room.isPrivate {
                             // Named as its header names it, by its lock.
                             Text(
-                                "Also send to \(Image(systemName: room.channelSymbol))\(Text(room.name).fontWeight(.semibold))"
+                                "Also send to \(Image(systemName: room.channelSymbol)) \(Text(room.name).fontWeight(.semibold))"
                             )
                         } else {
                             Text("Also send to \(Text(room.writtenName).fontWeight(.semibold))")
@@ -1954,9 +1954,13 @@ struct RootView: View {
                 for: matrix.rooms.first { $0.id == id }, selectedRoomID: matrix.selectedRoomID,
                 explicitEventID: eventID, opensThread: thread != nil)
         let destinationEventID = eventID ?? resumeAnchor
-        if let current = matrix.selectedRoomID, current != id, let open = threadRoot { leftThreads[current] = open }
-        // Only a plain visit: a jump to a message or a thread of its own wins.
-        let leftThread = thread == nil && eventID == nil && restoringReply == nil ? leftThreads[id] : nil
+        let previousRoomID = matrix.selectedRoomID
+        if let current = previousRoomID, current != id, let open = threadRoot { leftThreads[current] = open }
+        // Only a plain visit to another room: a jump to a message, an explicit thread, or clicking the current room
+        // never replays an old `leftThreads` entry.
+        let leftThread =
+            previousRoomID != id && thread == nil && eventID == nil && restoringReply == nil ? leftThreads[id] : nil
+        if leftThread != nil { leftThreads[id] = nil }
         let requiresRoomSelection = !matrix.isLiveTimelineReady(roomID: id) || pendingRoomID != nil
         // The cases below that open a new timeline.
         if destinationEventID != nil || thread == nil || requiresRoomSelection {
@@ -1982,10 +1986,8 @@ struct RootView: View {
         route = .home
         if id != matrix.selectedRoomID { channelPanel = nil }
         matrix.setMessageActionThread(rootID: nil)
-        matrix.closeThread()
-        threadRoot = nil
-        threadReadyID = nil
-        openingThreadID = nil
+        let parkedCurrentThread = matrix.selectedRoomID != nil && matrix.selectedRoomID != id && threadRoot != nil
+        if parkedCurrentThread { matrix.parkThread() } else { matrix.closeThread() }
         threadLoadError = nil
         cancelCurrentEdit()
         if restoringReply == nil { cancelReply() }
@@ -1993,6 +1995,9 @@ struct RootView: View {
         preferredRoomID = id
         UserDefaults.standard.set(id, forKey: "room.\(storageKey)")
         if matrix.isPreview {
+            threadRoot = nil
+            threadReadyID = nil
+            openingThreadID = nil
             matrix.selectPreviewRoom(id)
             pendingRoomID = nil
             if let thread = thread ?? leftThread {
@@ -2001,8 +2006,42 @@ struct RootView: View {
                 threadReadyID = thread.eventID
             }
         } else {
-            // A conversation still open from earlier goes up with this click; the task below then finds it shown.
-            if restoringReply == nil, eventID == nil { _ = matrix.showRecentRoom(id, containing: resumeAnchor) }
+            let restoredThread = thread ?? leftThread
+            // A conversation still open from earlier goes up with this click, together with any thread left open in
+            // it, so the channel opens at its final width without a full-width flash or double row measurement.
+            let shownRoom =
+                restoringReply == nil && eventID == nil && matrix.showRecentRoom(id, containing: resumeAnchor)
+            var shownThread = false
+            if shownRoom {
+                if eventID == nil { matrix.clearJump() }
+                if let restoredThread {
+                    if matrix.showRecentThread(restoredThread, openedWith: openedWith) {
+                        threadRoot = restoredThread
+                        threadReadyID = restoredThread.eventID
+                        openingThreadID = nil
+                        shownThread = true
+                    } else if previousRoomID != id {
+                        threadRoot = restoredThread
+                        threadReadyID = nil
+                        openingThreadID = restoredThread.eventID
+                    } else {
+                        threadRoot = nil
+                        threadReadyID = nil
+                        openingThreadID = nil
+                    }
+                } else {
+                    threadRoot = nil
+                    threadReadyID = nil
+                    openingThreadID = nil
+                }
+                if destinationEventID == nil && restoringReply == nil && (restoredThread == nil || shownThread) {
+                    pendingRoomID = nil
+                }
+            } else {
+                threadRoot = nil
+                threadReadyID = nil
+                openingThreadID = nil
+            }
             Task { @MainActor in
                 guard navigationGeneration == generation, composerIdentity == identity else { return }
                 if let restoringReply {
@@ -2014,10 +2053,10 @@ struct RootView: View {
                 }
                 var replyRootID: String?
                 if let resumeAnchor, eventID == nil {
-                    await matrix.resumeRoom(id, at: resumeAnchor)
+                    if !shownRoom { await matrix.resumeRoom(id, at: resumeAnchor) }
                 } else if let destinationEventID {
                     replyRootID = await matrix.jumpToMessage(roomID: id, eventID: destinationEventID)
-                } else if thread == nil || requiresRoomSelection {
+                } else if !shownRoom && (thread == nil || requiresRoomSelection) {
                     await matrix.selectRoom(id)
                 }
                 guard navigationGeneration == generation, composerIdentity == identity, matrix.selectedRoomID == id
@@ -2034,10 +2073,12 @@ struct RootView: View {
                 }
                 // A jump to a thread reply opens its thread beside the conversation, as Slack does.
                 let replyRoot = replyRootID.flatMap { root in matrix.messages.first { $0.eventID == root } }
-                if let thread = thread ?? replyRoot ?? leftThread {
-                    await loadThread(
-                        thread, generation: generation, identity: identity, restoringReply: restoringReply,
-                        openedWith: openedWith)
+                if let targetThread = thread ?? replyRoot ?? leftThread {
+                    if !(shownThread && threadReadyID == targetThread.eventID) {
+                        await loadThread(
+                            targetThread, generation: generation, identity: identity, restoringReply: restoringReply,
+                            openedWith: openedWith)
+                    }
                 } else if let restoringReply, restoringReply.isCurrent(replyTarget, owner: replyOwner) {
                     replyOpening = false
                     replyError = nil
@@ -2053,6 +2094,7 @@ struct RootView: View {
         else { return selectRoom(id, record: true, thread: root, openedWith: openedWith) }
         let generation = UUID()
         navigationGeneration = generation
+        leftThreads[id] = nil
         matrix.setMessageActionThread(rootID: nil)
         threadReadyID = nil
         threadLoadError = nil
