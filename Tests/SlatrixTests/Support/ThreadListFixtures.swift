@@ -5,9 +5,9 @@ import MatrixRustSDK
 final class FakeThreadList: ThreadListService, @unchecked Sendable {
     private let lock = NSLock()
     private var storedValues: [ThreadListItem]
+    private var storedFailPaginate = false
+    private var storedRemainingPages = 1
     let pages = Recorder<Void>()
-    var failPaginate = false
-    var remainingPages = 1
     private var listeners: [ThreadListEntriesListener] = []
     init(_ values: [ThreadListItem] = []) {
         self.storedValues = values
@@ -18,13 +18,27 @@ final class FakeThreadList: ThreadListService, @unchecked Sendable {
         get { lock.withLock { storedValues } }
         set { lock.withLock { storedValues = newValue } }
     }
+    var failPaginate: Bool {
+        get { lock.withLock { storedFailPaginate } }
+        set { lock.withLock { storedFailPaginate = newValue } }
+    }
+    var remainingPages: Int {
+        get { lock.withLock { storedRemainingPages } }
+        set { lock.withLock { storedRemainingPages = newValue } }
+    }
     override func paginate() async throws {
         pages.append(())
-        if failPaginate { throw ClientError.Generic(msg: "pagination failed", details: nil) }
-        if remainingPages > 0 { remainingPages -= 1 }
+        let shouldFail = lock.withLock {
+            if storedFailPaginate { return true }
+            if storedRemainingPages > 0 { storedRemainingPages -= 1 }
+            return false
+        }
+        if shouldFail { throw ClientError.Generic(msg: "pagination failed", details: nil) }
     }
     override func items() -> [ThreadListItem] { values }
-    override func paginationState() -> ThreadListPaginationState { .idle(endReached: remainingPages == 0) }
+    override func paginationState() -> ThreadListPaginationState {
+        .idle(endReached: lock.withLock { storedRemainingPages == 0 })
+    }
     override func subscribeToItemsUpdates(listener: ThreadListEntriesListener) -> TaskHandle {
         let current = lock.withLock {
             listeners.append(listener)
@@ -34,7 +48,8 @@ final class FakeThreadList: ThreadListService, @unchecked Sendable {
         return FakeCancellableHandle(noHandle: .init())
     }
     override func subscribeToPaginationStateUpdates(listener: ThreadListPaginationStateListener) -> TaskHandle {
-        listener.onUpdate(state: .idle(endReached: remainingPages == 0))
+        let done = lock.withLock { storedRemainingPages == 0 }
+        listener.onUpdate(state: .idle(endReached: done))
         return FakeCancellableHandle(noHandle: .init())
     }
     func replaySnapshot() {

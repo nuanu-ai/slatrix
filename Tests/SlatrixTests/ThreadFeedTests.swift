@@ -509,14 +509,21 @@ struct ThreadFeedDiscoveryTests {
     }
 
     // capability: threads.feed
-    @Test("Opening Threads across many rooms updates subscriptions once instead of per small batch")
+    @Test("Opening Threads across many rooms updates subscriptions once with the top 32 priority rooms")
     func discoversRoomsInOneBatch() async {
-        var subscriptionUpdates = 0
-        await feed.open(client: FakeThreadClient(sdkRoom), rooms: rooms, workspaceID: nil) { _ in
-            subscriptionUpdates += 1
+        var many = (0..<36).map { ChatRoom(id: "!many\($0):example.org", name: String(format: "Room %02d", $0)) }
+        many[34].mentions = 2
+        many[35].favorite = true
+        let perRoom = Dictionary(uniqueKeysWithValues: many.map { ($0.id, FakeThreadRoom()) })
+        var snapshots: [Set<String>] = []
+        await feed.open(client: FakeThreadClient(sdkRoom, rooms: perRoom), rooms: many, workspaceID: nil) { ids in
+            snapshots.append(ids)
         }
-        #expect(subscriptionUpdates == 1)
-        #expect(feed.checkedRoomCount == rooms.count)
+        #expect(snapshots.count == 1)
+        #expect(snapshots.first?.count == 32)
+        #expect(snapshots.first?.contains(many[34].id) == true)
+        #expect(snapshots.first?.contains(many[35].id) == true)
+        #expect(feed.checkedRoomCount == many.count)
     }
 
     // capability: threads.feed
@@ -534,6 +541,7 @@ struct ThreadFeedDiscoveryTests {
             ])
         let client = FakeThreadClient(fakeRoom)
         await feed.open(client: client, rooms: [rooms[0]], workspaceID: nil) { _ in }
+        let firstSession = feed.sessionID
         feed.close()
 
         fakeRoom.timelineGate.arm()
@@ -547,25 +555,53 @@ struct ThreadFeedDiscoveryTests {
         fakeRoom.timelineGate.release()
         await reopen.value
         #expect(settled && !blocked)
+        #expect(feed.sessionID != firstSession)
         #expect(feed.preview(roomID: rooms[0].id, eventID: "$root").state == .ready)
         #expect(feed.preview(roomID: rooms[0].id, eventID: "$reply").state == .ready)
     }
 
     // capability: threads.feed
-    @Test("Preparing Threads restores cached items synchronously and prevents an empty-state flash when cold")
+    @Test("Preparing Threads cancels an in-flight workspace open and restores the requested scope cleanly")
     func prepareRestoresCacheOrMarksDiscovering() async {
         feed.prepare(workspaceID: "!cold:example.org")
         #expect(feed.isDiscovering && feed.items.isEmpty)
 
-        let fakeRoom = FakeThreadRoom(
-            threads: FakeThreadList([ThreadListItem(rootEvent: threadEvent("$root"), latestEvent: nil, numReplies: 1)]),
-            timelines: ["$root": FakeEventTimeline(textEvent("$root", body: "Ready"))])
-        await feed.open(client: FakeThreadClient(fakeRoom), rooms: [rooms[0]], workspaceID: nil) { _ in }
+        var roomA = ChatRoom(id: "!prep-a:example.org", name: "Alpha")
+        roomA.spaceIDs = ["!ws-a:example.org"]
+        var roomB = ChatRoom(id: "!prep-b:example.org", name: "Beta")
+        roomB.spaceIDs = ["!ws-b:example.org"]
+        let fakeA = FakeThreadRoom(
+            threads: FakeThreadList([
+                ThreadListItem(rootEvent: threadEvent("$root-a"), latestEvent: nil, numReplies: 1)
+            ]),
+            timelines: ["$root-a": FakeEventTimeline(textEvent("$root-a", body: "Ready A"))])
+        let fakeB = FakeThreadRoom(
+            threads: FakeThreadList([
+                ThreadListItem(rootEvent: threadEvent("$root-b"), latestEvent: nil, numReplies: 1)
+            ]),
+            timelines: ["$root-b": FakeEventTimeline(textEvent("$root-b", body: "Ready B"))])
+        let client = FakeThreadClient(sdkRoom, rooms: [roomA.id: fakeA, roomB.id: fakeB])
+        await feed.open(client: client, rooms: [roomA, roomB], workspaceID: "!ws-a:example.org") { _ in }
+        await feed.open(client: client, rooms: [roomA, roomB], workspaceID: "!ws-b:example.org") { _ in }
         feed.close()
         #expect(feed.items.isEmpty && !feed.isDiscovering)
 
-        feed.prepare(workspaceID: nil)
-        #expect(feed.isDiscovering && feed.items.map(\.root.eventID) == ["$root"])
+        // Rapid A -> B -> A prepare switches restore the exact requested scope and cancel any pending open.
+        fakeA.receiptGate.arm()
+        let slowOpenA = Task {
+            await feed.open(
+                client: client, rooms: [roomA, roomB], workspaceID: "!ws-a:example.org", ownUserID: "@me:example.org"
+            ) { _ in }
+        }
+        #expect(await eventually { fakeA.receiptGate.isWaiting })
+        feed.prepare(workspaceID: "!ws-b:example.org")
+        #expect(feed.isDiscovering && feed.items.map(\.root.eventID) == ["$root-b"])
+        fakeA.receiptGate.release()
+        await slowOpenA.value
+        #expect(feed.items.map(\.root.eventID) == ["$root-b"])
+
+        feed.prepare(workspaceID: "!ws-a:example.org")
+        #expect(feed.isDiscovering && feed.items.map(\.root.eventID) == ["$root-a"])
     }
 
     // capability: threads.feed
@@ -576,11 +612,56 @@ struct ThreadFeedDiscoveryTests {
             timelines: ["$slow": FakeEventTimeline(textEvent("$slow", body: "Arrived late"))])
         fakeRoom.timelineGate.arm()
         feed.hydrationTimeout = .milliseconds(25)
-        await feed.open(client: FakeThreadClient(fakeRoom), rooms: [rooms[0]], workspaceID: nil) { _ in }
+        var finished = false
+        let opening = Task {
+            await feed.open(client: FakeThreadClient(fakeRoom), rooms: [rooms[0]], workspaceID: nil) { _ in }
+            finished = true
+        }
+        let timedOutCleanly = await eventually(timeout: .seconds(1)) { finished }
+        if !timedOutCleanly { fakeRoom.timelineGate.release() }
+        await opening.value
+        #expect(timedOutCleanly)
         #expect(!feed.isDiscovering && feed.items.map(\.root.eventID) == ["$slow"])
         // Once the slow preview eventually lands in the background, the row updates cleanly.
         fakeRoom.timelineGate.release()
         #expect(await eventually { feed.preview(roomID: rooms[0].id, eventID: "$slow").state == .ready })
+    }
+
+    // capability: threads.feed
+    @Test("Marking an older cached reply read does not clear a newer reply cached in another workspace")
+    func markThreadReadMatchesReplyRevisionAcrossCaches() async {
+        let me = "@me:example.org"
+        var dm = ChatRoom(id: "!dm:example.org", name: "Alex", isDirect: true)
+        dm.spaceIDs = []
+        let list = FakeThreadList([
+            ThreadListItem(
+                rootEvent: threadEvent("$dm-root", timestamp: 1_000),
+                latestEvent: threadEvent("$r1", timestamp: 2_000), numReplies: 1)
+        ])
+        let fakeDM = FakeThreadRoom(threads: list)
+        let client = FakeThreadClient(fakeDM)
+        await feed.open(client: client, rooms: [dm], workspaceID: "!ws-a:example.org", ownUserID: me) { _ in }
+        feed.close()
+
+        // Workspace B sees a newer reply `$r2` on the same DM thread.
+        list.values = [
+            ThreadListItem(
+                rootEvent: threadEvent("$dm-root", timestamp: 1_000),
+                latestEvent: threadEvent("$r2", timestamp: 4_000), numReplies: 2)
+        ]
+        await feed.open(client: client, rooms: [dm], workspaceID: "!ws-b:example.org", ownUserID: me) { _ in }
+        feed.close()
+
+        // A receipt for `$r1` clears workspace A's cached item but leaves workspace B's newer `$r2` unread.
+        feed.markThreadRead(roomID: dm.id, rootID: "$dm-root", eventID: "$r1")
+        feed.prepare(workspaceID: "!ws-a:example.org")
+        #expect(feed.items.first?.isUnread == false)
+        feed.prepare(workspaceID: "!ws-b:example.org")
+        #expect(feed.items.first?.isUnread == true)
+
+        // Room snapshot captures the newest reply (`$r2`) regardless of cache iteration order.
+        let snapshot = feed.snapshotLatestEventIDs(roomID: dm.id)
+        #expect(snapshot[ActivityService.key(roomID: dm.id, eventID: "$dm-root")] == "$r2")
     }
 
     // capability: threads.feed

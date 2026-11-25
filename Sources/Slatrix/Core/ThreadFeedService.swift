@@ -256,15 +256,22 @@ final class RoomSubscriptionCoordinator {
     private(set) var liveRoomCount = 0
     var checkedRoomCount: Int { roomStates.filter { $0.state == .ready || $0.state == .error }.count }
     var failedRoomCount: Int { roomStates.filter { $0.state == .error }.count }
-    var hasOlderThreads: Bool { roomStates.contains { $0.state == .ready && $0.hasMore } }
+    var hasOlderThreads: Bool {
+        !isDiscovering
+            && roomStates.contains {
+                $0.state == .unloaded || (($0.state == .ready || $0.state == .loading) && $0.hasMore)
+            }
+    }
     var totalRoomCount: Int { roomStates.count }
     var canCheckMore: Bool { roomStates.contains { $0.state == .unloaded } }
     private(set) var isActive = false
+    /// Changes once per settled open so mounted rows re-attach live preview listeners after a refresh.
+    private(set) var sessionID = UUID()
     /// True while opening checks every room's first page and the first screen's current text, so the list shows once,
     /// in its final order, instead of rows arriving and moving under the reader.
     private(set) var isDiscovering = false
     // Separate concurrency budgets so preview hydration never stalls room discovery or vice versa.
-    private static let paginationConcurrency = 6
+    private nonisolated static let paginationConcurrency = 6
     private let paginationLimit = ConcurrencyLimit(slots: paginationConcurrency)
     private let previewLimit = ConcurrencyLimit(slots: 6)
     @ObservationIgnored var hydrationTimeout: Duration = .milliseconds(800)
@@ -343,10 +350,11 @@ final class RoomSubscriptionCoordinator {
     @ObservationIgnored private var publishPending = false
 
     /// Restores cached items (or marks discovery active on a cold scope) synchronously before the first frame paints,
-    /// so opening Threads never flashes an empty state before its async load begins.
+    /// invalidating any in-flight open for another workspace so it cannot republish stale rows into this scope.
     func prepare(workspaceID: String?) {
-        guard !isActive || self.workspaceID != workspaceID else { return }
-        if isActive, !isDiscovering { lastShownByScope[self.workspaceID] = items }
+        if isActive, self.workspaceID == workspaceID, !isDiscovering { return }
+        close()
+        self.workspaceID = workspaceID
         items = lastShownByScope[workspaceID] ?? []
         isDiscovering = true
     }
@@ -371,13 +379,7 @@ final class RoomSubscriptionCoordinator {
                 if generation == token { errorMessage = MatrixService.safeError(error) }
             }
         }
-        while generation == token, isActive, !Task.isCancelled, canCheckMore {
-            let pending = roomStates.filter { $0.state == .unloaded }.map(\.id)
-            await paginate(roomIDs: pending)
-            guard generation == token else { return }
-            // A cancelled or competing operation must not turn automatic discovery into a busy loop.
-            if roomStates.filter({ $0.state == .unloaded }).map(\.id) == pending { break }
-        }
+        await discoverUnloadedRooms(token: token)
         guard generation == token else { return }
         // The thread list carries messages as first sent, so uncached rows on the first screen wait briefly for their
         // current text; rows already cached in `current` show immediately without blocking on preview timelines.
@@ -399,9 +401,23 @@ final class RoomSubscriptionCoordinator {
             }
         }
         guard generation == token else { return }
+        // Catch any room that joined during the brief preview wait before publishing.
+        if canCheckMore { await discoverUnloadedRooms(token: token) }
+        guard generation == token else { return }
         isDiscovering = false
+        sessionID = token
         publishItems()
         lastShownByScope[workspaceID] = items
+    }
+
+    private func discoverUnloadedRooms(token: UUID) async {
+        while generation == token, isActive, !Task.isCancelled, canCheckMore {
+            let pending = roomStates.filter { $0.state == .unloaded }.map(\.id)
+            await paginate(roomIDs: pending)
+            guard generation == token else { return }
+            // A cancelled or competing operation must not turn automatic discovery into a busy loop.
+            if roomStates.filter({ $0.state == .unloaded }).map(\.id) == pending { break }
+        }
     }
 
     /// Runs `operation` up to `timeout` without blocking on unstructured preview tasks once the deadline elapses.
@@ -483,16 +499,22 @@ final class RoomSubscriptionCoordinator {
     /// Clears a thread's unread indicator once a read receipt succeeds, before sync echoes it back.
     func markThreadRead(roomID: String, rootID: String, eventID: String? = nil) {
         let key = ActivityService.key(roomID: roomID, eventID: rootID)
+        let newestCached = lastShownByScope.values.lazy.flatMap { $0 }
+            .filter { $0.id == key }
+            .max { $0.lastActivityAt < $1.lastActivityAt }
         let readEventID =
             eventID
             ?? records[roomID]?.values.first(where: { $0.rootEvent.eventId == rootID })?.latestEvent?.eventId
-            ?? lastShownByScope.values.lazy.flatMap { $0 }.first(where: { $0.id == key })?.latest?.eventID
+            ?? newestCached?.latest?.eventID
         if let readEventID { locallyReadThreads[key] = readEventID }
         for (scope, var cached) in lastShownByScope {
             var changed = false
             for index in cached.indices where cached[index].id == key && cached[index].isUnread {
-                cached[index].isUnread = false
-                changed = true
+                let matchesReply = readEventID == nil || cached[index].latest?.eventID == readEventID
+                if matchesReply {
+                    cached[index].isUnread = false
+                    changed = true
+                }
             }
             if changed { lastShownByScope[scope] = cached }
         }
@@ -512,11 +534,16 @@ final class RoomSubscriptionCoordinator {
                 }
             }
         } else {
+            var newestByKey: [String: (eventID: String, activityAt: Date)] = [:]
             for cached in lastShownByScope.values {
                 for item in cached where item.roomID == roomID {
-                    if let latestID = item.latest?.eventID { result[item.id] = latestID }
+                    guard let latestID = item.latest?.eventID else { continue }
+                    if newestByKey[item.id].map({ item.lastActivityAt > $0.activityAt }) ?? true {
+                        newestByKey[item.id] = (latestID, item.lastActivityAt)
+                    }
                 }
             }
+            for (key, value) in newestByKey { result[key] = value.eventID }
         }
         return result
     }
@@ -612,6 +639,11 @@ final class RoomSubscriptionCoordinator {
 
     func loadOlder() async {
         guard !isLoading, isActive else { return }
+        let unloaded = roomStates.filter { $0.state == .unloaded }.map(\.id)
+        if !unloaded.isEmpty {
+            await paginate(roomIDs: unloaded)
+            return
+        }
         let candidates = Array(roomStates.filter { $0.state == .ready && $0.hasMore }.prefix(8).map(\.id))
         guard !candidates.isEmpty else { return }
         await paginate(roomIDs: candidates)
@@ -858,13 +890,18 @@ final class RoomSubscriptionCoordinator {
         guard !candidates.isEmpty else { return (unthreaded, [:]) }
         let threads = await withTaskGroup(of: (String, UserReceipt?).self, returning: [String: UserReceipt].self) {
             group in
-            for (rootID, latest) in candidates {
+            var cursor = 0
+            func addNext() {
+                guard cursor < candidates.count, !Task.isCancelled else { return }
+                let (rootID, latest) = candidates[cursor]
+                cursor += 1
                 group.addTask {
                     guard !Task.isCancelled else { return (rootID, nil) }
                     let thread = ReceiptThread.thread(threadRootEventId: rootID)
                     let publicReceipt = try? await room.loadUserReceipt(
                         receiptType: .read, thread: thread, userId: ownUserID)
                     if ThreadFeedMapping.isRead(latest, by: publicReceipt) { return (rootID, publicReceipt) }
+                    guard !Task.isCancelled else { return (rootID, publicReceipt) }
                     if let privateReceipt = try? await room.loadUserReceipt(
                         receiptType: .readPrivate, thread: thread, userId: ownUserID)
                     {
@@ -873,10 +910,16 @@ final class RoomSubscriptionCoordinator {
                     return (rootID, publicReceipt)
                 }
             }
+            for _ in 0..<min(Self.paginationConcurrency, candidates.count) { addNext() }
             var result: [String: UserReceipt] = [:]
             result.reserveCapacity(candidates.count)
             for await (rootID, receipt) in group {
                 if let receipt { result[rootID] = receipt }
+                if Task.isCancelled {
+                    group.cancelAll()
+                } else {
+                    addNext()
+                }
             }
             return result
         }

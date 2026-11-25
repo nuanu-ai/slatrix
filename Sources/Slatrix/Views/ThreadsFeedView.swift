@@ -22,47 +22,71 @@ struct ThreadsFeedView: View {
         let visibleItems = displayedItems
         VStack(spacing: 0) {
             Divider().overlay(colors.border)
-            if let error = errorBannerMessage {
-                HStack {
-                    InlineErrorView(message: error)
-                    Button("Retry") {
-                        if feed.errorMessage != nil { refresh() } else { Task { await matrix.retryFailedThreads() } }
-                    }.buttonStyle(.textLink).font(m.font(.subheadline)).padding(.trailing, m.sp20)
-                }.disabled(feed.isLoading)
-                Divider().overlay(colors.border)
-            }
-            if visibleItems.isEmpty {
-                if feed.items.isEmpty && (feed.isLoading || feed.isDiscovering) {
-                    SkeletonRows(interval: .threadsLoading)
-                        .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if unreadOnly && !feed.items.isEmpty {
-                    EmptyStateView(symbol: "bubble.left.and.bubble.right", title: "No unread threads")
+            Group {
+                if visibleItems.isEmpty {
+                    if feed.items.isEmpty && (feed.isLoading || feed.isDiscovering) {
+                        SkeletonRows(interval: .threadsLoading)
+                            .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if unreadOnly && !feed.items.isEmpty {
+                        EmptyStateView(symbol: "bubble.left.and.bubble.right", title: "No unread threads") {
+                            if feed.hasOlderThreads {
+                                Button("Load older threads") { Task { await matrix.loadOlderThreads() } }
+                                    .disabled(feed.isLoading)
+                            }
+                        }
+                    } else {
+                        EmptyStateView(symbol: "bubble.left.and.bubble.right", title: "No threads yet") {
+                            if feed.hasOlderThreads {
+                                Button("Load older threads") { Task { await matrix.loadOlderThreads() } }
+                                    .disabled(feed.isLoading)
+                            }
+                        }
+                    }
                 } else {
-                    EmptyStateView(symbol: "bubble.left.and.bubble.right", title: "No threads yet")
+                    ScrollView {
+                        LazyVStack(spacing: m.sp12) {
+                            ForEach(visibleItems) { item in
+                                ThreadFeedRow(
+                                    item: item, root: feed.preview(roomID: item.roomID, eventID: item.root.eventID),
+                                    latest: item.latest.flatMap {
+                                        $0.eventID == item.root.eventID
+                                            ? nil : feed.preview(roomID: item.roomID, eventID: $0.eventID)
+                                    }, sessionID: feed.sessionID, matrix: matrix, onOpen: onOpen,
+                                    hydrate: { [feed] in await feed.hydratePreview(item, retry: $0) })
+                            }
+                            if feed.hasOlderThreads {
+                                Button("Load older threads") { Task { await matrix.loadOlderThreads() } }
+                                    .buttonStyle(.textLink)
+                                    .font(m.font(.subheadline, .medium))
+                                    .padding(.vertical, m.sp8)
+                                    .disabled(feed.isLoading)
+                            }
+                        }.padding(.horizontal, m.sp20).padding(.vertical, m.sp16)
+                            .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: m.sp12) {
-                        ForEach(visibleItems) { item in
-                            ThreadFeedRow(
-                                item: item, root: feed.preview(roomID: item.roomID, eventID: item.root.eventID),
-                                latest: item.latest.flatMap {
-                                    $0.eventID == item.root.eventID
-                                        ? nil : feed.preview(roomID: item.roomID, eventID: $0.eventID)
-                                }, matrix: matrix, onOpen: onOpen,
-                                hydrate: { [feed] in await feed.hydratePreview(item, retry: $0) })
-                        }
-                        if feed.hasOlderThreads {
-                            Button("Load older threads") { Task { await matrix.loadOlderThreads() } }
-                                .buttonStyle(.textLink)
-                                .font(m.font(.subheadline, .medium))
-                                .padding(.vertical, m.sp8)
-                                .disabled(feed.isLoading)
-                        }
-                    }.padding(.horizontal, m.sp20).padding(.vertical, m.sp16)
-                        .frame(maxWidth: m(ConversationGrid.collectionWidth), alignment: .leading)
-                        .frame(maxWidth: .infinity)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .top) {
+                if let error = errorBannerMessage {
+                    HStack {
+                        InlineErrorView(message: error)
+                        Button("Retry") {
+                            if feed.errorMessage != nil {
+                                refresh()
+                            } else {
+                                Task { await matrix.retryFailedThreads() }
+                            }
+                        }.buttonStyle(.textLink).font(m.font(.subheadline)).padding(.trailing, m.sp16)
+                    }
+                    .disabled(feed.isLoading)
+                    .background(colors.overlay, in: RoundedRectangle(cornerRadius: m.radiusLarge))
+                    .elevation(.e1, cornerRadius: m.radiusLarge)
+                    .padding(.horizontal, m.sp20).padding(.top, m.sp12)
+                    .frame(maxWidth: m(ConversationGrid.collectionWidth))
+                    .transition(.opacity)
                 }
             }
         }.background(colors.canvas)
@@ -118,6 +142,7 @@ struct ThreadFeedRow: View {
     let item: ThreadFeedItem
     let root: ThreadPreview
     let latest: ThreadPreview?
+    var sessionID = UUID()
     let matrix: MatrixService
     let onOpen: (ChatMessage) -> Void
     let hydrate: (_ retry: Bool) async -> Void
@@ -196,7 +221,7 @@ struct ThreadFeedRow: View {
                     "Thread in \(item.roomName), \(rootMessage.senderName), \(Self.plainPreview(rootMessage)), \(item.replyCount) \(item.replyCount == 1 ? "reply" : "replies")"
                 ).accessibilityValue(item.isUnread ? "Unread" : "")
         }.buttonStyle(.row)
-            .task(id: item.id + (item.latest?.eventID ?? "")) { await hydrate(false) }
+            .task(id: "\(sessionID.uuidString):\(item.id):\(item.latest?.eventID ?? "")") { await hydrate(false) }
             .contextMenu {
                 Button("Open thread") { onOpen(rootMessage) }
                 if failed { Button("Retry preview") { Task { await hydrate(true) } } }
