@@ -1121,6 +1121,7 @@ struct RootView: View {
                 set: { next in
                     if next == .directMessages { return openDirectMessages() }
                     directMessagesColumn = false
+                    if next == .threads { matrix.prepareThreads(workspaceID: workspaceID) }
                     route = next
                 }),
             workspaceID: Binding(
@@ -1130,6 +1131,7 @@ struct RootView: View {
                     directMessagesColumn = false
                     workspaceID = $0
                     workspaceInitialized = true
+                    if route == .threads { matrix.prepareThreads(workspaceID: $0) }
                 }), directMessageSearch: $directMessageSearch,
             unreadDirectMessagesOnly: $unreadDirectMessagesOnly, draftRoomIDs: draftRoomIDs,
             draftCount: draftAddresses.count,
@@ -1516,6 +1518,7 @@ struct RootView: View {
         .overlay(alignment: .top) { if !threadCovers { threadNotice.padding(.top, m.paneHeader) } }
         .background(colors.canvas).dropToUpload("Upload to thread")
     }
+    @State private var threadsUnreadOnly = false
     private var browsedWorkspace: Workspace? { matrix.workspaces.first { $0.id == workspaceID } }
     private func collectionContent(_ route: AppRoute) -> some View {
         VStack(spacing: 0) {
@@ -1538,6 +1541,10 @@ struct RootView: View {
                     } label: {
                         Label("New message", systemImage: "square.and.pencil")
                     }.buttonStyle(.secondary)
+                } else if route == .threads {
+                    ThreadsToolbarControls(
+                        matrix: matrix, feed: matrix.threadFeed, workspaceID: $workspaceID,
+                        unreadOnly: $threadsUnreadOnly)
                 }
             }
             routeBody(route)
@@ -1556,7 +1563,8 @@ struct RootView: View {
         case .directory: PeopleDirectoryView(matrix: matrix, people: matrix.people, onOpenProfile: openProfile)
         case .threads:
             ThreadsFeedView(
-                matrix: matrix, feed: matrix.threadFeed, workspaceID: $workspaceID, onOpen: openRepliesAction)
+                matrix: matrix, feed: matrix.threadFeed, workspaceID: $workspaceID, unreadOnly: threadsUnreadOnly,
+                onOpen: openRepliesAction)
         case .files:
             SharedFilesView(
                 matrix: matrix, service: matrix.sharedFiles, workspaceID: workspaceID,
@@ -3042,7 +3050,9 @@ struct RootView: View {
         case "new-channel": creation = .channel
         case "back": navigateHistory(-1)
         case "forward": navigateHistory(1)
-        case "threads": route = .threads
+        case "threads":
+            matrix.prepareThreads(workspaceID: workspaceID)
+            route = .threads
         case "dms": openDirectMessages()
         case "activity": route = .activity
         case "later": route = .saved

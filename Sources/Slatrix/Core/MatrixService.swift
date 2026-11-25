@@ -4195,8 +4195,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         threadSelection = UUID()
     }
 
+    func prepareThreads(workspaceID: String?) { threadFeed.prepare(workspaceID: workspaceID) }
     func checkMoreThreads() async { await threadFeed.checkMore() }
+    func loadOlderThreads() async { await threadFeed.loadOlder() }
     func loadOlderThreads(roomID: String) async { await threadFeed.loadOlder(roomID: roomID) }
+    func retryFailedThreads() async { await threadFeed.retryFailed() }
     func retryThreads(roomID: String) async { await threadFeed.retry(roomID: roomID) }
     func closeThreads() {
         threadFeed.close()

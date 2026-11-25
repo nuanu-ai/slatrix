@@ -24,6 +24,8 @@ struct NativeMessageBody: View {
     private var showsSpoilerControl: Bool
     /// Off where a placeholder holds the row at text size until the body arrives, such as a Threads preview.
     private var largeEmoji: Bool
+    private var role: TextRole
+    private var textColor: Color?
     /// Compact mode's sender name, flowed inline before plain/inline text or stacked above block elements.
     private var senderName: String?
     private var onOpenSender: (() -> Void)?
@@ -40,14 +42,16 @@ struct NativeMessageBody: View {
     }
     init(
         body: String, formattedBody: String?, edited: Bool = false, showsSpoilerControl: Bool = true,
-        largeEmoji: Bool = true, senderName: String? = nil, onOpenSender: (() -> Void)? = nil,
-        menuCommands: @escaping () -> [MessageMenuCommand] = { [] }
+        largeEmoji: Bool = true, role: TextRole = .reading, textColor: Color? = nil, senderName: String? = nil,
+        onOpenSender: (() -> Void)? = nil, menuCommands: @escaping () -> [MessageMenuCommand] = { [] }
     ) {
         messageBody = body
         self.formattedBody = formattedBody
         self.edited = edited
         self.showsSpoilerControl = showsSpoilerControl
         self.largeEmoji = largeEmoji
+        self.role = role
+        self.textColor = textColor
         self.senderName = senderName
         self.onOpenSender = onOpenSender
         self.menuCommands = menuCommands
@@ -68,7 +72,7 @@ struct NativeMessageBody: View {
             body: messageBody, formattedBody: formattedBody, revealSpoilers: revealed)
         let colors = appearance.colors
         let flowSender = senderName != nil && Self.canFlowInlineSender(rendered)
-        let fontSize = m.size(largeEmoji && rendered.isJumbomoji ? .largeTitle : .reading)
+        let fontSize = m.size(largeEmoji && rendered.isJumbomoji ? .largeTitle : role)
         VStack(alignment: .leading, spacing: m.sp2) {
             if let senderName, !flowSender {
                 Button {
@@ -80,7 +84,7 @@ struct NativeMessageBody: View {
             }
             NativeSelectableMessageText(
                 runs: MessageBodyRenderer.named(rendered.runs) { id in mentions.members.first { $0.id == id }?.name },
-                fontSize: fontSize, textColor: NSColor(colors.textBody), linkColor: NSColor(colors.accent),
+                fontSize: fontSize, textColor: NSColor(textColor ?? colors.textBody), linkColor: NSColor(colors.accent),
                 mentions: MentionPalette(
                     me: mentions.me, text: NSColor(colors.mentionText), fill: NSColor(colors.mentionFill),
                     ownText: NSColor(colors.mentionYouText), ownFill: NSColor(colors.mentionYouFill)),
