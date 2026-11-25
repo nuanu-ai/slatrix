@@ -726,7 +726,7 @@ struct MessageRow: View {
             content(gutter: gutter)
         }.padding(.horizontal, m.conversationInset(thread: isThread))
             .padding(.top, Self.topInset(m, grouped: grouped, compact: compact, followsAttachment: followsAttachment))
-            .padding(.bottom, compact ? m.sp2 : m.sp4)
+            .padding(.bottom, compact ? m.sp2 : grouped ? m.sp4 : m.sp2)
     }
     /// The space above a row's first line, which the hover toolbar may hang into.
     static func topInset(_ m: Metrics, grouped: Bool, compact: Bool, followsAttachment: Bool = false) -> CGFloat {

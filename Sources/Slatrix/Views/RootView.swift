@@ -1954,9 +1954,13 @@ struct RootView: View {
                 for: matrix.rooms.first { $0.id == id }, selectedRoomID: matrix.selectedRoomID,
                 explicitEventID: eventID, opensThread: thread != nil)
         let destinationEventID = eventID ?? resumeAnchor
-        if let current = matrix.selectedRoomID, current != id, let open = threadRoot { leftThreads[current] = open }
-        // Only a plain visit: a jump to a message or a thread of its own wins.
-        let leftThread = thread == nil && eventID == nil && restoringReply == nil ? leftThreads[id] : nil
+        let previousRoomID = matrix.selectedRoomID
+        if let current = previousRoomID, current != id, let open = threadRoot { leftThreads[current] = open }
+        // Only a plain visit to another room: a jump to a message, an explicit thread, or clicking the current room
+        // never replays an old `leftThreads` entry.
+        let leftThread =
+            previousRoomID != id && thread == nil && eventID == nil && restoringReply == nil ? leftThreads[id] : nil
+        if leftThread != nil { leftThreads[id] = nil }
         let requiresRoomSelection = !matrix.isLiveTimelineReady(roomID: id) || pendingRoomID != nil
         // The cases below that open a new timeline.
         if destinationEventID != nil || thread == nil || requiresRoomSelection {
@@ -2009,15 +2013,21 @@ struct RootView: View {
                 restoringReply == nil && eventID == nil && matrix.showRecentRoom(id, containing: resumeAnchor)
             var shownThread = false
             if shownRoom {
+                if eventID == nil { matrix.clearJump() }
                 if let restoredThread {
-                    threadRoot = restoredThread
                     if matrix.showRecentThread(restoredThread, openedWith: openedWith) {
+                        threadRoot = restoredThread
                         threadReadyID = restoredThread.eventID
                         openingThreadID = nil
                         shownThread = true
-                    } else {
+                    } else if previousRoomID != id {
+                        threadRoot = restoredThread
                         threadReadyID = nil
                         openingThreadID = restoredThread.eventID
+                    } else {
+                        threadRoot = nil
+                        threadReadyID = nil
+                        openingThreadID = nil
                     }
                 } else {
                     threadRoot = nil
@@ -2084,6 +2094,7 @@ struct RootView: View {
         else { return selectRoom(id, record: true, thread: root, openedWith: openedWith) }
         let generation = UUID()
         navigationGeneration = generation
+        leftThreads[id] = nil
         matrix.setMessageActionThread(rootID: nil)
         threadReadyID = nil
         threadLoadError = nil

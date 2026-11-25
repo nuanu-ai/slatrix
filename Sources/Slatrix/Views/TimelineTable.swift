@@ -178,7 +178,6 @@ struct TimelineTable: NSViewRepresentable {
     private static let spareCells = 20
     private static let recycledCells = 40
     private static var recycled: [TimelineCell] = []
-    private static var recycleCleanupTask: Task<Void, Never>?
 
     private var configuration: TimelineTable?
     private var rows: [TimelineEntry] = []
@@ -428,9 +427,8 @@ struct TimelineTable: NSViewRepresentable {
             ?? Self.recycled.popLast() ?? TimelineCell(identifier: Self.cellID)
     }
 
-    /// The next timeline, usually another room, shows its rows in these cells: keeping their hosted SwiftUI views warm
-    /// across the switch frame lets the incoming room diff and reuse their `MessageTextView`s in place, while idle
-    /// cells still drop their rows after a short pause so nothing retains stale contexts.
+    /// The next timeline, usually another room, shows its rows in these cells: updating a row's views in place costs
+    /// a fraction of building them.
     func recycleCells() {
         var cells = Array(prepared.values) + spares
         table.enumerateAvailableRowViews { rowView, _ in
@@ -439,24 +437,9 @@ struct TimelineTable: NSViewRepresentable {
         prepared = [:]
         spares = []
         for cell in cells {
-            cell.clearCommands()
+            cell.clear()
             cell.removeFromSuperview()
-            if Self.recycled.count < Self.recycledCells {
-                Self.recycled.append(cell)
-            } else {
-                cell.clear()
-            }
-        }
-        Self.scheduleRecycleCleanup()
-    }
-
-    private static func scheduleRecycleCleanup() {
-        recycleCleanupTask?.cancel()
-        recycleCleanupTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled else { return }
-            for cell in recycled { cell.clear() }
-            recycleCleanupTask = nil
+            if Self.recycled.count < Self.recycledCells { Self.recycled.append(cell) }
         }
     }
 
@@ -1171,17 +1154,6 @@ struct TimelineTable: NSViewRepresentable {
         placeToolbar()
     }
 
-    static func toolbarOriginY(
-        rowTop: CGFloat, toolbarHeight: CGFloat, topInset: CGFloat, grouped: Bool, compact: Bool,
-        visibleMinY: CGFloat, visibleMaxY: CGFloat, margin: CGFloat
-    ) -> CGFloat {
-        // An ungrouped comfortable row has a sender-header line whose trailing side is open, so centering the toolbar
-        // on the row's top edge keeps it clear of the message body while minimizing overlap above. Grouped and compact
-        // rows begin body text immediately after `topInset`, so the toolbar stays above it.
-        let inset = !grouped && !compact ? toolbarHeight / 2 : min(toolbarHeight / 2, topInset)
-        return min(max(rowTop + inset - toolbarHeight, visibleMinY + margin), visibleMaxY - toolbarHeight)
-    }
-
     /// The one hover toolbar, hung on the hovered row's top right edge as Slack hangs it, never down over the row's
     /// first line, and kept inside the viewport.
     private func placeToolbar() {
@@ -1207,11 +1179,11 @@ struct TimelineTable: NSViewRepresentable {
             x: clip.minX, y: clip.minY + insets.top, width: clip.width,
             height: clip.height - insets.top - insets.bottom)
         let compact = context.appearance?.density == .compact
-        let topInset = MessageRow.topInset(
-            m, grouped: entry.grouped, compact: compact, followsAttachment: entry.followsAttachment)
-        let y = Self.toolbarOriginY(
-            rowTop: top.y, toolbarHeight: size.height, topInset: topInset, grouped: entry.grouped, compact: compact,
-            visibleMinY: visible.minY, visibleMaxY: visible.maxY, margin: m.sp4)
+        let inset = min(
+            size.height / 2,
+            MessageRow.topInset(m, grouped: entry.grouped, compact: compact, followsAttachment: entry.followsAttachment)
+        )
+        let y = min(max(top.y + inset - size.height, visible.minY + m.sp4), visible.maxY - size.height)
         toolbar.frame.origin = NSPoint(x: top.x - m.conversationInset(thread: context.isThread) - size.width, y: y)
         toolbar.isHidden = false
     }
@@ -1356,9 +1328,6 @@ final class TimelineCell: NSView {
         host.rootView = row
         self.commands = commands
     }
-
-    /// Drops menu closures immediately while keeping the hosted SwiftUI view warm for same-frame room-switch reuse.
-    func clearCommands() { commands = nil }
 
     /// Drops the hosted row so idle spare and recycled cells neither retain old contexts nor stay subscribed.
     func clear() {

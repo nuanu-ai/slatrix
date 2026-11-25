@@ -2351,6 +2351,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     /// Shows a conversation whose live timeline is still open, rows and all, in the frame of the click. False when
     /// none is open, or when it does not hold `anchor`.
+    /// Clears any in-flight or remembered message jump on a plain conversation visit.
+    func clearJump() {
+        jump = nil
+        jumping = nil
+    }
+
     func showRecentRoom(_ id: String, containing anchor: String? = nil) -> Bool {
         guard connectionStopTask == nil, client != nil, !isPreview else { return false }
         func holds(_ kept: KeptTimeline) -> Bool {
@@ -2358,6 +2364,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
         if let live = liveTimeline, live.roomID == id, holds(live) {
             // Already on screen; this drops any other conversation that was still opening, or jump being prepared.
+            if anchor == nil { jump = nil }
             jumping = nil
             selection = live.token
             if rooms.first(where: { $0.id == id })?.isMarkedUnread == true || locallyMarkedUnreadRooms.contains(id) {
@@ -2368,6 +2375,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             return true
         }
         guard let kept = recentTimelines.entry(id), holds(kept) else { return false }
+        if anchor == nil { jump = nil }
         jumping = nil
         _ = recentTimelines.take(id)
         selection = kept.token
@@ -2849,9 +2857,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         timelineHandle = nil
         typingHandle?.cancel()
         threadHandle?.cancel()
+        threadHandle = nil
+        threadSelection = UUID()
         timeline = nil
         timelineObserver = nil
         threadTimeline = nil
+        threadSnapshot = nil
         loadedThreadRootID = nil
     }
 
@@ -3308,8 +3319,8 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             Task { @MainActor [weak self] in
                 guard let self, self.sessionGeneration == session else { return }
                 self.messagesGone(Set(deleted.map { ActivityService.key(roomID: root.roomID, eventID: $0) }))
-                guard self.selectedRoomID == root.roomID, threadToken == self.threadSelection,
-                    revision > self.threadRevision
+                guard self.selectedRoomID == root.roomID, self.loadedThreadRootID == root.eventID,
+                    threadToken == self.threadSelection, revision > self.threadRevision
                 else { return }
                 self.threadRevision = revision
                 self.showThread(items, root: root)
@@ -3434,6 +3445,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         readyThreadReadSelection = nil
         lastThreadReceipt = nil
         threadHandle?.cancel()
+        threadHandle = nil
         // The root keeps one identity in the pane from the moment it opens, whichever timeline it came from.
         let opening = Self.threadRootCopy(root, id: root.eventID)
         threadHoldsRoot = false
@@ -4063,11 +4075,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         } catch { threadFeed.unavailable(Self.safeError(error)) }
     }
 
-    /// Parks the open thread timeline in `recentThreads` when switching away from its room so returning restores it
-    /// synchronously without a blank frame or incremental re-pagination.
+    /// Parks a settled, live thread timeline in `recentThreads` when switching away from its room so returning
+    /// restores it synchronously without a blank frame or incremental re-pagination. Threads still loading or with
+    /// a failed first page close cleanly instead so returning retries them normally.
     func parkThread() {
         guard let timeline = threadTimeline, let rootID = loadedThreadRootID, let roomID = selectedRoomID,
-            let observer = threadSnapshot, let listener = threadHandle
+            let observer = threadSnapshot, let listener = threadHandle,
+            readyThreadReadSelection == threadSelection, threadPageError == nil
         else {
             closeThread()
             return
@@ -4077,7 +4091,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             listener: listener, revision: threadRevision, messages: threadMessages,
             hasMoreHistory: hasMoreThreadHistory, holdsRoot: threadHoldsRoot, media: threadMedia,
             forwardMedia: threadForwardMedia, sendFailures: threadSendFailures, projections: threadProjections,
-            revealed: threadRevealedSelection == threadSelection, readReady: readyThreadReadSelection == threadSelection
+            revealed: threadRevealedSelection == threadSelection, readReady: true
         )
         for closed in recentThreads.keep(kept, for: Self.threadKey(roomID: roomID, rootID: rootID)) {
             closed.listener.cancel()
@@ -4128,7 +4142,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         threadOpening = (kept.rootID, openedWith)
         threadHoldsRoot = kept.holdsRoot
         hasMoreThreadHistory = kept.hasMoreHistory
-        threadMessages = kept.messages
+        var restored = kept.messages
+        if !kept.holdsRoot {
+            let freshRoot = conversationRoot() ?? Self.threadRootCopy(root, id: root.eventID)
+            if restored.isEmpty { restored = [freshRoot] } else { restored[0] = freshRoot }
+        } else if let currentRoot = conversationRoot(), restored.first != currentRoot {
+            if restored.isEmpty { restored = [currentRoot] } else { restored[0] = currentRoot }
+        }
+        threadMessages = restored
         threadMedia = kept.media
         threadForwardMedia = kept.forwardMedia
         threadProjections = kept.projections
@@ -4151,13 +4172,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         if snapshot.revision > threadRevision {
             threadRevision = snapshot.revision
             showThread(snapshot.items, root: root)
-        } else if let currentRoot = conversationRoot(), threadMessages.first != currentRoot {
-            var updated = threadMessages
-            if updated.isEmpty { updated = [currentRoot] } else { updated[0] = currentRoot }
-            threadMessages = updated
-        }
-        if !kept.revealed {
-            Task { _ = try? await loadMoreThread(rootID: kept.rootID) }
         }
         return true
     }
