@@ -444,4 +444,29 @@ class LiveWorkspaceTest {
         assertFalse("Inactive glassBar falls back to translucent tint without Haze effect", barModifier.hasHazeEffect())
         assertFalse("Inactive glass falls back to translucent tint without Haze effect", capsuleModifier.hasHazeEffect())
     }
+
+    @Test fun pushingAPageDisablesLiveGlassUntilTheSlideSettles() {
+        val stack = mutableStateOf(emptyList<String>())
+        var channelGlass = true
+        compose.setContent {
+            SlatrixTheme {
+                LiveWorkspace(stack.value.map { key ->
+                    WorkspaceCover(key) {
+                        channelGlass = LocalGlassActive.current
+                        Text("Channel")
+                    }
+                }) { Text("Home") }
+            }
+        }
+        compose.waitForIdle()
+
+        compose.mainClock.autoAdvance = false
+        compose.runOnUiThread { stack.value = listOf("channel"); Snapshot.sendApplyNotifications() }
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeByFrame()
+        assertFalse("Pushing page must disable live blur while sliding in", channelGlass)
+
+        compose.mainClock.advanceTimeBy(1_000)
+        assertTrue("Top page activates live blur once the slide settles", channelGlass)
+    }
 }

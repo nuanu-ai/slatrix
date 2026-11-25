@@ -591,6 +591,53 @@ class MatrixWorkspaceTest {
             kept["\$c"], workspace.selected.first { it?.threadRoot == "\$c" && it.composer != null }!!.conversation)
         workspace.close()
     }
+
+    @Test fun warmingTopRoomsPreloadsRecentTimelinesForInstantFirstOpenAndYieldsToSelection() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val betaStarted = CompletableDeferred<Unit>()
+        val slowStarted = CompletableDeferred<Unit>()
+        val started = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val client = WorkspaceClient(beforeTimeline = { id ->
+            started += id
+            if (id == "!beta:example.org") betaStarted.complete(Unit)
+            if (id == "!slow:example.org") {
+                slowStarted.complete(Unit)
+                gate.await()
+            }
+        })
+        val workspace = MatrixWorkspace(backgroundScope, client)
+        val alpha = workspaceRoom("!alpha:example.org", "Alpha")
+        val beta = workspaceRoom("!beta:example.org", "Beta")
+        val gamma = workspaceRoom("!gamma:example.org", "Gamma")
+
+        workspace.warm(listOf(alpha.id, beta.id, alpha.id))
+        betaStarted.await()
+        assertEquals(listOf(alpha.id, beta.id), started.toList())
+
+        // First open of a warmed room attaches its live conversation synchronously on frame 0 without rebuilding it.
+        workspace.open(alpha)
+        val instant = workspace.selected.value?.conversation
+        assertNotNull("Warmed room must attach a live conversation on frame 0", instant)
+        workspace.selected.first { it?.room == alpha && it.composer != null }
+        assertSame(instant, workspace.selected.value?.conversation)
+        assertEquals("Opening a warmed room must not build a second timeline", listOf(alpha.id, beta.id), started.toList())
+
+        // Warming yields immediately as soon as the reader opens another room.
+        workspace.back()
+        workspace.selected.first { it == null }
+        runCurrent()
+        workspace.warm(listOf("!slow:example.org", gamma.id))
+        slowStarted.await()
+        assertFalse("Sequential warm must not start gamma while slow is pending", started.contains(gamma.id))
+        workspace.open(gamma)
+        workspace.selected.first { it?.room == gamma && it.composer != null }
+        assertEquals(gamma, workspace.selected.value?.room)
+        gate.complete(Unit)
+        runCurrent()
+
+        workspace.close()
+        assertTrue("Closing the workspace destroys all warmed room handles", client.handles.all { it.uniffiIsDestroyed })
+    }
 }
 
 private class WorkspaceClient(private val threadRoots: Map<String, String> = emptyMap(),

@@ -377,6 +377,26 @@ class ThreadScreenTest {
             scope.cancel()
         }
     }
+
+    // capability: thread.open
+    @Test fun aTallThreadRootInPreviewStartsBelowHeaderInsteadOfClippingBehindIt() {
+        val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
+        val longRoot = ConversationMessage("thread-root", "\$root", "@sam:example.org", "Sam",
+            (1..60).joinToString("\n") { "Root line $it" }, null, 1_700_000_000_000L,
+            MessageKind.Text, MessageSendState.Sent, false, "S", 0)
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(longRoot), loading = false, hasMore = true, preview = true, replies = 1),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, threadRoot = "\$root")
+            }
+        }
+        compose.waitForIdle()
+        compose.onNodeWithText("Root line 1", substring = true, useUnmergedTree = true).assertIsDisplayed()
+        val headerBottom = compose.onNodeWithContentDescription("Back").getUnclippedBoundsInRoot().bottom
+        val rootBounds = compose.onNodeWithText("Root line 1", substring = true, useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("Tall preview root starts below header ($rootBounds vs header $headerBottom)",
+            rootBounds.top >= headerBottom && rootBounds.top - headerBottom < 120.dp)
+    }
 }
 
 /** One room with a thread of five replies, whose timeline waits for [page]; the room's other calls answer nothing. */

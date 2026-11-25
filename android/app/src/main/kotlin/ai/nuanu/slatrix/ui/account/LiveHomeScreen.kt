@@ -280,7 +280,9 @@ fun LiveWorkspace(covers: List<WorkspaceCover>, home: @Composable () -> Unit) {
                     // Single composition branch keeps subtrees alive across depth and exit transitions; Home inherits outer coordinator.
                     val backCoordinator = if (index == 0) LocalBackProgress.current else coordinator.takeIf { depth == 0 }
                     val covered = leaving != null || depth > 0
-                    val glassActive = LocalGlassActive.current && !covered
+                    // Skip live backdrop blur while the top page is sliding in or tracking a predictive-back drag so
+                    // transition frames never stack GPU blur passes on top of initial layout.
+                    val glassActive = LocalGlassActive.current && !covered && !(depth == 0 && backingVisible)
                     Covered(covered) {
                         CompositionLocalProvider(LocalBackProgress provides backCoordinator, LocalGlassActive provides glassActive) {
                             saved.SaveableStateProvider(stateKey, page.content)
