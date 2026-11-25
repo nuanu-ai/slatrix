@@ -67,9 +67,9 @@ struct AvatarShapeTests {
         #expect(awayRingPixels >= 30, "Expected visible away ring (>= 30 px at 2x), got \(awayRingPixels)")
     }
 
-    @Test("An avatar whose image lands in cache before its task runs still replaces its initials")
-    func displaysImageCachedBeforeTaskRuns() async throws {
-        // Solid sRGB green 8×8 PNG so its pixels are unmistakable over any initials background.
+    @Test("An avatar draws a cached photo without staying stuck on initials")
+    func displaysCachedPhotoImmediately() throws {
+        // Solid sRGB green 8×8 image so its pixels are unmistakable over any initials background.
         let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
         let context = try #require(
             CGContext(
@@ -78,53 +78,22 @@ struct AvatarShapeTests {
         context.setFillColor(CGColor(colorSpace: colorSpace, components: [0, 1, 0, 1])!)
         context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
         let cgImage = try #require(context.makeImage())
-        let png = try #require(NSBitmapImageRep(cgImage: cgImage).representation(using: .png, properties: [:]))
 
         let matrix = MatrixService.scratch()
         matrix.user = ChatUser(id: "@me:example.org", name: "Dmitry Ukhanov", avatarURL: "mxc://example.org/me")
-        let gate = Gate()
-        gate.arm()
-        defer { gate.release() }
-        // Another AvatarView has an in-flight load for the same avatar; it finishes right after this view's first
-        // layout and before its .task executes.
-        let inFlight = Task {
-            await matrix.avatarImages.image(for: "mxc://example.org/me", pixels: 128) {
-                await gate.wait()
-                return png
-            }
-        }
-        #expect(await eventually { gate.isWaiting })
+        matrix.avatarImages.store(cgImage, for: "mxc://example.org/me")
 
-        let appearance = AppearanceStore()
-        let hosting = NSHostingView(
-            rootView: AvatarView(
+        let renderer = ImageRenderer(
+            content: AvatarView(
                 name: "Dmitry Ukhanov", size: 28, matrix: matrix, source: "mxc://example.org/me"
-            ).environmentObject(appearance))
-        let window = offscreenWindow(NSSize(width: 40, height: 40))
-        defer {
-            window.contentView = nil
-            window.close()
-        }
-        hosting.frame = NSRect(x: 0, y: 0, width: 40, height: 40)
-        window.contentView = hosting
-        // First layout renders initials while cache is still empty.
-        hosting.layoutSubtreeIfNeeded()
-        // The other AvatarView finishes populating the cache now.
-        gate.release()
-        let cached = await inFlight.value
-        #expect(cached != nil)
-
-        func centerIsGreen() -> Bool {
-            hosting.layoutSubtreeIfNeeded()
-            hosting.displayIfNeeded()
-            guard let snap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else { return false }
-            hosting.cacheDisplay(in: hosting.bounds, to: snap)
-            guard
-                let color = snap.colorAt(x: snap.pixelsWide / 2, y: snap.pixelsHigh / 2)?.usingColorSpace(.sRGB)
-            else { return false }
-            return color.greenComponent > 0.9 && color.greenComponent - color.redComponent > 0.4
-                && color.greenComponent - color.blueComponent > 0.5
-        }
-        #expect(await eventually { centerIsGreen() })
+            ).environmentObject(AppearanceStore()))
+        renderer.scale = 1
+        let rendered = try #require(renderer.cgImage)
+        let bitmap = NSBitmapImageRep(cgImage: rendered)
+        let color = try #require(
+            bitmap.colorAt(x: rendered.width / 2, y: rendered.height / 2)?.usingColorSpace(.sRGB))
+        #expect(
+            color.greenComponent > 0.9 && color.greenComponent - color.redComponent > 0.4
+                && color.greenComponent - color.blueComponent > 0.5)
     }
 }

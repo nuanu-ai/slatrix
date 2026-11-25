@@ -105,7 +105,11 @@ private final class ResizePointerView: NSView {
     var isCovered = false {
         didSet {
             guard isCovered != oldValue else { return }
-            if isCovered { onHovering(false) }
+            if isCovered {
+                interaction = SidebarResizeInteraction()
+                onDragging(false)
+                onHovering(false)
+            }
             window?.invalidateCursorRects(for: self)
         }
     }
@@ -165,7 +169,7 @@ private final class ResizePointerView: NSView {
     }
     override func mouseUp(with event: NSEvent) {
         onDragging(false)
-        guard let width = interaction.end(x: x(event)) else { return }
+        guard !isCovered, let width = interaction.end(x: x(event)) else { return }
         onChange(width)
         onCommit()
         window?.invalidateCursorRects(for: self)

@@ -1532,12 +1532,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let refresher = RoomListRefresher()
         refresher.onChange = { [weak self, weak refresher] in
             guard let self, let refresher else { return }
-            let wasLoaded = self.roomsLoaded
             if self.rooms != refresher.rooms { self.rooms = refresher.rooms }
             if self.workspaces != refresher.workspaces { self.workspaces = refresher.workspaces }
             if self.roomsLoaded != refresher.loaded { self.roomsLoaded = refresher.loaded }
             self.threadFeed.updateRooms(refresher.rooms)
-            if !wasLoaded && self.roomsLoaded { self.scheduleWarmStarredRooms() }
+            if self.roomsLoaded, !self.warmedStarred,
+                self.rooms.contains(where: { $0.favorite && !$0.isSpace && $0.membership == "join" })
+            {
+                self.scheduleWarmStarredRooms()
+            }
         }
         refresher.onError = { [weak self] error in self?.errorMessage = Self.safeError(error) }
         return refresher
@@ -1891,6 +1894,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 let name = try await activeClient.displayName()
                 let avatar = try await activeClient.avatarUrl()
                 guard let self, self.sessionGeneration == generation, !Task.isCancelled else { return }
+                if let avatar {
+                    // Warm the own avatar before publishing `user.avatarURL` so the sidebar footer Menu label draws
+                    // the photo on its first render instead of sticking on initials.
+                    _ = await self.avatarImages.image(for: avatar, pixels: 128) {
+                        try await self.avatarThumbnail(avatar, side: 128)
+                    }
+                    guard self.sessionGeneration == generation, !Task.isCancelled else { return }
+                }
                 self.needsInitialProfileLoad = false
                 if self.profileRevision == loadedProfileRevision { self.user?.name = name }
                 if self.avatarRevision == loadedAvatarRevision { self.user?.avatarURL = avatar }
@@ -2440,8 +2451,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 listener.cancel()
                 continue
             }
-            if observer.snapshot.items.count < 20 {
-                _ = try? await timeline.paginateBackwards(numEvents: 30)
+            var hasMore = true
+            if observer.snapshot.items.count < 20,
+                let reachedStart = try? await timeline.paginateBackwards(numEvents: 30)
+            {
+                hasMore = !reachedStart
             }
             guard !Task.isCancelled, sessionGeneration == generation, connectionStopTask == nil,
                 id != selectedRoomID, id != liveTimeline?.roomID, recentTimelines.entry(id) == nil
@@ -2451,6 +2465,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             }
             let kept = KeptTimeline(
                 roomID: id, token: token, timeline: timeline, observer: observer, listener: listener)
+            kept.hasMoreHistory = hasMore
             for closed in recentTimelines.keep(kept, for: id) { closed.listener.cancel() }
             warmedAny = true
             await Task.yield()

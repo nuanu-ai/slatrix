@@ -2518,27 +2518,49 @@ struct TimelinePointerTests {
 
     @Test("A covered timeline clears hover and ignores pointer movement and text cursor updates beneath a modal")
     func coveredTimelineBlocksHoverAndCursor() throws {
+        let window = offscreenWindow(NSSize(width: 400, height: 300))
+        defer {
+            window.contentView = nil
+            window.close()
+        }
         let scrollView = TimelineScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
         let textView = MessageTextView(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
+        textView.textContainerInset = .zero
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.textStorage?.setAttributedString(
+            NSAttributedString(
+                string: "https://example.org",
+                attributes: [
+                    .link: URL(string: "https://example.org")!,
+                    .font: NSFont.systemFont(ofSize: 14),
+                ]))
         scrollView.documentView = textView
+        window.contentView = scrollView
+        scrollView.layoutSubtreeIfNeeded()
+
         var lastPointer: NSPoint? = NSPoint(x: 10, y: 10)
         scrollView.onPointer = { lastPointer = $0 }
+        let layout = try #require(textView.layoutManager)
+        let glyphPoint = textView.convert(NSPoint(x: 12, y: 8), to: nil)
+        let move = try #require(
+            NSEvent.mouseEvent(
+                with: .mouseMoved, location: glyphPoint, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
 
         scrollView.isCovered = true
         #expect(lastPointer == nil)
         #expect(textView.effectivelyCovered)
-
-        let move = try #require(
-            NSEvent.mouseEvent(
-                with: .mouseMoved, location: NSPoint(x: 40, y: 40), modifierFlags: [], timestamp: 0, windowNumber: 0,
-                context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
         scrollView.mouseMoved(with: move)
         #expect(lastPointer == nil)
+        textView.mouseMoved(with: move)
+        #expect(layout.temporaryAttribute(.underlineStyle, atCharacterIndex: 0, effectiveRange: nil) == nil)
 
         scrollView.isCovered = false
         #expect(!textView.effectivelyCovered)
         scrollView.mouseMoved(with: move)
-        #expect(lastPointer == NSPoint(x: 40, y: 40))
+        #expect(lastPointer == glyphPoint)
+        textView.mouseMoved(with: move)
+        #expect(layout.temporaryAttribute(.underlineStyle, atCharacterIndex: 0, effectiveRange: nil) != nil)
     }
 
     @Test("Compact message row estimates omit comfortable mode's separate sender header line")

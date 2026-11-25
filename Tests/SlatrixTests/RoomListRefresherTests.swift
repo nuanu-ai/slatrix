@@ -155,6 +155,8 @@ extension RoomListRefresherTests {
         third.info = roomInfo(id: "!third:example.org", unread: 3)
         first.notifyInfoChanged()
         await Task.yield()
+        // An unchanged `.set` for an already-watched room must not break the coalescing window.
+        refresher.request([.set(index: 0, value: first)])
         second.notifyInfoChanged()
         await Task.yield()
         third.notifyInfoChanged()

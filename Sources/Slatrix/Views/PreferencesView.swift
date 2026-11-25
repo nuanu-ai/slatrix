@@ -25,8 +25,8 @@ struct PreferencesView: View {
     @State private var notificationStatusRequest = UUID()
     @State private var notificationPermissionRequest = UUID()
     @State private var isPresented = false
-    @State private var openAtLogin = false
-    @State private var loginToggleEdited = false
+    @State private var openAtLogin: Bool?
+    @State private var loginStatusRevision = 0
     @State private var error: String?
     private var colors: AppColors { appearance.colors }
 
@@ -140,9 +140,7 @@ struct PreferencesView: View {
         }
         .task(id: tab) {
             guard tab == .advanced else { return }
-            let enabled = await readOpenAtLogin()
-            guard !Task.isCancelled, !loginToggleEdited else { return }
-            openAtLogin = enabled
+            await refreshOpenAtLogin()
         }
         .onChange(of: activeWorkspace?.id) { _, currentID in
             if case .workspace(let boundID) = themeScope, currentID != boundID {
@@ -156,6 +154,7 @@ struct PreferencesView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             if tab == .notifications, !requestingNotifications { Task { await refreshNotificationStatus() } }
+            if tab == .advanced { Task { await refreshOpenAtLogin() } }
         }
         .onChange(of: matrix.notificationSessionID) { _, _ in
             notificationPermissionRequest = UUID()
@@ -406,13 +405,22 @@ struct PreferencesView: View {
         }
     }
 
+    @MainActor private func refreshOpenAtLogin() async {
+        guard isPresented, tab == .advanced else { return }
+        let revision = loginStatusRevision
+        let enabled = await readOpenAtLogin()
+        guard !Task.isCancelled, isPresented, tab == .advanced, loginStatusRevision == revision else { return }
+        openAtLogin = enabled
+    }
+
     private var advancedPane: some View {
         VStack(alignment: .leading, spacing: m.sp24) {
             Toggle(
                 isOn: Binding(
-                    get: { openAtLogin },
+                    get: { openAtLogin ?? false },
                     set: { enabled in
-                        loginToggleEdited = true
+                        guard openAtLogin != nil else { return }
+                        loginStatusRevision += 1
                         do {
                             try PlatformIntegration.shared.setOpenAtLogin(enabled)
                             openAtLogin = PlatformIntegration.shared.openAtLogin
@@ -423,7 +431,7 @@ struct PreferencesView: View {
                     })
             ) {
                 sectionTitle("Open Slatrix at login")
-            }.toggleStyle(.switch)
+            }.toggleStyle(.switch).disabled(openAtLogin == nil)
             Divider().overlay(colors.border)
             HStack(alignment: .top, spacing: m.sp16) {
                 Image(nsImage: NSApplication.shared.applicationIconImage).resizable()
