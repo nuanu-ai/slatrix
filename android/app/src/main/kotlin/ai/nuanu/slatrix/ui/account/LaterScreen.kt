@@ -72,6 +72,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -83,11 +84,13 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import java.text.SimpleDateFormat
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.ZoneOffset
+import java.util.Date
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -256,6 +259,29 @@ private fun dueLabel(at: Long, now: Long): String = when {
     else -> "Due ${dayLabelAhead(at, now)} at ${timeLabel(at)}"
 }
 
+/** A concise date for a Later card so it never truncates beside the sender's name: time today, "Yesterday, 14:24", or "Nov 23". */
+@Composable
+private fun laterTimestamp(timestamp: Long, now: Long): String {
+    val locale = LocalConfiguration.current.locales[0]
+    val zone = ZoneId.systemDefault()
+    val today = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+    return remember(timestamp, today, locale, zone) {
+        val day = Instant.ofEpochMilli(timestamp).atZone(zone).toLocalDate()
+        when {
+            day == today -> timeLabel(timestamp)
+            day == today.minusDays(1) -> "Yesterday, ${timeLabel(timestamp)}"
+            day.year == today.year -> SimpleDateFormat(
+                android.text.format.DateFormat.getBestDateTimePattern(locale, "MMMd"),
+                locale,
+            ).format(Date(timestamp))
+            else -> SimpleDateFormat(
+                android.text.format.DateFormat.getBestDateTimePattern(locale, "yMMMd"),
+                locale,
+            ).format(Date(timestamp))
+        }
+    }
+}
+
 /** Tomorrow, then the weekday within a week, then the date. */
 private fun dayLabelAhead(at: Long, now: Long): String {
     val zone = ZoneId.systemDefault()
@@ -360,13 +386,13 @@ private fun SavedCard(saved: SavedMessage, room: RoomSummary?, previews: Mutable
                 }
             }
             val shown = preview
-            Row(horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
-                // The line keeps its height while the message loads, so the row never grows under the reader. The name
-                // takes what it needs and the time gives way.
-                Text(shown?.senderName ?: "", style = MaterialTheme.typography.bodyLarge,
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall), verticalAlignment = Alignment.CenterVertically) {
+                // The line keeps its height while the message loads, so the row never grows under the reader. The time
+                // stays readable in full while a long sender name ellipsizes.
+                Text(shown?.senderName ?: "", Modifier.weight(1f, fill = false), style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (shown != null) Text("${dayLabel(shown.timestamp)} at ${timeLabel(shown.timestamp)}", Modifier.weight(1f, fill = false),
-                    style = MaterialTheme.typography.labelSmall, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (shown != null) Text(laterTimestamp(shown.timestamp, now),
+                    style = MaterialTheme.typography.labelSmall, color = colors.textSecondary, maxLines = 1, softWrap = false)
             }
             Text(when {
                 shown != null -> shown.body

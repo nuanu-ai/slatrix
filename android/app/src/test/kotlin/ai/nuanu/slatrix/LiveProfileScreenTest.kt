@@ -259,6 +259,100 @@ class LiveProfileScreenTest {
         }
     }
 
+    // capability: app.themes
+    @Test @Config(qualifiers = "w360dp-h800dp-420dpi")
+    fun themeSwatchCardsKeepEqualHeightWhenMaterialYouWrapsAndScopeStaysCompactOnOneRow() {
+        compose.setContent {
+            val baseDensity = LocalDensity.current
+            // On a 360dp phone at 1.25x text, "Material You" wraps to 2 lines in a 3-column row.
+            CompositionLocalProvider(LocalDensity provides Density(baseDensity.density, fontScale = 1.25f)) {
+                SlatrixTheme {
+                    LivePreferencesScreen(
+                        dark = false,
+                        darkOverride = null,
+                        theme = AndroidTheme.Neutral,
+                        onColorMode = {},
+                        onTheme = {},
+                        onBack = {},
+                        activeWorkspaceId = "!nuanu:example.org",
+                        activeWorkspaceName = "Nuanu AI Lab",
+                        workspaceTheme = null,
+                        onWorkspaceTheme = { _, _ -> },
+                    )
+                }
+            }
+        }
+        val materialLabelLayouts = mutableListOf<TextLayoutResult>()
+        compose.onNode(hasText("Material You"), useUnmergedTree = true).performScrollTo()
+            .fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action!!(materialLabelLayouts)
+        assertEquals("Material You wraps to 2 lines in this test setup", 2, materialLabelLayouts.single().lineCount)
+
+        val neutral = compose.onNode(hasText("Neutral") and isSelectable()).performScrollTo().fetchSemanticsNode().boundsInRoot
+        val materialYou = compose.onNode(hasText("Material You") and isSelectable()).fetchSemanticsNode().boundsInRoot
+        val sand = compose.onNode(hasText("Sand") and isSelectable()).fetchSemanticsNode().boundsInRoot
+        assertEquals("Neutral and Material You card tops align", neutral.top, materialYou.top, 1f)
+        assertEquals("Neutral and Material You card heights match", neutral.height, materialYou.height, 1f)
+        assertEquals("Sand and Material You card heights match", sand.height, materialYou.height, 1f)
+
+        val all = compose.onNode(hasText("All workspaces") and isSelectable()).performScrollTo().fetchSemanticsNode().boundsInRoot
+        val workspace = compose.onNode(hasText("Nuanu AI Lab") and isSelectable()).fetchSemanticsNode().boundsInRoot
+        assertEquals("Scope segments sit side by side on one row", all.top, workspace.top, 1f)
+        assertEquals("Scope segments share height on one row", all.height, workspace.height, 1f)
+        assertTrue("Scope segments sit left-to-right", all.right < workspace.left)
+        val maxCompactHeightPx = with(compose.density) { 46f * density }
+        assertTrue("Single-row scope segment stays compact (${all.height}px <= ${maxCompactHeightPx}px)", all.height <= maxCompactHeightPx)
+    }
+
+    // capability: app.themes
+    @Test @Config(qualifiers = "w320dp-h640dp-420dpi")
+    fun workspaceScopeStacksCleanlyOnVeryNarrowScreen() {
+        compose.setContent {
+            SlatrixTheme {
+                LivePreferencesScreen(
+                    dark = false,
+                    darkOverride = null,
+                    theme = AndroidTheme.Neutral,
+                    onColorMode = {},
+                    onTheme = {},
+                    onBack = {},
+                    activeWorkspaceId = "!nuanu:example.org",
+                    activeWorkspaceName = "Nuanu AI Lab",
+                    workspaceTheme = null,
+                    onWorkspaceTheme = { _, _ -> },
+                )
+            }
+        }
+        val all = compose.onNode(hasText("All workspaces") and isSelectable()).performScrollTo().fetchSemanticsNode().boundsInRoot
+        val workspace = compose.onNode(hasText("Nuanu AI Lab") and isSelectable()).fetchSemanticsNode().boundsInRoot
+        assertTrue("Scope stacks vertically below 340dp", workspace.top >= all.bottom)
+    }
+
+    // capability: app.themes
+    @Test fun workspaceScopeStacksCleanlyAtLargeFontScale() {
+        compose.setContent {
+            val baseDensity = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(baseDensity.density, fontScale = 1.5f)) {
+                SlatrixTheme {
+                    LivePreferencesScreen(
+                        dark = false,
+                        darkOverride = null,
+                        theme = AndroidTheme.Neutral,
+                        onColorMode = {},
+                        onTheme = {},
+                        onBack = {},
+                        activeWorkspaceId = "!nuanu:example.org",
+                        activeWorkspaceName = "Nuanu AI Lab",
+                        workspaceTheme = null,
+                        onWorkspaceTheme = { _, _ -> },
+                    )
+                }
+            }
+        }
+        val all = compose.onNode(hasText("All workspaces") and isSelectable()).performScrollTo().fetchSemanticsNode().boundsInRoot
+        val workspace = compose.onNode(hasText("Nuanu AI Lab") and isSelectable()).performScrollTo().fetchSemanticsNode().boundsInRoot
+        assertTrue("Scope stacks vertically at 1.5x font scale", workspace.top >= all.bottom)
+    }
+
     // capability: app.text-size
     @Test fun theTextSizeSliderGrowsMessageTextAndNothingElse() {
         val scale = mutableStateOf(1f)

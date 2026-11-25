@@ -920,6 +920,27 @@ class MatrixRoomsTest {
             rooms.close()
         }
     }
+
+    // capability: home.dms
+    @Test fun directMessagePreviewsSanitizeMarkdownBackticksLinksAndMentions() = runTest {
+        val cyrillicBackticks = TestRoom(roomInfo("!c:example.org", "Alex", direct = true),
+            latest(4_000u, "Запускаю живой план для `revit-work` и **деплой**", own = false))
+        val markdownMention = TestRoom(roomInfo("!m:example.org", "Dmitry", direct = true),
+            latest(3_000u, "[Dmitry Ukhanov](https://matrix.to/#/@dmitry.ukhanov:matrix.org) посмотри [релиз](https://example.org/r)", own = false))
+        val htmlMention = TestRoom(roomInfo("!h:example.org", "Mira", direct = true),
+            latest(2_000u, "[Dmitry Ukhanov](https://matrix.to/#/@dmitry.ukhanov:matrix.org)\n\n`sshd`", own = false,
+                html = "<p><a href=\"https://matrix.to/#/@dmitry.ukhanov:matrix.org\">Dmitry Ukhanov</a></p><p><code>sshd</code></p>"))
+        val reply = TestRoom(roomInfo("!r:example.org", "Sam", direct = true),
+            latest(1_000u, "> <@bob:example.org> Old line\n\nNew `fix_1` ready", own = true))
+        val rooms = MatrixRooms(backgroundScope, RoomsClient(listOf(cyrillicBackticks, markdownMention, htmlMention, reply)))
+        val state = rooms.state.first { !it.loading }
+        val previews = state.rooms.associate { it.name to it.latest?.body }
+        assertEquals("Запускаю живой план для revit-work и деплой", previews["Alex"])
+        assertEquals("@Dmitry Ukhanov посмотри релиз", previews["Dmitry"])
+        assertEquals("@Dmitry Ukhanov sshd", previews["Mira"])
+        assertEquals("New fix_1 ready", previews["Sam"])
+        rooms.close()
+    }
 }
 
 // About three times the 14–38 ms measured locally; rebuilding the whole list per message took 400–750 ms.
@@ -1121,11 +1142,12 @@ internal fun roomInfo(
     privilegedCreatorsRole = false,
 )
 
-private fun latest(timestamp: ULong, body: String, own: Boolean) = LatestEventValue.Remote(
+private fun latest(timestamp: ULong, body: String, own: Boolean, html: String? = null) = LatestEventValue.Remote(
     timestamp = timestamp, sender = "@sam:example.org", isOwn = own,
     profile = ProfileDetails.Ready("Sam", false, null, null, null),
     content = TimelineItemContent.MsgLike(MsgLikeContent(
-        MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent(body, null)), body, false, null)),
+        MsgLikeKind.Message(MessageContent(
+            MessageType.Text(TextMessageContent(body, html?.let { FormattedBody(MessageFormat.Html, it) })), body, false, null)),
         null, null, null,
     )),
 )

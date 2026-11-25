@@ -98,6 +98,14 @@ class SlatrixThemeTest {
                     val outMentionYouBg = onFill.mentionYouFill.compositeOver(colors.accentFill)
                     assertTrue("$tag outgoing @room/@you mention contrast=${contrast(onFill.mentionYouText, outMentionYouBg)}",
                         contrast(onFill.mentionYouText, outMentionYouBg) >= 4.5f)
+                    val inCodeBg = colors.inlineCode.compositeOver(colors.bubbleIn)
+                    assertTrue("$tag incoming inlineCode contrast=${contrast(colors.textBody, inCodeBg)}",
+                        contrast(colors.textBody, inCodeBg) >= 4.5f)
+                    val outCodeBg = onFill.inlineCode.compositeOver(colors.accentFill)
+                    assertTrue("$tag outgoing inlineCode contrast=${contrast(onFill.textBody, outCodeBg)}",
+                        contrast(onFill.textBody, outCodeBg) >= 4.5f)
+                    assertTrue("$tag outgoing inlineCode stays at least as legible as accentFill",
+                        contrast(onFill.textBody, outCodeBg) >= contrast(colors.onAccent, colors.accentFill) - 0.01f)
                     assertTrue("$tag destructive/canvas", contrast(colors.destructive, colors.canvas) >= 4.5f)
                     val chipBg = colors.dateChip.compositeOver(colors.wallpaper)
                     assertTrue("$tag onDateChip/dateChip", contrast(colors.onDateChip, chipBg) >= 4.5f)

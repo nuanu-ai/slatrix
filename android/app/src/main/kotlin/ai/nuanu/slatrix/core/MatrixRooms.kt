@@ -34,8 +34,12 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.matrix.rustcomponents.sdk.Client
 import org.matrix.rustcomponents.sdk.TypingNotificationsListener
+import org.matrix.rustcomponents.sdk.FormattedBody
 import org.matrix.rustcomponents.sdk.JoinRule
 import org.matrix.rustcomponents.sdk.LatestEventValue
+import org.matrix.rustcomponents.sdk.MessageContent
+import org.matrix.rustcomponents.sdk.MessageFormat
+import org.matrix.rustcomponents.sdk.MessageType
 import org.matrix.rustcomponents.sdk.MsgLikeKind
 import org.matrix.rustcomponents.sdk.NotificationProcessSetup
 import org.matrix.rustcomponents.sdk.NotificationStatus
@@ -698,13 +702,164 @@ class MatrixRooms(scope: CoroutineScope, internal val client: Client, private va
 private val RoomListServiceState.hasResponse: Boolean
     get() = this == RoomListServiceState.SETTING_UP || this == RoomListServiceState.RECOVERING || this == RoomListServiceState.RUNNING
 
-/** A message's text for a one-line preview; null when there is nothing to show, such as a membership change. */
-internal fun previewText(content: TimelineItemContent): String? =
+/** A message's text for a preview; null when there is nothing to show, such as a membership change. */
+internal fun previewText(content: TimelineItemContent, singleLine: Boolean = true): String? =
     when (val kind = (content as? TimelineItemContent.MsgLike)?.content?.kind) {
-        is MsgLikeKind.Message -> kind.content.body
+        is MsgLikeKind.Message -> messagePreviewText(kind.content, singleLine)
         is MsgLikeKind.Sticker -> kind.body
         is MsgLikeKind.Poll -> kind.question
         is MsgLikeKind.Redacted -> "This message was deleted"
         is MsgLikeKind.UnableToDecrypt -> "Waiting for this message"
         else -> null
     }
+
+private fun messagePreviewText(content: MessageContent, singleLine: Boolean): String {
+    fun html(formatted: FormattedBody?) = formatted?.takeIf { it.format is MessageFormat.Html }?.body
+    return when (val type = content.msgType) {
+        is MessageType.Text -> sanitizePreviewText(content.body, html(type.content.formatted), singleLine)
+        is MessageType.Notice -> sanitizePreviewText(content.body, html(type.content.formatted), singleLine)
+        is MessageType.Emote -> sanitizePreviewText(content.body, html(type.content.formatted), singleLine)
+        is MessageType.Image -> type.content.caption?.let { sanitizePreviewText(it, html(type.content.formattedCaption), singleLine) } ?: type.content.filename
+        is MessageType.Video -> type.content.caption?.let { sanitizePreviewText(it, html(type.content.formattedCaption), singleLine) } ?: type.content.filename
+        is MessageType.Audio -> type.content.caption?.let { sanitizePreviewText(it, html(type.content.formattedCaption), singleLine) } ?: type.content.filename
+        is MessageType.File -> type.content.caption?.let { sanitizePreviewText(it, html(type.content.formattedCaption), singleLine) } ?: type.content.filename
+        else -> sanitizePreviewText(content.body, null, singleLine)
+    }
+}
+
+private val QUOTE_PREFIX = Regex("""^(\s*>\s?)+""")
+private val HEADING_PREFIX = Regex("""^#{1,6}\s+""")
+private val MARKDOWN_LINK = Regex("""!?\[([^\[\]]*)]\(<?((?:https?|matrix|mailto):[^\s<>()]*(?:\([^\s<>()]*\)[^\s<>()]*)*)>?(?:\s+"[^"]*")?\)""")
+private val BARE_MATRIX_USER_URL = Regex("""(?:https://matrix\.to/#/(?:@|%40)|matrix:u/)[^\s<>()]+""", RegexOption.IGNORE_CASE)
+private val INLINE_MARKERS = listOf(
+    Regex("""\*\*(.+?)\*\*"""),
+    Regex("""__(.+?)__"""),
+    Regex("""~~(.+?)~~"""),
+    Regex("""(?<![\p{L}\p{N}*])\*(?!\s)(.+?)(?<!\s)\*(?![\p{L}\p{N}*])"""),
+    Regex("""(?<![\p{L}\p{N}_])_(?!\s)(.+?)(?<!\s)_(?![\p{L}\p{N}_])"""),
+)
+private val WHITESPACE_RUN = Regex("""\s+""")
+private val HORIZONTAL_SPACE = Regex("""[ \t]+""")
+
+/** Turns a message's HTML or Markdown body into clean human-readable preview text without raw markup or matrix.to URLs. */
+internal fun sanitizePreviewText(body: String, html: String?, singleLine: Boolean = true): String {
+    val raw = if (!html.isNullOrBlank()) {
+        // Pre-sanitize the plain fallback so unsupported HTML tags still yield clean Markdown-free preview text.
+        val fallback = stripMarkdown(body)
+        MessageBodyRenderer.render(fallback, html).joinToString("") { run ->
+            when {
+                run.mention != null || MessageTextStyle.Code in run.styles -> run.text
+                else -> scrubMarkdownLinks(run.text)
+            }
+        }
+    } else {
+        stripMarkdown(body)
+    }
+    return normalizePreviewWhitespace(raw, singleLine).ifEmpty {
+        normalizePreviewWhitespace(scrubMarkdownLinks(body), singleLine)
+    }
+}
+
+private fun stripMarkdown(body: String): String {
+    val withoutReply = dropReplyFallback(body)
+    val lines = withoutReply.split('\n')
+        .filterNot { val trimmed = it.trimStart(); trimmed.startsWith("```") || trimmed.startsWith("~~~") }
+        .joinToString("\n") { line ->
+            line.replace(QUOTE_PREFIX, "").replace(HEADING_PREFIX, "")
+        }
+    return unwrapInlineCode(lines)
+}
+
+private fun dropReplyFallback(body: String): String {
+    val lines = body.split('\n')
+    val firstNonQuote = lines.indexOfFirst { !it.startsWith(">") }
+    return if (lines.firstOrNull()?.startsWith("> <") == true &&
+        firstNonQuote >= 0 && lines[firstNonQuote].isEmpty() && firstNonQuote + 1 < lines.size
+    ) {
+        lines.drop(firstNonQuote + 1).joinToString("\n")
+    } else {
+        body
+    }
+}
+
+/** Strips matched backtick code delimiters while applying Markdown formatting cleanup only outside code spans. */
+private fun unwrapInlineCode(text: String): String {
+    val out = StringBuilder(text.length)
+    var plainStart = 0
+    var i = 0
+    while (i < text.length) {
+        if (text[i] != '`') {
+            i++
+            continue
+        }
+        var ticks = 0
+        while (i + ticks < text.length && text[i + ticks] == '`') ticks++
+        val close = findClosingBackticks(text, i + ticks, ticks)
+        if (close >= 0) {
+            if (i > plainStart) out.append(scrubPlainMarkdown(text.substring(plainStart, i)))
+            val inner = text.substring(i + ticks, close)
+            val stripped = if (ticks > 1 && inner.length >= 2 && inner.startsWith(' ') && inner.endsWith(' ') && inner.isNotBlank()) {
+                inner.substring(1, inner.length - 1)
+            } else inner
+            out.append(stripped)
+            i = close + ticks
+            plainStart = i
+        } else {
+            i += ticks
+        }
+    }
+    if (plainStart < text.length) out.append(scrubPlainMarkdown(text.substring(plainStart)))
+    return out.toString()
+}
+
+private fun findClosingBackticks(text: String, from: Int, count: Int): Int {
+    var i = from
+    while (i < text.length) {
+        if (text[i] != '`') {
+            i++
+            continue
+        }
+        var run = 0
+        while (i + run < text.length && text[i + run] == '`') run++
+        if (run == count) return i
+        i += run
+    }
+    return -1
+}
+
+private fun scrubPlainMarkdown(text: String): String {
+    val linksCleaned = scrubMarkdownLinks(text)
+    return INLINE_MARKERS.fold(linksCleaned) { current, marker ->
+        marker.replace(current) { it.groupValues[1] }
+    }
+}
+
+private fun scrubMarkdownLinks(text: String): String {
+    val withoutLinks = MARKDOWN_LINK.replace(text) { match ->
+        val label = match.groupValues[1].trim()
+        val url = match.groupValues[2]
+        val userId = ComposerFormat.mentionedUser(url)
+        when {
+            userId != null -> {
+                val shown = if (label.isEmpty() || label == userId) DisplayNames.localpart(userId) else label.trimStart('@')
+                "@$shown"
+            }
+            label.isNotEmpty() -> label
+            else -> ""
+        }
+    }
+    val withoutBareMatrixUrls = BARE_MATRIX_USER_URL.replace(withoutLinks) { match ->
+        val full = match.value
+        val candidate = full.trimEnd('.', ',', ';', ':', '!', '?', ']')
+        val suffix = full.substring(candidate.length)
+        val userId = ComposerFormat.mentionedUser(candidate)
+        if (userId != null) "@${DisplayNames.localpart(userId)}$suffix" else full
+    }
+    return DisplayNames.mentions(withoutBareMatrixUrls, emptyMap())
+}
+
+private fun normalizePreviewWhitespace(text: String, singleLine: Boolean): String = if (singleLine) {
+    text.replace(WHITESPACE_RUN, " ").trim()
+} else {
+    text.lines().map { it.replace(HORIZONTAL_SPACE, " ").trim() }.filter { it.isNotEmpty() }.joinToString("\n")
+}

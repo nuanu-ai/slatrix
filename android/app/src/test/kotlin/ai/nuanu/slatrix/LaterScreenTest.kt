@@ -8,6 +8,9 @@ import ai.nuanu.slatrix.core.SavedPreview
 import ai.nuanu.slatrix.core.UnreadBadge
 import ai.nuanu.slatrix.ui.account.LaterActions
 import ai.nuanu.slatrix.ui.account.LaterScreen
+import ai.nuanu.slatrix.ui.account.timeLabel
+import java.time.LocalDate
+import java.time.ZoneId
 import ai.nuanu.slatrix.core.LaterState
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -64,17 +67,64 @@ class LaterScreenTest {
 
     // capability: message.save
     @Config(qualifiers = "w320dp-h704dp-xxxhdpi")
-    @Test fun onANarrowPhoneTheSendersNameKeepsItsRoomAndTheTimeGivesWay() {
-        val name = "Alexandra Whitfield"
+    @Test fun onANarrowPhoneTheTimestampStaysUntruncatedBesideALongSenderName() {
+        val zone = ZoneId.systemDefault()
+        val now = LocalDate.of(2026, 11, 25).atTime(15, 0).atZone(zone).toInstant().toEpochMilli()
+        val yesterday = LocalDate.of(2026, 11, 24).atTime(14, 24).atZone(zone).toInstant().toEpochMilli()
+        val expectedTime = "Yesterday, ${timeLabel(yesterday)}"
+        val name = "Alexandra Whitfield-Montgomery"
         compose.setContent {
             SlatrixTheme {
                 LaterScreen(SavedList(listOf(SavedMessage("!design:example.org", "\$one", 1_000))), rooms,
-                    { SavedPreview("@alexandra:example.org", name, "Ship it on Thursday", 1_700_000_000_000L) }, LaterActions({}))
+                    { SavedPreview("@alexandra:example.org", name, "Ship it on Thursday", yesterday) }, LaterActions({}), now = { now })
             }
         }
-        val layouts = mutableListOf<TextLayoutResult>()
-        compose.onNodeWithText(name, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
-        assertFalse(layouts.single().isLineEllipsized(0))
+        val timeLayouts = mutableListOf<TextLayoutResult>()
+        compose.onNodeWithText(expectedTime, useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(timeLayouts) }
+        val timeLayout = timeLayouts.single()
+        assertFalse("Timestamp '$expectedTime' ellipsized", timeLayout.isLineEllipsized(0))
+        assertFalse("Timestamp '$expectedTime' overflowed vertically", timeLayout.didOverflowHeight)
+        assertEquals("Timestamp '$expectedTime' fits all characters on line 0", expectedTime.length, timeLayout.getLineEnd(0, visibleEnd = true))
+        assertTrue(
+            "Timestamp '$expectedTime' lineRight (${timeLayout.getLineRight(0)}) fits inside width (${timeLayout.size.width})",
+            timeLayout.getLineRight(0) <= timeLayout.size.width.toFloat(),
+        )
+    }
+
+    // capability: message.save
+    @Test fun laterShowsConciseDatesWithoutTruncatingBesideSenderName() {
+        val zone = ZoneId.systemDefault()
+        val now = LocalDate.of(2026, 11, 25).atTime(15, 0).atZone(zone).toInstant().toEpochMilli()
+        val yesterday = LocalDate.of(2026, 11, 24).atTime(14, 24).atZone(zone).toInstant().toEpochMilli()
+        val earlier = LocalDate.of(2026, 11, 23).atTime(9, 15).atZone(zone).toInstant().toEpochMilli()
+        val saved = SavedList(listOf(
+            SavedMessage("!design:example.org", "\$y", 2_000),
+            SavedMessage("!design:example.org", "\$e", 1_000),
+        ))
+        val previews = mapOf(
+            "\$y" to SavedPreview("@dmitry:example.org", "Dmitry Ukhanov", "Yesterday's note", yesterday),
+            "\$e" to SavedPreview("@dmitry:example.org", "Dmitry Ukhanov", "Earlier note", earlier),
+        )
+        compose.setContent {
+            SlatrixTheme {
+                LaterScreen(saved, rooms, { previews[it.eventId] }, LaterActions({}), now = { now })
+            }
+        }
+        val yesterdayLabel = "Yesterday, ${timeLabel(yesterday)}"
+        for (label in listOf(yesterdayLabel, "Nov 23")) {
+            val layouts = mutableListOf<TextLayoutResult>()
+            compose.onNodeWithText(label, useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            val result = layouts.single()
+            assertFalse("'$label' ellipsized", result.isLineEllipsized(0))
+            assertFalse("'$label' overflowed vertically", result.didOverflowHeight)
+            assertEquals("'$label' fits all characters on line 0", label.length, result.getLineEnd(0, visibleEnd = true))
+            assertTrue(
+                "'$label' lineRight (${result.getLineRight(0)}) fits inside width (${result.size.width})",
+                result.getLineRight(0) <= result.size.width.toFloat(),
+            )
+        }
     }
 
     // capability: message.save

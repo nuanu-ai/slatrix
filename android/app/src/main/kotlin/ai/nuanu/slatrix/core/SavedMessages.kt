@@ -349,7 +349,7 @@ class MatrixSaved(private val client: Client) {
                 )).use { timeline ->
                     val event = timeline.getEventTimelineItemByEventId(saved.eventId)
                     if ((event.eventOrTransactionId as? EventOrTransactionId.EventId)?.eventId != saved.eventId) return@use null
-                    val body = previewText(event.content) ?: return@use null
+                    val body = previewText(event.content, singleLine = false) ?: return@use null
                     val profile = event.senderProfile as? ProfileDetails.Ready
                     SavedPreview(event.sender, event.senderProfile.nameOf(event.sender),
                         body, event.timestamp.coerceAtMost(Long.MAX_VALUE.toULong()).toLong(), profile?.avatarUrl)
