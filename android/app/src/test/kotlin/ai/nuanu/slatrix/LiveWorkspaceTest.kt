@@ -12,7 +12,20 @@ import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.ui.account.LiveHomeScreen
 import ai.nuanu.slatrix.ui.account.LiveChannelScreen
+import ai.nuanu.slatrix.ui.designsystem.LocalGlassActive
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
+import ai.nuanu.slatrix.ui.designsystem.glass
+import ai.nuanu.slatrix.ui.designsystem.glassBar
+import ai.nuanu.slatrix.ui.designsystem.glassSource
+import ai.nuanu.slatrix.ui.designsystem.rememberGlass
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import dev.chrisbanes.haze.HazeState
+import org.junit.Assert.assertTrue
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasContentDescription
@@ -342,5 +355,93 @@ class LiveWorkspaceTest {
         compose.onNodeWithText("Home").assertIsDisplayed()
         compose.runOnIdle { open.value = true }
         compose.onNodeWithText("Marker: fresh").assertIsDisplayed()
+    }
+
+    @Test fun coveredAndExitingPagesDisableLiveGlassWhileTopPageKeepsItActive() {
+        val stack = mutableStateOf(emptyList<String>())
+        var homeGlass = false
+        var channelGlass = false
+        var threadGlass = false
+        compose.setContent {
+            SlatrixTheme {
+                LiveWorkspace(stack.value.map { key ->
+                    WorkspaceCover(key) {
+                        when (key) {
+                            // Nested LiveWorkspace inside Channel must inherit inactive glass when Channel is covered by Thread.
+                            "channel" -> LiveWorkspace(emptyList()) {
+                                channelGlass = LocalGlassActive.current
+                                Text("Channel")
+                            }
+                            else -> {
+                                threadGlass = LocalGlassActive.current
+                                Text("Thread")
+                            }
+                        }
+                    }
+                }) {
+                    homeGlass = LocalGlassActive.current
+                    Text("Home")
+                }
+            }
+        }
+        compose.waitForIdle()
+        assertTrue("Home has active glass while uncovered", homeGlass)
+
+        compose.runOnIdle { stack.value = listOf("channel") }
+        compose.waitForIdle()
+        assertFalse("Home disables glass when covered by a channel", homeGlass)
+        assertTrue("Top channel has active glass", channelGlass)
+
+        compose.runOnIdle { stack.value = listOf("channel", "thread") }
+        compose.waitForIdle()
+        assertFalse("Home keeps glass disabled at depth 2", homeGlass)
+        assertFalse("Covered channel (and its nested workspace) disables glass", channelGlass)
+        assertTrue("Top thread has active glass", threadGlass)
+
+        // Mid-pop exit: the sliding-out thread disables live glass immediately while the revealed channel turns it back on.
+        compose.mainClock.autoAdvance = false
+        compose.runOnUiThread { stack.value = listOf("channel"); Snapshot.sendApplyNotifications() }
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeByFrame()
+        assertFalse("Exiting thread disables live glass immediately during slide-out", threadGlass)
+        assertTrue("Revealed channel activates live glass", channelGlass)
+        assertFalse("Home remains covered with glass disabled", homeGlass)
+        compose.mainClock.advanceTimeBy(1_000)
+        assertTrue(channelGlass)
+    }
+
+    @Test fun inactiveGlassSkipsHazeSourceAndEffectRegistrations() {
+        val active = mutableStateOf(true)
+        lateinit var glassState: HazeState
+        var barModifier: Modifier = Modifier
+        var capsuleModifier: Modifier = Modifier
+        fun Modifier.hasHazeEffect() = foldIn(false) { acc, element ->
+            acc || element.javaClass.name.startsWith("dev.chrisbanes.haze.")
+        }
+        compose.setContent {
+            SlatrixTheme {
+                CompositionLocalProvider(LocalGlassActive provides active.value) {
+                    val glass = rememberGlass()
+                    glassState = glass
+                    barModifier = Modifier.size(48.dp).glassBar(glass)
+                    capsuleModifier = Modifier.size(48.dp).glass(glass, SlatrixTheme.colors.glass, CircleShape)
+                    Box(Modifier.fillMaxSize()) {
+                        Box(Modifier.fillMaxSize().glassSource(glass))
+                        Box(barModifier)
+                        Box(capsuleModifier)
+                    }
+                }
+            }
+        }
+        compose.waitForIdle()
+        assertTrue("Active glass registers its Haze source area", glassState.areas.isNotEmpty())
+        assertTrue("Active glassBar attaches Haze effect", barModifier.hasHazeEffect())
+        assertTrue("Active glass attaches Haze effect", capsuleModifier.hasHazeEffect())
+
+        compose.runOnIdle { active.value = false }
+        compose.waitForIdle()
+        assertTrue("Inactive glass unregisters Haze areas", glassState.areas.isEmpty())
+        assertFalse("Inactive glassBar falls back to translucent tint without Haze effect", barModifier.hasHazeEffect())
+        assertFalse("Inactive glass falls back to translucent tint without Haze effect", capsuleModifier.hasHazeEffect())
     }
 }

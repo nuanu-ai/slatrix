@@ -1,8 +1,10 @@
 package ai.nuanu.slatrix.ui.designsystem
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
@@ -26,11 +28,18 @@ import dev.chrisbanes.haze.hazeEffect
 import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.rememberHazeState
 
+/**
+ * Whether frosted glass runs live backdrop blur in this subtree. Covered and sliding-out pages set this to `false` so
+ * overlapping pages fall back to a translucent solid tint instead of stacking GPU blur passes during transitions.
+ */
+val LocalGlassActive = compositionLocalOf { true }
+
 /** What a [glass] surface blurs: mark it with [glassSource], and keep the glass outside it. */
 @Composable
 fun rememberGlass(): HazeState = rememberHazeState()
 
-fun Modifier.glassSource(state: HazeState): Modifier = hazeSource(state)
+@Composable
+fun Modifier.glassSource(state: HazeState): Modifier = if (LocalGlassActive.current) hazeSource(state) else this
 
 /**
  * Frosted glass: what scrolls beneath, blurred and washed with [tint], inside [shape] with a hairline edge. With
@@ -39,9 +48,14 @@ fun Modifier.glassSource(state: HazeState): Modifier = hazeSource(state)
 @Composable
 fun Modifier.glass(state: HazeState, tint: Color, shape: Shape, lifted: Boolean = false): Modifier {
     val colors = SlatrixTheme.colors
+    val fill = if (LocalGlassActive.current) {
+        Modifier.hazeEffect(state, HazeStyle(backgroundColor = colors.canvas, tint = HazeTint(tint), blurRadius = UiMetrics.GlassBlur, noiseFactor = 0f))
+    } else {
+        Modifier.background(tint)
+    }
     return (if (lifted) shadow(UiMetrics.GlassLift, shape, ambientColor = colors.glassShadow, spotColor = colors.glassShadow) else this)
         .clip(shape)
-        .hazeEffect(state, HazeStyle(backgroundColor = colors.canvas, tint = HazeTint(tint), blurRadius = UiMetrics.GlassBlur, noiseFactor = 0f))
+        .then(fill)
         .border(UiMetrics.Hairline, colors.glassEdge, shape)
 }
 
@@ -49,8 +63,13 @@ fun Modifier.glass(state: HazeState, tint: Color, shape: Shape, lifted: Boolean 
 @Composable
 fun Modifier.glassBar(state: HazeState, atFoot: Boolean = false): Modifier {
     val colors = SlatrixTheme.colors
-    return hazeEffect(state, HazeStyle(backgroundColor = colors.canvas, tint = HazeTint(colors.glassHeader), blurRadius = UiMetrics.GlassBlur,
-        noiseFactor = 0f)).drawWithContent {
+    val fill = if (LocalGlassActive.current) {
+        Modifier.hazeEffect(state, HazeStyle(backgroundColor = colors.canvas, tint = HazeTint(colors.glassHeader), blurRadius = UiMetrics.GlassBlur,
+            noiseFactor = 0f))
+    } else {
+        Modifier.background(colors.glassHeader)
+    }
+    return then(fill).drawWithContent {
         drawContent()
         val y = if (atFoot) 0f else size.height
         drawLine(colors.glassEdge, Offset(0f, y), Offset(size.width, y), UiMetrics.Hairline.toPx())
