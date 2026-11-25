@@ -4,6 +4,7 @@ import ai.nuanu.slatrix.core.ComposerState
 import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.ConversationState
 import ai.nuanu.slatrix.core.DayDivider
+import ai.nuanu.slatrix.core.MessageAttachment
 import ai.nuanu.slatrix.core.MessageKind
 import ai.nuanu.slatrix.core.MessageSendState
 import ai.nuanu.slatrix.core.MessageThread
@@ -272,7 +273,7 @@ class LiveChannelScreenTest {
         assertTrue("The message left its place: $first ${sharp.first()}..${sharp.last()} $sheet", first.bottom.toInt() !in sharp)
     }
 
-    private fun drawn(text: String): Boolean {
+    private fun drawn(text: String, expectedColor: Int = bubble): Boolean {
         // The text alone, inside its bubble: a plain wallpaper can outnumber a short bubble across its whole row.
         val bounds = compose.onNodeWithText(text, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val image = compose.runOnIdle {
@@ -282,7 +283,7 @@ class LiveChannelScreenTest {
         val colors = mutableListOf<Int>()
         for (x in bounds.left.toInt() until bounds.right.toInt().coerceAtMost(image.width))
             for (y in bounds.top.toInt() until bounds.bottom.toInt().coerceAtMost(image.height)) colors += image.getPixel(x, y)
-        return colors.groupingBy { it }.eachCount().maxBy { it.value }.key == bubble
+        return colors.groupingBy { it }.eachCount().maxBy { it.value }.key == expectedColor
     }
 
     @Test fun aPageThatLandsWithinAFrameAsksAgainWhileTheTopIsNear() {
@@ -958,6 +959,145 @@ class LiveChannelScreenTest {
         // At 320 dp theirs leaves a narrow gutter, as Telegram's do, not the room a wide phone gives it.
         assertTrue("Theirs reaches past 87% of the width, ending at ${theirs.right}", theirs.right >= width * 0.87f)
         assertTrue("Mine starts within the first 20%, at ${mine.left}", mine.left <= width * 0.2f)
+    }
+
+    @Test fun initialLoadAndBackwardHistoryPagingAppearAtFullOpacityWhileLiveArrivalsFadeIn() {
+        val state = mutableStateOf(ConversationState(emptyList(), loading = true, hasMore = true))
+        var accent = 0
+        compose.mainClock.autoAdvance = false
+        compose.setContent {
+            screen = LocalView.current
+            SlatrixTheme {
+                bubble = SlatrixTheme.colors.bubbleIn.toArgb()
+                accent = SlatrixTheme.colors.accentFill.toArgb()
+                LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.mainClock.advanceTimeByFrame()
+
+        val initial = (21..40).map { message("Message $it", minutes = it) }
+        compose.runOnUiThread {
+            state.value = ConversationState(initial, loading = false, hasMore = true)
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeBy(16)
+        assertTrue("Initial page must appear at full opacity without ghost fade-in", drawn("Message 40"))
+
+        compose.mainClock.advanceTimeBy(800)
+        // Scroll to the top of the initial page, then prepend older history.
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(initial.size)
+        compose.mainClock.advanceTimeBy(200)
+        val withHistory = (1..40).map { message("Message $it", minutes = it) }
+        compose.runOnUiThread {
+            state.value = state.value.copy(rows = withHistory, hasMore = false)
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeBy(16)
+        assertTrue("Backward-paged history must appear at full opacity without ghost fade-in", drawn("Message 20"))
+
+        // Return to the newest end and append a live outgoing message (distinct accent bubble color over wallpaper):
+        // live arrivals still fade in smoothly instead of snapping.
+        compose.onNode(hasScrollToIndexAction()).performScrollToIndex(0)
+        compose.mainClock.advanceTimeBy(400)
+        compose.runOnUiThread {
+            state.value = state.value.copy(rows = withHistory + message("Live arrival", minutes = 41, sender = "Jordan"))
+            androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.advanceTimeBy(16)
+        assertFalse("Live new message fades in instead of snapping at 16ms", drawn("Live arrival", accent))
+        compose.mainClock.advanceTimeBy(800)
+        assertTrue("Live new message settles at full opacity", drawn("Live arrival", accent))
+    }
+
+    // capability: conversation.unread-line
+    @Test fun oldestUnreadMessageStartsAtTopWithoutOverscrollingAndShortUnreadChannelStaysAboveComposer() {
+        val tall = (1..25).map { message("Message $it", minutes = it) }
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(tall, loading = false, hasMore = true,
+                    firstUnread = "\$Message 1", startsAtUnread = true), ComposerState(loading = false),
+                    {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onNodeWithText("New").assertIsDisplayed()
+        compose.onNodeWithText("Message 1").assertIsDisplayed()
+        val header = compose.onNodeWithContentDescription("Back").fetchSemanticsNode().boundsInRoot
+        val newLine = compose.onNodeWithText("New").fetchSemanticsNode().boundsInRoot
+        assertTrue("The New line clears the header ($newLine vs $header)", newLine.top >= header.bottom)
+    }
+
+    @Test fun aShortUnreadChannelWithHistoryIndicatorStaysAnchoredAboveTheComposer() {
+        val shortRows = listOf(message("Hello", minutes = 0), message("Unread follow-up", minutes = 1))
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(shortRows, loading = false, hasMore = true,
+                    firstUnread = "\$Hello", startsAtUnread = true), ComposerState(loading = false),
+                    {}, {}, {}, {}, {}, {}, {}, {})
+            }
+        }
+        compose.onNodeWithText("New").assertIsDisplayed()
+        compose.onNodeWithText("Hello").assertIsDisplayed()
+        compose.onNodeWithText("Unread follow-up").assertIsDisplayed()
+        val composerTop = compose.onNodeWithContentDescription("Message #design").getUnclippedBoundsInRoot().top
+        val lastBottom = compose.onNodeWithText("Unread follow-up", useUnmergedTree = true).getUnclippedBoundsInRoot().bottom
+        assertTrue("Short unread channel sits near the composer ($lastBottom vs $composerTop)",
+            composerTop - lastBottom < 64.dp)
+    }
+
+    @Test fun aDeletedMessageShowsPlaceholderAndHidesReactionsQuoteRepliesBarAndAttachment() {
+        val deleted = message("This message was deleted", minutes = 0).copy(
+            kind = MessageKind.Deleted,
+            reactions = listOf(MessageReaction("🤷‍♂️", 1, false, listOf("@sam:example.org"))),
+            replyTo = ReplyPreview("\$parent", ReplyPreview.State.Ready, "Sam", "Quoted parent"),
+            thread = MessageThread(2, "Sam", System.currentTimeMillis() - 3_600_000L),
+            attachment = MessageAttachment(MessageAttachment.Kind.File, "secret.pdf", "application/pdf", 1_024L,
+                null, null, TestMediaSource("mxc://example.org/secret")),
+        )
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(deleted), loading = false, hasMore = false),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, onOpenThread = {})
+            }
+        }
+        compose.onNodeWithText("This message was deleted.").assertIsDisplayed()
+        compose.onNodeWithText("🤷‍♂️", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("Quoted parent", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("2 replies", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("secret.pdf", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    // capability: message.thread-summary
+    @Test fun theThreadRepliesBarShowsConciseRelativeTimeWithoutTruncatingOnNarrowPhones() {
+        RuntimeEnvironment.setQualifiers("w320dp-h704dp-xxhdpi")
+        val now = System.currentTimeMillis()
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(
+                    message("Plan?", minutes = 0).copy(thread = MessageThread(1, "Sam", now - 3_600_000L)),
+                    message("Follow-up", minutes = 1).copy(thread = MessageThread(12, "Mira", now - 25 * 60_000L)),
+                    message("Archive", minutes = 2).copy(thread = MessageThread(3, "Sam", now - 2 * 86_400_000L)),
+                    message("Fresh", minutes = 3).copy(thread = MessageThread(4, "Mira", now - 10_000L)),
+                ), loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, onOpenThread = {})
+            }
+        }
+        fun assertNoEllipsis(label: String) {
+            compose.onNodeWithText(label, useUnmergedTree = true).assertIsDisplayed()
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { action ->
+                    val layouts = mutableListOf<TextLayoutResult>()
+                    action(layouts)
+                    val layout = layouts.single()
+                    assertFalse("Compact reply time '$label' must not truncate on a 320dp phone", layout.isLineEllipsized(0))
+                    assertEquals("All characters of '$label' must be visible", label.length, layout.getLineEnd(0, visibleEnd = true))
+                }
+        }
+        compose.onNodeWithText("1 reply", useUnmergedTree = true).assertIsDisplayed()
+        assertNoEllipsis("1h ago")
+        assertNoEllipsis("25m ago")
+        assertNoEllipsis("2d ago")
+        assertNoEllipsis("Just now")
     }
 
     private fun message(body: String, minutes: Int, sender: String = "Mira", state: MessageSendState = MessageSendState.Sent) =

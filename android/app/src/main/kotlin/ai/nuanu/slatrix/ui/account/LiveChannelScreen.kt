@@ -170,18 +170,31 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     // Where the reader left it: the row at the bottom of the screen and how far it was scrolled, as the Mac anchors a row;
     // null at the newest. Kept while the conversation is left, and restored when its rows still hold that row.
     var place by rememberSaveable { mutableStateOf<Pair<String, Int>?>(null) }
-    val newLine = remember { object { var at: String? = null; var start: String? = null; var decided = false; var back: Pair<String, Int>? = null } }
+    val ready = !state.loading && !state.preview
+    val newLine = remember {
+        object {
+            var at: String? = null
+            var start: String? = null
+            var decided = false
+            var back: Pair<String, Int>? = null
+            var threadTop: String? = null
+        }
+    }
     // Decided as it opens: nothing that arrives while it's open, read as it comes, adds a line.
-    if (!newLine.decided && state.rows.any { it is ConversationMessage && it.eventId != null && it.eventId == state.firstUnread }) {
+    if (!newLine.decided && ready && state.rows.any { it is ConversationMessage && it.eventId != null && it.eventId == state.firstUnread }) {
         newLine.at = state.firstUnread
     }
-    if (!newLine.decided && !state.loading && state.rows.isNotEmpty()) {
+    if (!newLine.decided && ready && state.rows.isNotEmpty()) {
         newLine.decided = true
         newLine.start = newLine.at.takeIf { state.startsAtUnread && state.highlight == null }
         newLine.back = place?.takeIf { (id) -> newLine.start == null && state.highlight == null && state.rows.any { it.id == id } }
+        newLine.threadTop = threadRoot?.takeIf {
+            newLine.start == null && newLine.back == null && state.highlight == null &&
+                state.rows.any { row -> (row as? ConversationMessage)?.eventId == it }
+        }
     }
     val line = newLine.at
-    val opensAt = state.highlight ?: newLine.start ?: newLine.back?.first
+    val opensAt = state.highlight ?: newLine.start ?: newLine.back?.first ?: newLine.threadTop
     fun opens(row: ConversationRow) = row.id == opensAt || (row as? ConversationMessage)?.eventId == opensAt
     var jumped by remember(opensAt, state.jump) { mutableStateOf(opensAt == null) }
     val latest = (state.rows.lastOrNull { it is ConversationMessage && it.eventId != null } as ConversationMessage?)
@@ -194,9 +207,9 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         hadConnection.value = connected
     }
     val read by rememberUpdatedState(onRead)
-    LaunchedEffect(latest?.id, latest?.eventId, latest?.kind, state.ackToken, state.seekingTarget, resumed, jumped, reconnects) {
+    LaunchedEffect(latest?.id, latest?.eventId, latest?.kind, state.ackToken, state.seekingTarget, ready, resumed, jumped, reconnects) {
         val event = latest?.eventId ?: return@LaunchedEffect
-        if (!resumed || !jumped || state.seekingTarget) return@LaunchedEffect
+        if (!resumed || !jumped || !ready || state.seekingTarget) return@LaunchedEffect
         snapshotFlow {
             list.layoutInfo.visibleItemsInfo.any { item ->
                 item.key == latest.id && ReadState.seen(item.offset.toFloat(), (item.offset + item.size).toFloat(),
@@ -218,8 +231,12 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
         }
     }
     LaunchedEffect(newest?.id) {
-        // Not while it opens somewhere else, which scrolls there instead.
-        if (following && jumped && !state.focused) list.scrollToItem(0)
+        // Not while it opens somewhere else, which scrolls there instead; skip when already at index 0 so
+        // scrollToItem never resets LazyColumn's item animator and cancels live arrival animations.
+        if (following && jumped && !state.focused &&
+            (list.firstVisibleItemIndex != 0 || list.firstVisibleItemScrollOffset != 0)) {
+            list.scrollToItem(0)
+        }
     }
     // As on the Mac, what you send brings the conversation to its end and keeps it there, however soon the server
     // confirms it; sent from older messages, once the newest are back.
@@ -234,24 +251,43 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     val highlightAlpha = remember(opensAt, state.jump) { Animatable(0f) }
     LaunchedEffect(opensAt, state.jump) {
         val target = opensAt ?: return@LaunchedEffect
-        val index = snapshotFlow { rows.indexOfLast { it.id == target || (it as? ConversationMessage)?.eventId == target } }.first { it >= 0 }
-        following = false
+        val index = snapshotFlow {
+            val info = list.layoutInfo
+            val visible = info.viewportSize.height - info.beforeContentPadding - info.afterContentPadding
+            if (info.totalItemsCount == rows.size + 2 && visible > 0) {
+                rows.indexOfLast { it.id == target || (it as? ConversationMessage)?.eventId == target }
+            } else -1
+        }.first { it >= 0 }
         try {
             val listIndex = rows.size - index
-            newLine.back?.takeIf { it.first == target }?.let { (_, offset) ->
-                list.scrollToItem(listIndex, offset)
-                return@LaunchedEffect
+            if (state.highlight == null) {
+                newLine.back?.takeIf { it.first == target }?.let { (_, offset) ->
+                    following = false
+                    list.scrollToItem(listIndex, offset)
+                    return@LaunchedEffect
+                }
+                if (target == newLine.start || target == newLine.threadTop) {
+                    // Top-align only when content from target down exceeds the viewport; otherwise Arrangement.Bottom
+                    // already shows everything cleanly above the composer without pulling short lists into blank space.
+                    val info = list.layoutInfo
+                    val visible = info.viewportSize.height - info.beforeContentPadding - info.afterContentPadding
+                    val current = info.visibleItemsInfo.firstOrNull { it.index == listIndex }
+                    if (current == null || current.offset + current.size > visible) {
+                        following = false
+                        list.scrollToItem(listIndex)
+                        val after = list.layoutInfo
+                        val afterVisible = after.viewportSize.height - after.beforeContentPadding - after.afterContentPadding
+                        val placed = after.visibleItemsInfo.firstOrNull { it.index == listIndex }
+                        if (placed != null && afterVisible > 0) {
+                            val delta = placed.offset + placed.size - afterVisible
+                            if (delta != 0) list.scrollBy(delta.toFloat())
+                        }
+                    }
+                    return@LaunchedEffect
+                }
             }
+            following = false
             list.scrollToItem(listIndex)
-            if (target == newLine.start) {
-                // The line tops the screen with the unread messages under it; fewer than a screenful sit at the bottom, and
-                // one message taller than the screen shows from its start.
-                val item = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == listIndex }
-                val info = list.layoutInfo
-                val visible = info.viewportSize.height - info.beforeContentPadding - info.afterContentPadding
-                list.scrollBy(-(visible - (item?.size ?: 0)).toFloat())
-                return@LaunchedEffect
-            }
             // The list is reversed, so the message sits at the bottom; newer ones below lift it a third of the way up.
             list.scrollBy(-list.layoutInfo.viewportSize.height / 3f)
             jumped = true
@@ -363,7 +399,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     val named = !room.direct || room.memberCount > 2
     @Composable
     fun messageRow(row: ConversationMessage, last: Boolean, afterAttachment: Boolean = false, lifted: Boolean = false) {
-        val rowNames = if (row.reactions.isNotEmpty() || row.runs.any { it.mention != null }) state.names else emptyMap()
+        val rowNames = if (row.kind != MessageKind.Deleted && (row.reactions.isNotEmpty() || row.runs.any { it.mention != null })) state.names else emptyMap()
         LiveMessageRow(row, last, afterAttachment, named,
             state.ownUserId, rowNames, actions.onReact, { reacted = it }, onOpenThread.takeIf { threadRoot == null },
             onOpenReplies.takeIf { threadRoot == null }, onOpenMessage, loadPicture, videos, row.id in opening, openFile, { tile -> viewing = row.id to tile }, onPerson,
@@ -414,22 +450,62 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             // first rows. Scrolled away, the newest is off screen and the room would only move what the reader is looking at.
             val jumpRoom = if (state.focused) UiMetrics.Touch + UiMetrics.GapLarge else UiMetrics.GapSmall
             val listPadding = remember(bars, jumpRoom) { bars.deferred(topExtra = UiMetrics.GapSmall, bottomExtra = jumpRoom) }
-            // A thread reads down from its root, as in Slack, so a short one sits at the top, right under the header.
+            val arrivals = remember { ArrivalTracker() }
+            val liveFadeIds = remember(rows, ready, jumped, state.focused, state.loadingHistory) {
+                when {
+                    !ready || !jumped || state.focused -> emptySet()
+                    !arrivals.initialized || arrivals.wasFocused -> emptySet()
+                    rows === arrivals.prevRows -> arrivals.liveIds
+                    arrivals.prevRows.isEmpty() -> {
+                        if (state.loadingHistory) emptySet()
+                        else rows.mapTo(HashSet()) { it.id }
+                    }
+                    else -> {
+                        val prevIds = arrivals.prevIds
+                        val tailAnchor = rows.indexOfLast { it.id in prevIds }
+                        if (tailAnchor < 0) emptySet()
+                        else buildSet {
+                            for (i in (tailAnchor + 1) until rows.size) {
+                                val id = rows[i].id
+                                if (id !in prevIds) add(id)
+                            }
+                        }
+                    }
+                }
+            }
+            SideEffect {
+                if (!ready) {
+                    arrivals.initialized = false
+                    arrivals.wasFocused = false
+                    arrivals.prevRows = emptyList()
+                    arrivals.prevIds = emptySet()
+                    arrivals.liveIds = emptySet()
+                } else if (jumped) {
+                    arrivals.initialized = true
+                    arrivals.wasFocused = state.focused
+                    arrivals.prevRows = rows
+                    arrivals.prevIds = rows.mapTo(HashSet()) { it.id }
+                    arrivals.liveIds = liveFadeIds
+                }
+            }
             // Attach imeNestedScroll only while the IME is open so scrolling down drags the keyboard down 1:1 without
             // initiating phantom inset control requests when the keyboard is already closed.
             val imeVisible = WindowInsets.isImeVisible
             LazyColumn(Modifier.fillMaxSize().then(if (imeVisible) Modifier.imeNestedScroll() else Modifier)
                 .alpha(if (jumped || rows.none(::opens)) 1f else 0f),
                 state = list, reverseLayout = true,
-                verticalArrangement = if (threadRoot != null) Arrangement.Top else Arrangement.Bottom,
+                verticalArrangement = Arrangement.Bottom,
                 contentPadding = listPadding) {
                 // Zero-height bottom anchor keeps index 0 pinned at the newest end when cold-opened replies arrive above it.
                 item(key = "bottom") { Box(Modifier) }
                 // The pressed message hides while its copy lifts over the sheet and glides back down on close.
                 val forward = lifted?.message?.id
                 itemsIndexed(reversed, key = { _, row -> row.id }) { index, row ->
-                    Box(Modifier.animateItem(fadeInSpec = Motion.gentle(), placementSpec = Motion.snappy(), fadeOutSpec = Motion.gentle())
-                        .alpha(if (row.id != forward) 1f else 0f)) {
+                    Box(Modifier.animateItem(
+                        fadeInSpec = if (row.id in liveFadeIds) Motion.gentle() else null,
+                        placementSpec = Motion.snappy(),
+                        fadeOutSpec = Motion.gentle(),
+                    ).alpha(if (row.id != forward) 1f else 0f)) {
                     when (row) {
                         is DayDivider -> DayDividerRow(row.timestamp)
                         is ConversationMessage -> Column(if (lit != null && row.eventId == lit) Modifier.drawBehind {
@@ -502,6 +578,15 @@ private fun LazyListState.atBottom() =
 /** Visible items actually intersecting the viewport, excluding extra items kept off-screen by `animateItem`. */
 private fun LazyListLayoutInfo.inViewport() =
     visibleItemsInfo.filter { it.offset < viewportEndOffset && (it.size == 0 || it.offset + it.size > viewportStartOffset) }
+
+/** Tracks live arrivals so only new messages fade in while initial loads and backward history pages appear solid. */
+private class ArrivalTracker {
+    var initialized = false
+    var wasFocused = false
+    var prevRows: List<ConversationRow> = emptyList()
+    var prevIds: Set<String> = emptySet()
+    var liveIds: Set<String> = emptySet()
+}
 
 /** A long-pressed message, as its row showed it, and where its top was in the window. */
 private data class Pressed(val message: ConversationMessage, val last: Boolean, val afterAttachment: Boolean, val y: Float)
@@ -681,6 +766,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, aft
     onMenu: (y: Float) -> Unit) {
     val colors = SlatrixTheme.colors
     val failed = message.sendState == MessageSendState.Failed
+    val deleted = message.kind == MessageKind.Deleted
     val own = message.own
     // Kept out of state, so moving never recomposes the row.
     val place = remember { object { var y = 0f } }
@@ -694,7 +780,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, aft
     val reach = with(LocalDensity.current) { UiMetrics.Swipe.toPx() }
     val context = LocalContext.current
     val swipes = rememberCoroutineScope()
-    val reply = onReply?.takeIf { message.eventId != null && !failed }
+    val reply = onReply?.takeIf { message.eventId != null && !failed && !deleted }
     Box(Modifier.fillMaxWidth().onGloballyPositioned { place.y = it.positionInWindow().y }
         .then(if (reply == null) Modifier else Modifier.pointerInput(message, reply) {
         var past = false
@@ -765,7 +851,8 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, aft
         val bubble = @Composable {
             val fill = SlatrixTheme.colors
             Box(Modifier.weight(1f, fill = false).then(if (lifted) Modifier.lift(shape) else Modifier).bubble(shape, fill.bubbleIn, if (own) fill.bubbleIn.copy(alpha = 0f) else fill.bubbleEdge)) {
-            val attachment = message.attachment
+            val attachment = message.attachment.takeUnless { deleted }
+            val replyTo = message.replyTo.takeUnless { deleted }
             // A picture or video runs to the bubble's edge with its time on it, as in a messenger; the rest keeps the text's inset.
             val media = attachment?.kind == MessageAttachment.Kind.Image || attachment?.kind == MessageAttachment.Kind.Video
             val inset = if (media) Modifier.padding(horizontal = UiMetrics.BubbleInset - UiMetrics.GapTiny) else Modifier
@@ -790,7 +877,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, aft
                 val header = !own && !message.grouped && named
                 if (header) Text(message.senderName, inset.clickable(role = Role.Button) { onPerson(message.senderId) },
                     style = MaterialTheme.typography.labelLarge, color = fill.person(message.colorIndex), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                message.replyTo?.let { reply -> Box(inset) {
+                replyTo?.let { reply -> Box(inset) {
                     // A copy of a thread reply names its thread, and turns out an ordinary quote if its reply isn't in one.
                     var origin by remember(message.id) { mutableStateOf<ThreadOrigin?>(null) }
                     var notInThread by remember(message.id) { mutableStateOf(false) }
@@ -803,7 +890,7 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, aft
                 } }
                 attachment?.let { Box(when {
                     !media -> Modifier.padding(vertical = UiMetrics.GapTiny)
-                    header || message.replyTo != null -> Modifier.padding(top = UiMetrics.GapTiny)
+                    header || replyTo != null -> Modifier.padding(top = UiMetrics.GapTiny)
                     else -> Modifier
                 }) {
                     Attachment(it, loadPicture, videos, opening, { onOpenFile(message) }, ::menu, onView)
@@ -813,18 +900,18 @@ private fun LiveMessageRow(message: ConversationMessage, lastOfRun: Boolean, aft
                 // Without a caption a file's time closes it, at its end.
                 if (body != null) TimedBody(body, if (media) inset.padding(vertical = UiMetrics.GapTiny) else Modifier) { time(timeColor) }
                 else if (!media) TimedBody(null, Modifier.align(Alignment.End)) { time(timeColor) }
-                if (message.reactions.isNotEmpty()) Box(inset) {
+                if (!deleted && message.reactions.isNotEmpty()) Box(inset) {
                     Reactions(message.reactions, me, names, onReact?.let { react -> { key: String -> react(message, key) } }) { onShowReactions(message) }
                 }
                 val root = message.eventId
                 // Inside a thread the root's replies bar says it instead.
-                val thread = message.shownThread?.takeIf { it.replies > 0 }
+                val thread = message.shownThread?.takeIf { !deleted && it.replies > 0 }
                 if (thread != null && root != null && onOpenReplies != null) {
                     Box(inset) { ThreadReplies(thread) { onOpenReplies(root, thread.replies) } }
                 }
             }
             // In the bubble's bottom padding, so the bar comes and goes without moving anything.
-            message.uploadProgress?.let {
+            if (!deleted) message.uploadProgress?.let {
                 Box(Modifier.matchParentSize().padding(start = UiMetrics.BubbleInset, end = UiMetrics.BubbleInset, bottom = UiMetrics.GapTiny),
                     contentAlignment = Alignment.BottomStart) {
                     LinearProgressIndicator({ it }, Modifier.fillMaxWidth().height(UiMetrics.GapTiny))

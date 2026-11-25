@@ -206,7 +206,7 @@ class MessageContentTest {
     @Test fun aThreadRootShowsItsRepliesAndOpensTheThread() {
         show(message("Plan?").copy(thread = MessageThread(3, "Sam Okafor", System.currentTimeMillis() - 2 * 3_600_000L)))
         compose.onNodeWithText("3 replies", useUnmergedTree = true).assertIsDisplayed()
-        compose.onNodeWithText("Last reply 2 hours ago", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("2h ago", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithText("3 replies", useUnmergedTree = true).performClick()
         compose.runOnIdle { assertEquals("\$Plan?", thread) }
     }

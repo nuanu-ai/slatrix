@@ -21,6 +21,7 @@ import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.BottomSheet
 import ai.nuanu.slatrix.ui.designsystem.MenuItem
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
+import ai.nuanu.slatrix.ui.designsystem.LocalGlassActive
 import ai.nuanu.slatrix.ui.designsystem.glass
 import ai.nuanu.slatrix.ui.designsystem.tabFit
 import ai.nuanu.slatrix.ui.designsystem.glassSource
@@ -278,8 +279,10 @@ fun LiveWorkspace(covers: List<WorkspaceCover>, home: @Composable () -> Unit) {
                 Box(Modifier.fillMaxSize().then(modifier)) {
                     // Single composition branch keeps subtrees alive across depth and exit transitions; Home inherits outer coordinator.
                     val backCoordinator = if (index == 0) LocalBackProgress.current else coordinator.takeIf { depth == 0 }
-                    Covered(leaving != null || depth > 0) {
-                        CompositionLocalProvider(LocalBackProgress provides backCoordinator) {
+                    val covered = leaving != null || depth > 0
+                    val glassActive = LocalGlassActive.current && !covered
+                    Covered(covered) {
+                        CompositionLocalProvider(LocalBackProgress provides backCoordinator, LocalGlassActive provides glassActive) {
                             saved.SaveableStateProvider(stateKey, page.content)
                         }
                     }

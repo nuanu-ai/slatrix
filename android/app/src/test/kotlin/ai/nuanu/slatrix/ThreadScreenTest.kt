@@ -21,8 +21,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
@@ -147,8 +149,9 @@ class ThreadScreenTest {
 
             client.page.complete(Unit)
             compose.waitUntil(5_000) { compose.onAllNodesWithText("Reply 1", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
-            assertEquals("The thread's own root lands in the same place", root, bounds("Ship on Friday?"))
-            assertTrue("The root tops the thread", root.bottom <= bounds("Reply 1").top)
+            val loadedRoot = bounds("Ship on Friday?")
+            assertEquals("The thread's own root keeps its horizontal layout", root.left, loadedRoot.left)
+            assertTrue("The root tops the thread", loadedRoot.bottom <= bounds("Reply 1").top)
             compose.onNodeWithText("5 replies").assertExists()
         } finally {
             scope.cancel()
@@ -225,31 +228,33 @@ class ThreadScreenTest {
     }
 
     // capability: thread.open
-    @Test fun aTallColdThreadLandsAtItsNewestReplyWithoutJumpingFromTheRoot() {
+    @Test fun aTallColdThreadOpensAtItsRootTopWhenRepliesArrive() {
         val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
         fun message(id: String, body: String, minutes: Int) = ConversationMessage(id, "\$$id", "@sam:example.org", "Sam", body,
             null, minutes * 60_000L, MessageKind.Text, MessageSendState.Sent, false, "S", 0)
         val root = message("thread-root", "Ship on Friday?", 0).copy(eventId = "\$root")
-        val state = mutableStateOf(ConversationState(listOf(root), loading = true, hasMore = true, replies = 80))
-        var olderRequested = 0
+        val state = mutableStateOf(ConversationState(listOf(root), loading = true, hasMore = false, replies = 40))
         compose.setContent {
             SlatrixTheme {
-                LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, { olderRequested++ }, {}, {}, {}, {},
+                LiveChannelScreen(room, state.value, ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
                     threadRoot = "\$root")
             }
         }
         compose.onNodeWithText("Ship on Friday?").assertExists()
 
-        // When 80 replies arrive (well over 4 screens tall), the viewport must stay anchored at the newest reply
-        // instead of riding the moved root to index 80 at the top (which would also trigger a spurious older-history fetch).
-        val replies = (1..80).map { message("r-$it", "Reply $it", it) }
+        // When 40 replies arrive (well taller than the viewport), the thread opens at the root's top so the reader
+        // starts from the root rather than being dumped at Reply 40.
+        val replies = (1..40).map { message("r-$it", "Reply $it", it) }
         compose.runOnIdle {
-            state.value = ConversationState(listOf(root) + replies, loading = false, hasMore = true, replies = 80)
+            state.value = ConversationState(listOf(root) + replies, loading = false, hasMore = false, replies = 40)
         }
         compose.waitForIdle()
-        compose.onNodeWithText("Reply 80").assertExists()
-        assertEquals("Landing at the newest reply of an 80-reply thread must not jump to the root and page older history",
-            0, olderRequested)
+        compose.onNodeWithText("Ship on Friday?", useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithText("Reply 1", useUnmergedTree = true).assertIsDisplayed()
+        val headerBottom = compose.onNodeWithContentDescription("Back").getUnclippedBoundsInRoot().bottom
+        val rootBounds = compose.onNodeWithText("Ship on Friday?", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("Cold tall thread opens with root below header ($rootBounds vs header $headerBottom)",
+            rootBounds.top >= headerBottom && rootBounds.top - headerBottom < 120.dp)
     }
 
     // capability: thread.reply
@@ -272,6 +277,44 @@ class ThreadScreenTest {
         compose.waitForIdle()
         val after = compose.onNodeWithContentDescription("Add a reply").getUnclippedBoundsInRoot()
         assertEquals("Expanded composer should not shift vertically once the draft loads", before.top, after.top)
+    }
+
+    // capability: thread.open
+    @Test fun aShortThreadAnchorsAboveTheComposerInsteadOfFloatingAtTheTop() {
+        val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
+        fun message(id: String, body: String, minutes: Int) = ConversationMessage(id, "\$$id", "@sam:example.org", "Sam", body,
+            null, minutes * 60_000L, MessageKind.Text, MessageSendState.Sent, false, "S", 0)
+        val rows = listOf(message("thread-root", "Ship on Friday?", 0).copy(eventId = "\$root"), message("r-1", "Yes, ready.", 1))
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(rows, loading = false, hasMore = false, replies = 1),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, threadRoot = "\$root")
+            }
+        }
+        val composerTop = compose.onNodeWithContentDescription("Add a reply").getUnclippedBoundsInRoot().top
+        val replyBottom = compose.onNodeWithText("Yes, ready.", useUnmergedTree = true).getUnclippedBoundsInRoot().bottom
+        assertTrue("Short thread sits right above the composer (reply bottom $replyBottom, composer top $composerTop)",
+            replyBottom <= composerTop && composerTop - replyBottom < 64.dp)
+    }
+
+    // capability: thread.open
+    @Test fun aTallThreadOpensAtItsRootTopInsteadOfDumpingAtTheBottomOfALongReply() {
+        val room = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
+        fun message(id: String, body: String, minutes: Int) = ConversationMessage(id, "\$$id", "@sam:example.org", "Sam", body,
+            null, minutes * 60_000L, MessageKind.Text, MessageSendState.Sent, false, "S", 0)
+        val root = message("thread-root", "Release plan?", 0).copy(eventId = "\$root")
+        val longReply = message("r-1", (1..80).joinToString("\n") { "Step $it of the checklist" }, 1)
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(root, longReply), loading = false, hasMore = false, replies = 1),
+                    ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {}, threadRoot = "\$root")
+            }
+        }
+        compose.onNodeWithText("Release plan?", useUnmergedTree = true).assertIsDisplayed()
+        val headerBottom = compose.onNodeWithContentDescription("Back").getUnclippedBoundsInRoot().bottom
+        val rootBounds = compose.onNodeWithText("Release plan?", useUnmergedTree = true).getUnclippedBoundsInRoot()
+        assertTrue("Tall thread positions root below header ($rootBounds vs header $headerBottom)",
+            rootBounds.top >= headerBottom && rootBounds.top - headerBottom < 120.dp)
     }
 }
 

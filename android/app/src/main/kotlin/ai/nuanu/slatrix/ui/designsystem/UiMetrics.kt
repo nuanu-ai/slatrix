@@ -76,7 +76,7 @@ object UiMetrics {
     val ViewerDismiss = 120.dp
     val NarrowPhone = 320.dp
     val WidePhone = 412.dp
-    val GlassBlur = 24.dp
+    val GlassBlur = 14.dp
     /** The most of the screen a message sheet's actions take before they scroll, so its reactions stay within thumb reach. */
     const val MessageSheetShare = 0.45f
     val GlassLift = 12.dp

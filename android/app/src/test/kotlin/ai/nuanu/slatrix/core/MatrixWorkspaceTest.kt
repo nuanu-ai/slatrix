@@ -368,7 +368,7 @@ class MatrixWorkspaceTest {
 
     @Test fun aConversationLeftStaysOpenForComingBackToUntilNewerOnesPushItOutOrItHasSomethingNew() = runTest {
         val workspace = MatrixWorkspace(backgroundScope, WorkspaceClient())
-        val rooms = (1..6).map { workspaceRoom("!r$it:example.org", "R$it") }
+        val rooms = (1..12).map { workspaceRoom("!r$it:example.org", "R$it") }
         suspend fun visit(room: RoomSummary): MatrixConversation? {
             workspace.open(room)
             return workspace.selected.first { it?.room?.id == room.id && it.conversation != null }?.conversation
@@ -378,16 +378,76 @@ class MatrixWorkspaceTest {
         workspace.back()
         runCurrent()
         assertSame("Back to Home and in again finds the same timeline", first, visit(rooms[0]))
-        val kept = (1..5).map { visit(rooms[it]) }
-        assertNotSame("Four newer ones pushed it out", first, visit(rooms[0]))
-        assertSame(kept[4], visit(rooms[5]))
+        val kept = (1..11).map { visit(rooms[it]) }
+        assertNotSame("Ten newer ones pushed it out", first, visit(rooms[0]))
+        assertSame("The tenth most recent room still stays warm", kept[10], visit(rooms[11]))
+        assertSame("The second newest evicted only the oldest", kept[2], visit(rooms[3]))
         workspace.back()
         runCurrent()
-        val reopened = visit(rooms[5].copy(resumeAt = "\$read"))
-        assertNotSame("Unread messages open fresh, at the New line", kept[4], reopened)
+        val reopened = visit(rooms[11].copy(resumeAt = "\$read"))
+        assertNotSame("Unread messages open fresh, at the New line", kept[10], reopened)
         workspace.back()
         runCurrent()
-        assertNotSame("So does one marked unread", reopened, visit(rooms[5].copy(unread = UnreadBadge.Bold)))
+        assertNotSame("So does one marked unread", reopened, visit(rooms[11].copy(unread = UnreadBadge.Bold)))
+        workspace.close()
+    }
+
+    @Test fun reopeningAnEvictedOrUnreadRoomShowsItsCachedSnapshotOnFrameZeroUntilLiveTimelineEmits() = runTest {
+        var gate: CompletableDeferred<Unit>? = null
+        val client = WorkspaceClient(beforeTimeline = { gate?.await() })
+        val workspace = MatrixWorkspace(backgroundScope, client)
+        val alpha = workspaceRoom("!alpha:example.org", "Alpha")
+
+        workspace.open(alpha)
+        val first = workspace.selected.first { it?.room?.id == alpha.id && it.conversation != null }!!.conversation!!
+        first.state.first { !it.loading }
+        client.emit(listOf(TimelineDiff.Reset((1..35).map { conversationItem("m$it", "\$m$it", "Message $it") })))
+        first.state.first { it.rows.size == 35 }
+
+        // Push Alpha out of the 10-slot live LRU so reopening it is a cold open.
+        for (i in 1..11) {
+            val other = workspaceRoom("!other$i:example.org", "Other $i")
+            workspace.open(other)
+            workspace.selected.first { it?.room?.id == other.id && it.composer != null }
+        }
+        workspace.back()
+        runCurrent()
+
+        // Hold the live timeline so we observe frame 0 (waiting) and the attached-but-loading conversation.
+        val openGate = CompletableDeferred<Unit>()
+        gate = openGate
+        workspace.open(alpha)
+        val frameZero = requireNotNull(workspace.selected.value).waiting()
+        assertEquals("Snapshot caps at the newest 30 rows on frame 0", (6..35).map { "Message $it" },
+            frameZero.rows.filterIsInstance<ConversationMessage>().map { it.body })
+        assertTrue("Waiting snapshot stays loading until live rows reconcile", frameZero.loading)
+        assertFalse("Waiting snapshot does not trigger early pagination", frameZero.hasMore)
+
+        runCurrent()
+        val attached = requireNotNull(workspace.selected.value?.conversation)
+        assertEquals("Attached conversation keeps cached snapshot rows until live timeline emits",
+            (6..35).map { "Message $it" }, attached.state.value.rows.filterIsInstance<ConversationMessage>().map { it.body })
+        assertTrue(attached.state.value.loading)
+
+        openGate.complete(Unit)
+        attached.state.first { !it.loading }
+        client.emit(listOf(TimelineDiff.Reset(listOf(conversationItem("live", "\$live", "Live message")))))
+        val reconciled = attached.state.first { it.rows.filterIsInstance<ConversationMessage>().any { m -> m.body == "Live message" } }
+        assertEquals(listOf("Live message"), reconciled.rows.filterIsInstance<ConversationMessage>().map { it.body })
+
+        // An unread reopen is also cold (cannot reuse recent) and still shows cached rows on frame 0.
+        workspace.back()
+        runCurrent()
+        val unreadGate = CompletableDeferred<Unit>()
+        gate = unreadGate
+        workspace.open(alpha.copy(unread = UnreadBadge.Bold, resumeAt = "\$new"))
+        assertEquals(listOf("Live message"),
+            requireNotNull(workspace.selected.value).waiting().rows.filterIsInstance<ConversationMessage>().map { it.body })
+
+        // An explicit jump to an older event must not flash the bottom-of-room snapshot.
+        workspace.jumpTo(alpha, "\$old", threadRoot = null)
+        assertTrue(requireNotNull(workspace.selected.value).waiting().rows.isEmpty())
+        unreadGate.complete(Unit)
         workspace.close()
     }
 
@@ -488,6 +548,7 @@ class MatrixWorkspaceTest {
 }
 
 private class WorkspaceClient(private val threadRoots: Map<String, String> = emptyMap(),
+    private val beforeTimeline: suspend (String) -> Unit = {},
     private val beforeSave: suspend () -> Unit = {}) : Client(NoHandle) {
     private val drafts = mutableMapOf<String, ComposerDraft>()
     val handles = mutableListOf<Room>()
@@ -505,8 +566,9 @@ private class WorkspaceClient(private val threadRoots: Map<String, String> = emp
     override fun getRoom(roomId: String): Room = object : Room(NoHandle) {
         override fun id(): String = roomId
         override fun ownUserId(): String = "@me:example.org"
-        override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline =
-            focuses.add(configuration.focus).let { object : Timeline(NoHandle) {
+        override suspend fun timelineWithConfiguration(configuration: TimelineConfiguration): Timeline {
+            beforeTimeline(roomId)
+            return focuses.add(configuration.focus).let { object : Timeline(NoHandle) {
                 override suspend fun addListener(listener: TimelineListener): TaskHandle {
                     listeners += listener
                     listener.onUpdate(listOf(TimelineDiff.Reset(emptyList())))
@@ -521,6 +583,7 @@ private class WorkspaceClient(private val threadRoots: Map<String, String> = emp
                     override fun transactionId(): String = "txn"
                 }
             } }
+        }
         override suspend fun loadComposerDraft(threadRoot: String?): ComposerDraft? {
             check(!failLoads) { "Draft store busy" }
             return drafts["$roomId $threadRoot"]
