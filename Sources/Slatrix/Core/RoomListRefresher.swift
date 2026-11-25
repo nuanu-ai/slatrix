@@ -21,13 +21,20 @@ final class RoomListRefresher {
     private var generation = UUID()
     private var state = State()
     private var task: Task<Void, Never>?
+    private var coalesceTask: Task<Void, Never>?
     private var full = false
     private var changed: [String: Room] = [:]
+    /// Short leading window that batches bursts of incremental `RoomInfo` callbacks after the initial room list loads.
+    private let coalesce: Duration
+
+    init(coalesce: Duration = .milliseconds(60)) { self.coalesce = coalesce }
 
     func attach(_ client: Client?) {
         generation = UUID()
         task?.cancel()
         task = nil
+        coalesceTask?.cancel()
+        coalesceTask = nil
         full = false
         changed = [:]
         for handle in state.handles.values { handle.cancel() }
@@ -41,6 +48,8 @@ final class RoomListRefresher {
     /// Rereads every room. Triggers that arrive during a pass coalesce into one follow-up pass instead of restarting it.
     func request() {
         full = true
+        coalesceTask?.cancel()
+        coalesceTask = nil
         run()
     }
 
@@ -55,6 +64,8 @@ final class RoomListRefresher {
             case .clear, .popFront, .popBack, .remove, .truncate: continue
             }
         }
+        coalesceTask?.cancel()
+        coalesceTask = nil
         run()
     }
 
@@ -66,7 +77,17 @@ final class RoomListRefresher {
     private func roomChanged(_ room: Room, id: String, generation: UUID) {
         guard generation == self.generation else { return }
         changed[id] = room
-        run()
+        guard loaded, !full, task == nil, coalesce > .zero else {
+            run()
+            return
+        }
+        guard coalesceTask == nil else { return }
+        coalesceTask = Task { [weak self] in
+            try? await Task.sleep(for: self?.coalesce ?? .zero)
+            guard let self, self.generation == generation, !Task.isCancelled else { return }
+            self.coalesceTask = nil
+            self.run()
+        }
     }
 
     private func run() {

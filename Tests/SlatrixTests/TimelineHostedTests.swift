@@ -2515,6 +2515,50 @@ struct TimelinePointerTests {
         let areas = scrollView.trackingAreas.filter { $0.owner === scrollView }
         #expect(areas.count == 1 && areas.first === area)
     }
+
+    @Test("A covered timeline clears hover and ignores pointer movement and text cursor updates beneath a modal")
+    func coveredTimelineBlocksHoverAndCursor() throws {
+        let scrollView = TimelineScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+        let textView = MessageTextView(frame: NSRect(x: 0, y: 0, width: 200, height: 40))
+        scrollView.documentView = textView
+        var lastPointer: NSPoint? = NSPoint(x: 10, y: 10)
+        scrollView.onPointer = { lastPointer = $0 }
+
+        scrollView.isCovered = true
+        #expect(lastPointer == nil)
+        #expect(textView.effectivelyCovered)
+
+        let move = try #require(
+            NSEvent.mouseEvent(
+                with: .mouseMoved, location: NSPoint(x: 40, y: 40), modifierFlags: [], timestamp: 0, windowNumber: 0,
+                context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
+        scrollView.mouseMoved(with: move)
+        #expect(lastPointer == nil)
+
+        scrollView.isCovered = false
+        #expect(!textView.effectivelyCovered)
+        scrollView.mouseMoved(with: move)
+        #expect(lastPointer == NSPoint(x: 40, y: 40))
+    }
+
+    @Test("Compact message row estimates omit comfortable mode's separate sender header line")
+    func compactEstimateMatchesDensity() {
+        let message = ChatMessage(
+            id: "$m1", roomID: "!r:example.org", senderID: "@a:example.org", senderName: "Alice",
+            body: "Short line", timestamp: Date(timeIntervalSince1970: 0))
+        let entry = TimelineEntry(
+            id: "$m1",
+            kind: .message(
+                TimelineMessageEntry(
+                    message: message, grouped: false, time: "10:00", saved: false, pinned: false, highlighted: false,
+                    sendFailure: nil, sendBusy: false)))
+        let m = Metrics()
+        let comfortable = TimelineTableCoordinator.estimateHeight(
+            for: entry, rowWidth: 600, metrics: m, compact: false, isThread: false)
+        let compact = TimelineTableCoordinator.estimateHeight(
+            for: entry, rowWidth: 600, metrics: m, compact: true, isThread: false)
+        #expect(comfortable - compact >= 20)
+    }
 }
 
 @MainActor

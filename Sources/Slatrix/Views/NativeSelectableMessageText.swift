@@ -174,6 +174,7 @@ struct NativeSelectableMessageText: NSViewRepresentable {
         context.coordinator.onOpenURL = onOpenURL
         context.coordinator.onOpenSender = onOpenSender
         view.menuCommands = menuCommands
+        view.isCovered = context.environment.isCovered
         if limitChanged {
             view.textContainer?.maximumNumberOfLines = maxLines
             view.textContainer?.lineBreakMode = lineLimit == nil ? .byWordWrapping : .byTruncatingTail
@@ -392,13 +393,44 @@ final class MessageTextView: NSTextView {
     }
 
     // AppKit hands the text view the pointer across its whole visible rect, including where SwiftUI draws a control
-    // on top of it (the hover toolbar, a toast), so the I-beam applies only where the text is the view under it.
+    // on top of it (the hover toolbar, a toast, or an in-window modal), so the I-beam applies only when uncovered and
+    // under the pointer.
+    var isCovered = false {
+        didSet {
+            guard isCovered != oldValue else { return }
+            syncCoveredCursor()
+        }
+    }
+    var effectivelyCovered: Bool {
+        isCovered || (enclosingScrollView as? TimelineScrollView)?.isCovered == true
+    }
+    func syncCoveredCursor() {
+        if effectivelyCovered {
+            pointerOverText = false
+            underlineMention(at: nil)
+            if NSCursor.current == .iBeam { NSCursor.arrow.set() }
+        }
+        window?.invalidateCursorRects(for: self)
+    }
     private var pointerOverText: Bool?
+    override func resetCursorRects() {
+        guard !effectivelyCovered else { return }
+        super.resetCursorRects()
+    }
     override func cursorUpdate(with event: NSEvent) {
+        guard !effectivelyCovered else {
+            pointerOverText = false
+            return
+        }
         pointerOverText = isUnderPointer(event)
         if pointerOverText == true { super.cursorUpdate(with: event) } else { NSCursor.arrow.set() }
     }
     override func mouseMoved(with event: NSEvent) {
+        guard !effectivelyCovered else {
+            pointerOverText = false
+            underlineMention(at: nil)
+            return
+        }
         super.mouseMoved(with: event)
         underlineMention(at: event)
         let over = isUnderPointer(event)

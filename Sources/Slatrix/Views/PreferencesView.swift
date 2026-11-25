@@ -2,9 +2,9 @@ import AppKit
 import SwiftUI
 
 struct PreferencesView: View {
-    private static let size = CGSize(width: 848, height: 600)
+    private static let size = CGSize(width: 848, height: 660)
     private static let navWidth: CGFloat = 188
-    private static let miniatureHeight: CGFloat = 72
+    private static let miniatureHeight: CGFloat = 64
     private static let aboutIcon: CGFloat = 64
     private static let maxScopeTitleLength = 28
     @Environment(\.metrics) private var m
@@ -16,6 +16,7 @@ struct PreferencesView: View {
     var onEditProfile: () -> Void
     @State var tab = Tab.appearance
     var workspaceID: String? = nil
+    var readOpenAtLogin: @Sendable () async -> Bool = { await PlatformIntegration.shared.loadOpenAtLogin() }
     @State private var themeScope = ThemeScope.all
     @State private var requestingNotifications = false
     @State private var notificationStatus: DesktopNotificationStatus?
@@ -25,6 +26,7 @@ struct PreferencesView: View {
     @State private var notificationPermissionRequest = UUID()
     @State private var isPresented = false
     @State private var openAtLogin = false
+    @State private var loginToggleEdited = false
     @State private var error: String?
     private var colors: AppColors { appearance.colors }
 
@@ -114,7 +116,7 @@ struct PreferencesView: View {
                 }.padding(m.sp12).frame(width: m(Self.navWidth)).background(colors.raised)
                 Divider().overlay(colors.border)
                 ScrollView {
-                    VStack(alignment: .leading, spacing: m.sp24) {
+                    VStack(alignment: .leading, spacing: m.sp20) {
                         if let error {
                             InlineErrorView(message: error, dismiss: { self.error = nil }).clipShape(
                                 RoundedRectangle(cornerRadius: m.radius))
@@ -125,17 +127,22 @@ struct PreferencesView: View {
                         case .account: accountPane
                         case .advanced: advancedPane
                         }
-                    }.padding(m.sp32).frame(maxWidth: .infinity, alignment: .leading)
-                }
+                    }.padding(m.sp24).frame(maxWidth: .infinity, alignment: .leading)
+                }.scrollIndicators(.visible)
             }.overlay(alignment: .top) { Divider().overlay(colors.border) }
         }
         .preferredColorScheme(appearance.preferredColorScheme)
         .onAppear {
             isPresented = true
-            openAtLogin = PlatformIntegration.shared.openAtLogin
             if let space = activeWorkspace, appearance.workspaceThemes[space.id] != nil {
                 themeScope = .workspace(space.id)
             }
+        }
+        .task(id: tab) {
+            guard tab == .advanced else { return }
+            let enabled = await readOpenAtLogin()
+            guard !Task.isCancelled, !loginToggleEdited else { return }
+            openAtLogin = enabled
         }
         .onChange(of: activeWorkspace?.id) { _, currentID in
             if case .workspace(let boundID) = themeScope, currentID != boundID {
@@ -165,7 +172,7 @@ struct PreferencesView: View {
 
     private var appearancePane: some View {
         let highContrast = appearance.effectiveIncreaseContrast
-        return VStack(alignment: .leading, spacing: m.sp24) {
+        return VStack(alignment: .leading, spacing: m.sp20) {
             VStack(alignment: .leading, spacing: m.sp12) {
                 sectionTitle("Color mode")
                 ChoiceGrid(minColumnWidth: m(142), spacing: m.sp12) {
@@ -405,6 +412,7 @@ struct PreferencesView: View {
                 isOn: Binding(
                     get: { openAtLogin },
                     set: { enabled in
+                        loginToggleEdited = true
                         do {
                             try PlatformIntegration.shared.setOpenAtLogin(enabled)
                             openAtLogin = PlatformIntegration.shared.openAtLogin
@@ -483,8 +491,16 @@ struct PreferencesView: View {
 /// Lays out preference choice tiles in 3, 2, or 1 equal-width columns based on available width, never overflowing or
 /// collapsing to zero columns in narrow windows.
 private struct ChoiceGrid: Layout {
+    struct Cache {
+        var width: CGFloat = .nan
+        var columns = 0
+        var rowHeights: [CGFloat] = []
+    }
+
     let minColumnWidth: CGFloat
     let spacing: CGFloat
+
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
 
     private func columnCount(for width: CGFloat) -> Int {
         guard width.isFinite, width > 0 else { return 3 }
@@ -492,13 +508,15 @@ private struct ChoiceGrid: Layout {
         return max(1, min(3, fitting))
     }
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        guard !subviews.isEmpty else { return .zero }
-        let width = proposal.width ?? (3 * minColumnWidth + 2 * spacing)
+    private func measure(width: CGFloat, subviews: Subviews, cache: inout Cache) -> (Int, CGFloat, [CGFloat]) {
         let columns = columnCount(for: width)
         let columnWidth = max(0, (width - spacing * CGFloat(columns - 1)) / CGFloat(columns))
         let rows = (subviews.count + columns - 1) / columns
-        var totalHeight: CGFloat = 0
+        if cache.width == width && cache.columns == columns && cache.rowHeights.count == rows {
+            return (columns, columnWidth, cache.rowHeights)
+        }
+        var heights: [CGFloat] = []
+        heights.reserveCapacity(rows)
         for row in 0..<rows {
             let start = row * columns
             let end = min(start + columns, subviews.count)
@@ -506,25 +524,27 @@ private struct ChoiceGrid: Layout {
                 subviews[start..<end].map {
                     $0.sizeThatFits(ProposedViewSize(width: columnWidth, height: nil)).height
                 }.max() ?? 0
-            totalHeight += rowHeight
-            if row > 0 { totalHeight += spacing }
+            heights.append(rowHeight)
         }
+        cache = Cache(width: width, columns: columns, rowHeights: heights)
+        return (columns, columnWidth, heights)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        guard !subviews.isEmpty else { return .zero }
+        let width = proposal.width ?? (3 * minColumnWidth + 2 * spacing)
+        let (_, _, heights) = measure(width: width, subviews: subviews, cache: &cache)
+        let totalHeight = heights.reduce(0, +) + spacing * CGFloat(max(0, heights.count - 1))
         return CGSize(width: width, height: totalHeight)
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
         guard !subviews.isEmpty else { return }
-        let columns = columnCount(for: bounds.width)
-        let columnWidth = max(0, (bounds.width - spacing * CGFloat(columns - 1)) / CGFloat(columns))
-        let rows = (subviews.count + columns - 1) / columns
+        let (columns, columnWidth, heights) = measure(width: bounds.width, subviews: subviews, cache: &cache)
         var y = bounds.minY
-        for row in 0..<rows {
+        for (row, rowHeight) in heights.enumerated() {
             let start = row * columns
             let end = min(start + columns, subviews.count)
-            let rowHeight =
-                subviews[start..<end].map {
-                    $0.sizeThatFits(ProposedViewSize(width: columnWidth, height: nil)).height
-                }.max() ?? 0
             for column in 0..<(end - start) {
                 let x = bounds.minX + CGFloat(column) * (columnWidth + spacing)
                 subviews[start + column].place(

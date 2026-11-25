@@ -78,7 +78,10 @@ struct AvatarView: View {
                 guard let matrix, let source, !matrix.isPreview else { return }
                 let images = matrix.avatarImages
                 let key = large ? largeKey ?? source : source
-                guard images.cachedImage(for: key) == nil else { return }
+                if let existing = images.cachedImage(for: key) {
+                    if loaded?.request != request { loaded = Loaded(request: request, image: existing) }
+                    return
+                }
                 let side = large ? 512 : 128
                 let image = await images.image(for: key, pixels: side) {
                     try await matrix.avatarThumbnail(source, side: UInt64(side))

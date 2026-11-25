@@ -13,6 +13,7 @@ struct ResizeHandle: View {
     var onReset: () -> Void
     @EnvironmentObject private var appearance: AppearanceStore
     @Environment(\.metrics) private var m
+    @Environment(\.isCovered) private var isCovered
     @State private var dragging = false
     @State private var hovering = false
 
@@ -21,20 +22,20 @@ struct ResizeHandle: View {
         ZStack {
             // The sidebar floats on its own, so its divider shows only under the pointer; a pane keeps its hairline.
             Rectangle().fill(
-                dragging || hovering
+                !isCovered && (dragging || hovering)
                     ? appearance.colors.accentFill : pane == .trailing ? appearance.colors.border : .clear
-            ).frame(width: dragging || hovering ? m.sp2 : 1)
+            ).frame(width: !isCovered && (dragging || hovering) ? m.sp2 : 1)
         }
         .frame(width: m(SidebarLayout.handleWidth)).frame(maxHeight: .infinity)
         // Easier to hit than the line is wide: the pointer takes it over the panes' edges on either side too.
         .overlay {
             ResizePointerSurface(
-                direction: direction, currentWidth: currentWidth,
+                direction: direction, currentWidth: currentWidth, isCovered: isCovered,
+                onHovering: { hovering = $0 },
                 onDragging: { dragging = $0 }, onArrow: { adjust(by: m.sp16 * direction * $0) },
                 onChange: onChange, onCommit: onCommit, onReset: onReset
             )
             .frame(width: m(SidebarLayout.handleHitWidth)).contentShape(Rectangle())
-            .onHover { hovering = $0 }
         }
         .zIndex(1)
         .accessibilityElement(children: .ignore)
@@ -69,6 +70,8 @@ struct ResizeHandle: View {
 private struct ResizePointerSurface: NSViewRepresentable {
     var direction: CGFloat
     var currentWidth: CGFloat
+    var isCovered: Bool
+    var onHovering: (Bool) -> Void
     var onDragging: (Bool) -> Void
     var onArrow: (CGFloat) -> Void
     var onChange: (CGFloat) -> Void
@@ -86,6 +89,8 @@ private struct ResizePointerSurface: NSViewRepresentable {
     func updateNSView(_ view: ResizePointerView, context: Context) {
         view.direction = direction
         view.currentWidth = currentWidth
+        view.isCovered = isCovered
+        view.onHovering = onHovering
         view.onDragging = onDragging
         view.onArrow = onArrow
         view.onChange = onChange
@@ -97,6 +102,14 @@ private struct ResizePointerSurface: NSViewRepresentable {
 private final class ResizePointerView: NSView {
     var direction: CGFloat = 1
     var currentWidth: CGFloat = SidebarLayout.defaultWidth
+    var isCovered = false {
+        didSet {
+            guard isCovered != oldValue else { return }
+            if isCovered { onHovering(false) }
+            window?.invalidateCursorRects(for: self)
+        }
+    }
+    var onHovering: (Bool) -> Void = { _ in }
     var onDragging: (Bool) -> Void = { _ in }
     /// -1 for the left arrow, 1 for the right.
     var onArrow: (CGFloat) -> Void = { _ in }
@@ -104,11 +117,26 @@ private final class ResizePointerView: NSView {
     var onCommit: () -> Void = {}
     var onReset: () -> Void = {}
     private var interaction = SidebarResizeInteraction()
+    private lazy var hoverTracking = NSTrackingArea(
+        rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self)
 
     // The window moves by its background; without this the window server takes the drag and no mouseDragged arrives.
     override var mouseDownCanMoveWindow: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override var acceptsFirstResponder: Bool { true }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if !trackingAreas.contains(hoverTracking) { addTrackingArea(hoverTracking) }
+    }
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        guard !isCovered else { return }
+        onHovering(true)
+    }
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        onHovering(false)
+    }
     override func keyDown(with event: NSEvent) {
         switch event.specialKey {
         case .leftArrow?: onArrow(-1)
@@ -116,8 +144,12 @@ private final class ResizePointerView: NSView {
         default: super.keyDown(with: event)
         }
     }
-    override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
+    override func resetCursorRects() {
+        guard !isCovered else { return }
+        addCursorRect(bounds, cursor: .resizeLeftRight)
+    }
     override func mouseDown(with event: NSEvent) {
+        guard !isCovered else { return }
         window?.makeFirstResponder(self)
         onDragging(false)
         if interaction.begin(width: currentWidth, x: x(event), clickCount: event.clickCount) {
@@ -126,7 +158,7 @@ private final class ResizePointerView: NSView {
         }
     }
     override func mouseDragged(with event: NSEvent) {
-        guard let width = interaction.drag(x: x(event)) else { return }
+        guard !isCovered, let width = interaction.drag(x: x(event)) else { return }
         onDragging(true)
         NSCursor.resizeLeftRight.set()
         onChange(width)
@@ -142,6 +174,9 @@ private final class ResizePointerView: NSView {
     private func x(_ event: NSEvent) -> CGFloat { event.locationInWindow.x * direction }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil { interaction = SidebarResizeInteraction() }
+        if window == nil {
+            onHovering(false)
+            interaction = SidebarResizeInteraction()
+        }
     }
 }
