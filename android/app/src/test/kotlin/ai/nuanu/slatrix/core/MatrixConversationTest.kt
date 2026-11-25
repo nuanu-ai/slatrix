@@ -300,7 +300,7 @@ class MatrixConversationTest {
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
         conversation.state.first { !it.loading }
         repeat(20) { conversation.loadOlder(); runCurrent() }
-        assertNotNull(conversation.state.value.error)
+        assertNotNull(conversation.state.first { !it.loadingHistory && it.error != null }.error)
         assertTrue(conversation.markRead("\$one"))
         assertNotNull("Reading must not hide the history error", conversation.state.value.error)
 

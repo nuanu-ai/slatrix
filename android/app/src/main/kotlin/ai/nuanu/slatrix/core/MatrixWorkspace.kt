@@ -42,12 +42,20 @@ data class OpenChannel(
     val openedWith: Int? = null,
     /** Who else is typing here, and telling them you are. */
     val typing: MatrixTyping? = null,
+    /** Last known rows from an earlier visit, shown on frame 0 until the live timeline emits. */
+    val cachedRows: List<ConversationRow> = emptyList(),
+    /** Account user ID cached alongside [cachedRows] so mentions keep their styling before the live timeline attaches. */
+    val cachedOwnUserId: String? = null,
 )
 
-/** What shows while the conversation opens: a thread's root, as its channel showed it. */
-fun OpenChannel.waiting(): ConversationState = opening(root, error, openedWith).copy(hasMore = false)
+/** What shows while the conversation opens: a thread's root or cached snapshot rows from an earlier visit. */
+fun OpenChannel.waiting(): ConversationState =
+    opening(root, error, openedWith, cachedRows, cachedOwnUserId, listedRoot).copy(hasMore = false)
 
-private const val RECENT = 4
+private const val RECENT = 10
+private const val SNAPSHOT_LIMIT = 24
+private const val SNAPSHOT_ROWS = 30
+private const val THREAD_ROOT_KEY = "thread-root"
 
 class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
     /** Read once a conversation needs it; the thread workspace shares the main one's. */
@@ -66,10 +74,13 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
     private var current: OpenChannel? = null
     /**
      * The channels and threads left most recently, oldest first, still open with their rooms, so coming back is instant
-     * and finds the rows the reader left, as the Mac's RecentTimelines keeps them. With the open one, five each.
+     * and finds the rows the reader left, as the Mac's RecentTimelines keeps them. With the open one, eleven each.
      */
     private val recent = LinkedHashMap<String, Pair<MatrixConversation, Room>>()
     private val recentThreads = LinkedHashMap<String, Pair<MatrixConversation, Room>>()
+    private data class TimelineSnapshot(val rows: List<ConversationRow>, val ownUserId: String?)
+    /** Lightweight last-known rows per room/thread so cold opens never slide in a blank screen. */
+    private val snapshots = LinkedHashMap<String, TimelineSnapshot>()
     private val worker = scope.launch {
         try {
             for ((token, requested) in requests) {
@@ -91,12 +102,18 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
                     // Kept only while nothing is new: a conversation opened somewhere in particular, or an unread channel,
                     // opens fresh, and one marked unread on its last visit holds its reads back.
                     val cache = cacheFor(requested.threadRoot)
-                    val kept = cache.remove(cacheKey(requested.room.id, requested.threadRoot))?.let { (conversation, room) ->
+                    val key = cacheKey(requested.room.id, requested.threadRoot)
+                    val kept = cache.remove(key)?.let { (conversation, room) ->
                         if (canReuse(requested, conversation)) conversation to room
-                        else { closeKept(conversation); null }
+                        else {
+                            saveSnapshot(key, requested.threadRoot != null, conversation)
+                            closeKept(conversation)
+                            null
+                        }
                     }
+                    val seeded = if (kept == null) attachSnapshot(requested) else requested
                     if (kept == null && generation.get() == token && mutableSelected.value?.conversation != null) {
-                        mutableSelected.value = requested
+                        mutableSelected.value = seeded
                     }
                     // Held at once, so a failure below closes a kept timeline along with the rest.
                     conversation = kept?.first
@@ -106,7 +123,7 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
                     val timeline = kept?.first?.also { it.revisit(requested.root, requested.openedWith, requested.listedRoot) }
                         ?: MatrixConversation(session, checkNotNull(conversationRoom),
                             requested.threadRoot, requested.at, requested.root, requested.resume, openedWith = requested.openedWith,
-                            listedRoot = requested.listedRoot)
+                            listedRoot = requested.listedRoot, cachedRows = seeded.cachedRows)
                     conversation = timeline
                     composer = MatrixComposer(scope, checkNotNull(composerRoom), requested.threadRoot, timeline::send)
                     if (generation.get() == token) {
@@ -132,6 +149,7 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
             }
             recent.clear()
             recentThreads.clear()
+            snapshots.clear()
             mutableSelected.value = null
             requests.close()
         }
@@ -216,10 +234,40 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
         return requested.threadRoot != null || requested.room.unread == UnreadBadge.None
     }
 
+    private fun attachSnapshot(requested: OpenChannel): OpenChannel {
+        if (requested.at != null && !requested.resume) return requested
+        val key = cacheKey(requested.room.id, requested.threadRoot)
+        val keptState = cacheFor(requested.threadRoot)[key]?.first?.state?.value
+        val snapshot = keptState?.takeIf { !it.loading && !it.preview && !it.focused && it.error == null && it.rows.isNotEmpty() }
+            ?.let { TimelineSnapshot(snapshotRows(it.rows, requested.threadRoot != null), it.ownUserId) }
+            ?: snapshots[key]
+            ?: return requested
+        return requested.copy(cachedRows = snapshot.rows, cachedOwnUserId = snapshot.ownUserId)
+    }
+
     private fun attachKept(requested: OpenChannel): OpenChannel {
         val kept = cacheFor(requested.threadRoot)[cacheKey(requested.room.id, requested.threadRoot)]?.first
             ?.takeIf { canReuse(requested, it) }
-        return if (kept != null) requested.copy(conversation = kept) else requested
+        return if (kept != null) requested.copy(conversation = kept) else attachSnapshot(requested)
+    }
+
+    private fun snapshotRows(rows: List<ConversationRow>, isThread: Boolean): List<ConversationRow> {
+        if (rows.size <= SNAPSHOT_ROWS) return rows
+        if (isThread && rows.firstOrNull()?.id == THREAD_ROOT_KEY) {
+            return listOf(rows.first()) + rows.takeLast(SNAPSHOT_ROWS - 1)
+        }
+        return rows.takeLast(SNAPSHOT_ROWS)
+    }
+
+    private fun saveSnapshot(key: String, isThread: Boolean, conversation: MatrixConversation) {
+        val state = conversation.state.value
+        if (state.loading || state.preview || state.focused || state.error != null || state.rows.isEmpty()) return
+        snapshots.remove(key)
+        snapshots[key] = TimelineSnapshot(snapshotRows(state.rows, isThread), state.ownUserId)
+        while (snapshots.size > SNAPSHOT_LIMIT) {
+            val oldest = snapshots.keys.firstOrNull() ?: break
+            snapshots.remove(oldest)
+        }
     }
 
     suspend fun close() = withContext(NonCancellable) {
@@ -242,6 +290,9 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
         conversationRoom = null
         val open = current
         current = null
+        if (left != null && open != null) {
+            saveSnapshot(cacheKey(open.room.id, open.threadRoot), open.threadRoot != null, left)
+        }
         if (left == null || room == null) {
             runCatching { left?.close() }
             // A cancelled constructor task may never enter the conversation's cleanup.
@@ -255,7 +306,10 @@ class MatrixWorkspace(scope: CoroutineScope, private val client: Client) {
             val limit = if (active != null && active in cache) RECENT + 1 else RECENT
             while (cache.size > limit) {
                 val victim = cache.keys.firstOrNull { it != active } ?: break
-                cache.remove(victim)?.let { (conversation) -> closeKept(conversation) }
+                cache.remove(victim)?.let { (conversation) ->
+                    saveSnapshot(victim, open.threadRoot != null, conversation)
+                    closeKept(conversation)
+                }
             }
         } else closeKept(left)
     }

@@ -151,6 +151,8 @@ object MessageBodyRenderer {
                     val id = link?.let(ComposerFormat::mentionedUser)
                     next = next.copy(link = link, mention = id)
                     if (id != null) {
+                        // A spoiler nested inside a mention link must stay hidden rather than leaking through wholeText().
+                        if (node.selectFirst("[data-mx-spoiler]") != null) return append(SPOILER, style)
                         val label = node.wholeText().trim()
                         val shown = if (label.isEmpty() || label == id) DisplayNames.localpart(id) else label.trimStart('@')
                         // 0.2.8 and 0.2.9 split each mention into two links before its last letter; the second continues it.

@@ -920,6 +920,43 @@ class MatrixRoomsTest {
             rooms.close()
         }
     }
+
+    // capability: home.dms
+    @Test fun directMessagePreviewsSanitizeMarkdownBackticksLinksAndMentions() = runTest {
+        val cyrillicBackticks = TestRoom(roomInfo("!c:example.org", "Alex", direct = true),
+            latest(4_000u, "Запускаю живой план для `revit-work` и **деплой**", own = false))
+        val markdownMention = TestRoom(roomInfo("!m:example.org", "Dmitry", direct = true),
+            latest(3_000u, "[Dmitry Ukhanov](https://matrix.to/#/@dmitry.ukhanov:matrix.org) посмотри [релиз](https://example.org/r)", own = false))
+        val htmlMention = TestRoom(roomInfo("!h:example.org", "Mira", direct = true),
+            latest(2_000u, "[Dmitry Ukhanov](https://matrix.to/#/@dmitry.ukhanov:matrix.org)\n\n`sshd`", own = false,
+                html = "<p><a href=\"https://matrix.to/#/@dmitry.ukhanov:matrix.org\">Dmitry Ukhanov</a></p><p><code>sshd</code></p>"))
+        val reply = TestRoom(roomInfo("!r:example.org", "Sam", direct = true),
+            latest(1_000u, "> <@bob:example.org> Old line\n\nNew `fix_1` ready", own = true))
+        val rooms = MatrixRooms(backgroundScope, RoomsClient(listOf(cyrillicBackticks, markdownMention, htmlMention, reply)))
+        val state = rooms.state.first { !it.loading }
+        val previews = state.rooms.associate { it.name to it.latest?.body }
+        assertEquals("Запускаю живой план для revit-work и деплой", previews["Alex"])
+        assertEquals("@Dmitry Ukhanov посмотри релиз", previews["Dmitry"])
+        assertEquals("@Dmitry Ukhanov sshd", previews["Mira"])
+        assertEquals("New fix_1 ready", previews["Sam"])
+        rooms.close()
+    }
+
+    @Test fun previewSanitizerPreservesCodeFencesIdentifiersUrlsAndHandlesLargeBacktickInput() {
+        assertEquals("See @sam", sanitizePreviewText("See https://matrix.to/#/@sam:example.org",
+            "<p>See https://matrix.to/#/@sam:example.org</p>", singleLine = true))
+        assertEquals("https://example.org/docs#/@alice:example.org",
+            sanitizePreviewText("https://example.org/docs#/@alice:example.org", null, singleLine = true))
+        assertEquals("foo__bar__baz Release [v2]",
+            sanitizePreviewText("foo__bar__baz [Release [v2]](https://example.org/v2)", null, singleLine = true))
+        assertEquals("> keep\n**literal**",
+            sanitizePreviewText("```\n> keep\n**literal**\n```", null, singleLine = false))
+        val pathological = (1..2_000).joinToString(" ") { "`".repeat((it % 5) + 1) }
+        val started = System.nanoTime()
+        val result = sanitizePreviewText(pathological, null, singleLine = true)
+        val elapsedMs = (System.nanoTime() - started) / 1_000_000
+        assertTrue("Bounded preview sanitization took $elapsedMs ms", elapsedMs < 250 && result.isNotEmpty())
+    }
 }
 
 // About three times the 14–38 ms measured locally; rebuilding the whole list per message took 400–750 ms.
@@ -1121,11 +1158,12 @@ internal fun roomInfo(
     privilegedCreatorsRole = false,
 )
 
-private fun latest(timestamp: ULong, body: String, own: Boolean) = LatestEventValue.Remote(
+private fun latest(timestamp: ULong, body: String, own: Boolean, html: String? = null) = LatestEventValue.Remote(
     timestamp = timestamp, sender = "@sam:example.org", isOwn = own,
     profile = ProfileDetails.Ready("Sam", false, null, null, null),
     content = TimelineItemContent.MsgLike(MsgLikeContent(
-        MsgLikeKind.Message(MessageContent(MessageType.Text(TextMessageContent(body, null)), body, false, null)),
+        MsgLikeKind.Message(MessageContent(
+            MessageType.Text(TextMessageContent(body, html?.let { FormattedBody(MessageFormat.Html, it) })), body, false, null)),
         null, null, null,
     )),
 )

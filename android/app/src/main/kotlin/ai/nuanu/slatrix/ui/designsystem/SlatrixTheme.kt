@@ -84,7 +84,7 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
     val mediaShade = roles.getValue("mediaShade")
     val onMedia = roles.getValue("onMedia")
     // Text tints for message blocks, as the Mac draws them.
-    val inlineCode = textBody.copy(alpha = 0.06f)
+    val inlineCode = roles["inlineCode"] ?: textBody.copy(alpha = 0.08f)
     val codeBlock = textBody.copy(alpha = 0.04f)
     val codeBlockEdge = textBody.copy(alpha = 0.16f)
     val quoteBar = textBody.copy(alpha = 0.25f)
@@ -115,6 +115,7 @@ class AppColors internal constructor(private val roles: Map<String, Color>, priv
             "accent" to on, "accentTint" to rule, "accentFill" to rule,
             "mentionText" to on, "mentionFill" to pillShade.copy(alpha = 0.18f),
             "mentionYouText" to on, "mentionYouFill" to pillShade.copy(alpha = 0.3f),
+            "inlineCode" to pillShade.copy(alpha = 0.16f),
             "reaction" to rule, "bubbleIn" to fill,
         ), dark, underlineLinks = true)
     }
