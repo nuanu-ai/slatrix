@@ -3950,10 +3950,22 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             kind = .video(videoInfo: info, thumbnailSource: poster.map { .file(filename: $0.path) })
         } else if mime.hasPrefix("image/") {
             let shape = Self.displayedSize(url)
+            let fileBytes = values.fileSize.map(UInt64.init)
+            let animated = mime == "image/gif" || MediaImageDecoder.isAnimatedImage(url)
+            let needsThumb =
+                (fileBytes ?? 0) > 1_048_576 || mime == "image/heic" || mime == "image/heif" || mime == "image/tiff"
+            let thumb =
+                needsThumb
+                ? await Task.detached(priority: .userInitiated) { MediaImageDecoder.imageThumbnail(of: url) }.value
+                : nil
+            posterFile = thumb?.url
+            try assertActiveSession()
+            try assertDestination(roomID)
             kind = .image(
                 imageInfo: ImageInfo(
-                    height: shape?.height, width: shape?.width, mimetype: mime, size: values.fileSize.map(UInt64.init),
-                    thumbnailInfo: nil, thumbnailSource: nil, blurhash: nil, isAnimated: nil), thumbnailSource: nil)
+                    height: shape?.height, width: shape?.width, mimetype: mime, size: fileBytes,
+                    thumbnailInfo: thumb?.info, thumbnailSource: nil, blurhash: nil, isAnimated: animated ? true : nil),
+                thumbnailSource: thumb.map { .file(filename: $0.url.path) })
         } else {
             kind = .file(
                 fileInfo: FileInfo(

@@ -1,6 +1,9 @@
+import AppKit
 import Foundation
+import ImageIO
 import MatrixRustSDK
 import Testing
+import UniformTypeIdentifiers
 
 @testable import Slatrix
 
@@ -118,5 +121,38 @@ struct AttachmentPreviewTests {
         show(try imageEvent("$pdf-spoof", width: nil, height: nil, mime: "image/png"))
         let spoof = try #require(service.messages.first)
         #expect(await service.loadMediaImage(spoof) == nil)
+    }
+
+    @Test(
+        "ViewBox-only SVGs decode cleanly, transparent dark-ink SVGs get a contrast matte, and EXIF JPEGs open upright"
+    )
+    func svgMatteAndExifOrientation() throws {
+        let viewBoxOnly = Data(
+            """
+            <svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 240 120">
+              <line x1="20" y1="60" x2="220" y2="60" stroke="#111111" stroke-width="16"/>
+            </svg>
+            """.utf8)
+        let decoded = try #require(MediaImageDecoder.decodeStill(viewBoxOnly, maxPixels: 240))
+        #expect(decoded.width == 240 && decoded.height == 120)
+        // Transparent dark-ink SVG receives a light contrast matte in the corner so dark lines stay legible.
+        let rep = NSBitmapImageRep(cgImage: decoded)
+        let corner = try #require(rep.colorAt(x: 2, y: 2)?.usingColorSpace(.sRGB))
+        #expect(corner.alphaComponent > 0.95 && corner.redComponent > 0.9)
+
+        // Build a 120x60 JPEG tagged with EXIF orientation 6 (90° CW): full decode must produce upright 60x120.
+        let rawRep = try #require(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: 120, pixelsHigh: 60, bitsPerSample: 8, samplesPerPixel: 4,
+                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let cg = try #require(rawRep.cgImage)
+        let jpeg = NSMutableData()
+        let dest = try #require(
+            CGImageDestinationCreateWithData(jpeg as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, cg, [kCGImagePropertyOrientation: 6] as CFDictionary)
+        #expect(CGImageDestinationFinalize(dest))
+
+        let upright = try #require(MediaImageDecoder.decodeFullImage(jpeg as Data))
+        #expect(Int(upright.size.width) == 60 && Int(upright.size.height) == 120)
     }
 }

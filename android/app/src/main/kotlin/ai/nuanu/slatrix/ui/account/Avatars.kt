@@ -1,6 +1,7 @@
 package ai.nuanu.slatrix.ui.account
 
 import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.util.LruCache
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -10,6 +11,10 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
+import java.nio.ByteBuffer
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -43,13 +48,23 @@ class SessionAvatars(private val thumbnail: suspend (url: String, sizePx: Int) -
         ?: thumbnail(url, sizePx)?.let { bytes -> withContext(Dispatchers.Default) { decode(bytes, sizePx) } }
             ?.also { pictures.put("$url@$sizePx", it) }
 
-    /** A server may send the original for a thumbnail, so it is decoded at the power-of-two scale nearest the tile. */
-    private fun decode(bytes: ByteArray, sizePx: Int): ImageBitmap? {
+    /** Decodes upright via ImageDecoder (honoring EXIF orientation) and downscales to the avatar tile. */
+    private fun decode(bytes: ByteArray, sizePx: Int): ImageBitmap? = runCatching {
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            val w = info.size.width
+            val h = info.size.height
+            if (w > 0 && h > 0) {
+                val scale = min(1f, sizePx.toFloat() / min(w, h))
+                decoder.setTargetSize(max(1, (w * scale).roundToInt()), max(1, (h * scale).roundToInt()))
+            }
+        }.asImageBitmap()
+    }.getOrElse {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         var sample = 1
         while (bounds.outWidth / (sample * 2) >= sizePx && bounds.outHeight / (sample * 2) >= sizePx) sample *= 2
-        return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
     }
 }
 

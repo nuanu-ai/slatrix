@@ -2,25 +2,67 @@ import AppKit
 import Darwin
 import Foundation
 import ImageIO
+import UniformTypeIdentifiers
 
 enum ComposerAttachmentInput: Sendable {
+    enum ImageFormat: Sendable {
+        case png, tiff, jpeg, gif, heic, webp
+
+        var uti: String {
+            switch self {
+            case .png: "public.png"
+            case .tiff: "public.tiff"
+            case .jpeg: "public.jpeg"
+            case .gif: "com.compuserve.gif"
+            case .heic: "public.heic"
+            case .webp: "org.webmproject.webp"
+            }
+        }
+
+        var fileExtension: String {
+            switch self {
+            case .png, .tiff: "png"
+            case .jpeg: "jpg"
+            case .gif: "gif"
+            case .heic: "heic"
+            case .webp: "webp"
+            }
+        }
+    }
+
     case files([URL])
-    case image(Data, png: Bool)
+    case image(Data, format: ImageFormat)
     /// Files another app writes only when asked, as Photos, Mail and browsers offer them in a drag.
     case promises(FilePromises)
 
-    /// What a paste or a drop attaches: its files, else its image's data; nil when it holds neither.
+    static func image(_ data: Data, png: Bool) -> ComposerAttachmentInput {
+        .image(data, format: png ? .png : .tiff)
+    }
+
+    static let imagePasteboardTypes: [(NSPasteboard.PasteboardType, ImageFormat)] = [
+        (.init("com.compuserve.gif"), .gif),
+        (.png, .png),
+        (.init("public.jpeg"), .jpeg),
+        (.init("public.heic"), .heic),
+        (.init("org.webmproject.webp"), .webp),
+        (.tiff, .tiff),
+    ]
+
+    /// What a paste or a drop attaches: file URLs, then file promises (so Photos/Safari drags keep their original file
+    /// rather than a low-res TIFF preview), then clipboard images; nil when it holds none.
     init?(pasteboard: NSPasteboard) {
         let files =
             pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
         if !files.isEmpty {
             self = .files(files)
-        } else if let type = pasteboard.availableType(from: [.png, .tiff]), let data = pasteboard.data(forType: type) {
-            self = .image(data, png: type == .png)
         } else if let promises = pasteboard.readObjects(forClasses: [NSFilePromiseReceiver.self])
             as? [NSFilePromiseReceiver], !promises.isEmpty
         {
             self = .promises(FilePromises(receivers: promises))
+        } else if let matched = Self.imagePasteboardTypes.first(where: {
+            pasteboard.availableType(from: [$0.0]) != nil
+        }), let data = pasteboard.data(forType: matched.0) {
+            self = .image(data, format: matched.1)
         } else {
             return nil
         }
@@ -267,24 +309,43 @@ enum ComposerAttachmentImporter {
                 result.append(output)
                 try validateQueue(existing + result)
             }
-        case .image(let data, let png):
+        case .image(let data, let format):
             guard data.count <= maximumImageBytes else {
                 throw Failure(message: "Pasted images must be 25 MiB or smaller.")
             }
             let options = [kCGImageSourceShouldCache: false] as CFDictionary
             guard let source = CGImageSourceCreateWithData(data as CFData, options), CGImageSourceGetCount(source) > 0,
-                (CGImageSourceGetType(source) as String?) == (png ? "public.png" : "public.tiff"),
+                (CGImageSourceGetType(source) as String?) == format.uti,
                 let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, options) as? [CFString: Any],
                 let width = properties[kCGImagePropertyPixelWidth] as? Int,
                 let height = properties[kCGImagePropertyPixelHeight] as? Int,
                 width > 0, height > 0, width <= 16_384, height <= 16_384, width * height <= 64_000_000
             else {
-                throw Failure(message: "Couldn’t attach this image. Use a PNG or TIFF up to 64 megapixels.")
+                throw Failure(message: "Couldn’t attach this image. Use an image up to 64 megapixels.")
             }
-            let output = try destination(png ? "Pasted image.png" : "Pasted image.tiff")
+            // Convert raw uncompressed TIFF clipboard payloads to lossless PNG so they stay small and portable.
+            let payload: Data
+            if format == .tiff {
+                guard let cg = CGImageSourceCreateImageAtIndex(source, 0, options) else {
+                    throw Failure(message: "Couldn’t paste the image. Attach it as a file instead.")
+                }
+                let encoded = NSMutableData()
+                guard
+                    let dest = CGImageDestinationCreateWithData(
+                        encoded as CFMutableData, UTType.png.identifier as CFString, 1, nil)
+                else { throw Failure(message: "Couldn’t paste the image. Attach it as a file instead.") }
+                CGImageDestinationAddImage(dest, cg, nil)
+                guard CGImageDestinationFinalize(dest), encoded.length > 0 else {
+                    throw Failure(message: "Couldn’t paste the image. Attach it as a file instead.")
+                }
+                payload = encoded as Data
+            } else {
+                payload = data
+            }
+            let output = try destination("Pasted image.\(format.fileExtension)")
             guard
                 FileManager.default.createFile(
-                    atPath: output.path, contents: data, attributes: [.posixPermissions: 0o600])
+                    atPath: output.path, contents: payload, attributes: [.posixPermissions: 0o600])
             else { throw Failure(message: "Couldn’t paste the image. Attach it as a file instead.") }
             result.append(output)
             try validateQueue(existing + result)

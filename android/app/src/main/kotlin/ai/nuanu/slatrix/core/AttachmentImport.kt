@@ -4,7 +4,9 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.graphics.Matrix
+import android.graphics.drawable.AnimatedImageDrawable
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -13,12 +15,16 @@ import androidx.core.graphics.scale
 import java.io.File
 import java.io.FileInputStream
 import java.util.UUID
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /** A picked file, copied where the SDK can read it, with what its event says about it. */
 data class OutgoingAttachment(val path: String, val name: String, val mimeType: String, val size: Long,
-    val width: Int?, val height: Int?, val durationMillis: Long? = null, val poster: VideoPoster? = null)
+    val width: Int?, val height: Int?, val durationMillis: Long? = null, val poster: VideoPoster? = null,
+    val animated: Boolean = false)
 
 /** Copies what the system picker hands over into the app's cache, since its permission ends with the picker. */
 // The platform's ExifInterface reads a file's orientation correctly from API 24, the app's minimum.
@@ -32,9 +38,15 @@ class AttachmentImport(context: Context) {
         val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) cursor.getString(0) else null
         } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "file"
-        val mimeType = resolver.getType(uri)
-            ?: MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase())
-            ?: "application/octet-stream"
+        val rawMime = resolver.getType(uri)?.substringBefore(';')?.trim()?.lowercase()
+        val extensionMime = MimeTypeMap.getSingleton()
+            .getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase())
+        val mimeType = when {
+            !rawMime.isNullOrBlank() && rawMime != "application/octet-stream" && rawMime != "*/*" -> rawMime
+            !extensionMime.isNullOrBlank() -> extensionMime
+            name.endsWith(".svg", ignoreCase = true) -> "image/svg+xml"
+            else -> rawMime ?: "application/octet-stream"
+        }
         // Its own folder, so the name stays the one people see and two picks of the same name don't collide.
         val folder = File(context.cacheDir, "attachments/${UUID.randomUUID()}").apply { mkdirs() }
         // Only the last part of the provider's name, so it can't point outside the folder.
@@ -53,9 +65,43 @@ class AttachmentImport(context: Context) {
         val turned = bounds != null && runCatching {
             android.media.ExifInterface(copy.path).getAttributeInt(android.media.ExifInterface.TAG_ORIENTATION, 1) in 5..8
         }.getOrDefault(false)
-        OutgoingAttachment(copy.path, name, mimeType, copy.length(),
-            bounds?.let { if (turned) it.outHeight else it.outWidth }, bounds?.let { if (turned) it.outWidth else it.outHeight })
+        val svgSize = if (bounds == null && (mimeType == "image/svg+xml" || name.endsWith(".svg", ignoreCase = true)) &&
+            copy.length() <= 10L * 1024 * 1024) {
+            runCatching { SvgDecoder.dimensions(copy.readBytes()) }.getOrNull()
+        } else null
+        val outWidth = bounds?.let { if (turned) it.outHeight else it.outWidth } ?: svgSize?.first
+        val outHeight = bounds?.let { if (turned) it.outWidth else it.outHeight } ?: svgSize?.second
+        val animated = mimeType == "image/gif" || (mimeType == "image/webp" && runCatching {
+            ImageDecoder.decodeDrawable(ImageDecoder.createSource(copy)) is AnimatedImageDrawable
+        }.getOrDefault(false))
+        val thumbnail = if (mimeType.startsWith("image/") && (copy.length() > 1_048_576L ||
+            mimeType == "image/heic" || mimeType == "image/heif" || mimeType == "image/tiff")) {
+            imageThumbnail(copy, folder)
+        } else null
+        OutgoingAttachment(copy.path, name, mimeType, copy.length(), outWidth, outHeight,
+            poster = thumbnail, animated = animated)
     }
+
+    /** Generates a small upright JPEG thumbnail for large or HEIC photos so previews never fail on >10 MiB uploads. */
+    private fun imageThumbnail(source: File, folder: File): VideoPoster? = runCatching {
+        val bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(source)) { decoder, info, _ ->
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            val w = info.size.width
+            val h = info.size.height
+            if (w > 0 && h > 0) {
+                val scale = min(1f, 960f / max(w, h))
+                decoder.setTargetSize(max(1, (w * scale).roundToInt()), max(1, (h * scale).roundToInt()))
+            }
+        }
+        try {
+            val file = File(folder, "thumb.jpg")
+            file.outputStream().use { out -> bitmap.compress(Bitmap.CompressFormat.JPEG, 75, out) }
+            if (file.length() in 1..(512L * 1024L)) VideoPoster(file.path, bitmap.width, bitmap.height, file.length())
+            else { file.delete(); null }
+        } finally {
+            bitmap.recycle()
+        }
+    }.getOrNull()
 
     /**
      * A video's shown size and length, and its poster from a frame near the start, as Slack's videos carry, so others can

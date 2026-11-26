@@ -55,7 +55,7 @@ struct DropToUploadTests {
         let png = try Data(contentsOf: try scratch.png("photo.png", width: 4, height: 4))
         let pane = Pane()
         #expect(pane.view.performDragOperation(FakeDrag(png: png)))
-        guard case .image(let data, png: true) = try #require(pane.staged.first) else {
+        guard case .image(let data, format: .png) = try #require(pane.staged.first) else {
             Issue.record("Staged \(pane.staged) instead of the image")
             return
         }

@@ -25,6 +25,7 @@ struct MediaViewer: View {
 private struct MediaViewerPage: View {
     private static let titleWidth: CGFloat = 360
     @Environment(\.metrics) private var m
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var appearance: AppearanceStore
     let matrix: MatrixService
     let viewer: MediaViewerState
@@ -78,7 +79,8 @@ private struct MediaViewerPage: View {
             return loaded?.lease.map { .file($0.url) } ?? .empty
         }
         if let image = loaded?.image {
-            return .image(id: message.eventID, image, size: size ?? image.size, animates: attachment.animated)
+            return .image(
+                id: message.eventID, image, size: size ?? image.size, animates: attachment.animated && !reduceMotion)
         }
         guard let still = matrix.cachedMediaImage(message) else { return .empty }
         let image = NSImage(cgImage: still, size: .zero)

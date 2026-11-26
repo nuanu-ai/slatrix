@@ -77,13 +77,28 @@ struct AttachmentView: View {
         }
     }
 
-    /// Opens the file in the app macOS picks for it.
+    /// Opens the file in the app macOS picks for it, from an independent copy so switching rooms never deletes the
+    /// file out from under Preview or QuickTime.
     func open(_ message: ChatMessage, matrix: MatrixService) async {
         let session = matrix.notificationSessionID
+        let safeName = SharedContentMapping.safeFilename(message.attachment?.name ?? "attachment")
         do {
             let lease = try await matrix.prepareAttachmentPreview(message)
+            defer { withExtendedLifetime(lease) {} }
             guard matrix.notificationSessionID == session, lease.isCurrent else { return }
-            NSWorkspace.shared.open(lease.url)
+            let source = lease.url
+            let copy = try await Task.detached(priority: .userInitiated) {
+                let root = AppPaths.temporary.appendingPathComponent("OpenedAttachments", isDirectory: true)
+                let folder = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
+                try FileManager.default.createDirectory(
+                    at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                let destination = folder.appendingPathComponent(safeName)
+                try FileManager.default.copyItem(at: source, to: destination)
+                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
+                return destination
+            }.value
+            guard matrix.notificationSessionID == session else { return }
+            NSWorkspace.shared.open(copy)
         } catch is CancellationError {} catch {
             if matrix.notificationSessionID == session { matrix.errorMessage = MatrixService.safeError(error) }
         }
@@ -123,12 +138,15 @@ extension MatrixService {
         }
     }
 
-    /// The whole file as an image, which keeps a GIF's frames.
+    /// The whole file as an upright image, preserving GIF frames and rasterizing SVGs cleanly.
     func loadFullImage(_ message: ChatMessage) async throws -> NSImage {
         let lease = try await prepareAttachmentPreview(message)
         let url = lease.url
         let data = try await Task.detached(priority: .userInitiated) { try Data(contentsOf: url) }.value
-        guard lease.isCurrent, let image = NSImage(data: data) else { throw CancellationError() }
+        guard lease.isCurrent else { throw CancellationError() }
+        let image = await Task.detached(priority: .userInitiated) { MediaImageDecoder.decodeFullImage(data) }.value
+        guard lease.isCurrent else { throw CancellationError() }
+        guard let image else { throw MatrixServiceError.request("Couldn’t open this image.") }
         return image
     }
 }
@@ -148,6 +166,7 @@ private struct InlineMedia: View {
     let actions: AttachmentActions
     @State private var still: CGImage?
     @State private var animation: NSImage?
+    @State private var loadFailed = false
     /// Under Reduce Motion a GIF waits for a click.
     @State private var playing = false
     @State private var hovering = false
@@ -189,6 +208,16 @@ private struct InlineMedia: View {
                         MediaImage(image: animation, animates: true)
                     } else if let shown {
                         MediaImage(image: NSImage(cgImage: shown, size: .zero)).transition(.opacity)
+                    } else if loadFailed && !isVideo {
+                        VStack(spacing: m.sp8) {
+                            Image(systemName: "photo").font(m.font(.title2)).foregroundStyle(colors.textTertiary)
+                            Text(attachment.name).font(m.font(.caption, .medium)).foregroundStyle(colors.textSecondary)
+                                .lineLimit(1).truncationMode(.middle)
+                            if let size = attachment.size {
+                                Text(ByteCountFormatter.string(fromByteCount: Int64(clamping: size), countStyle: .file))
+                                    .font(m.font(.caption)).foregroundStyle(colors.textTertiary)
+                            }
+                        }.padding(m.sp16)
                     }
                 }
                 .overlay { if isVideo { videoOverlay } }
@@ -274,10 +303,13 @@ private struct InlineMedia: View {
     private func load() async {
         // A picture on screen stays when the server confirms a sent file: its copy is the same picture.
         let started = ContinuousClock.now
-        if still == nil, matrix.cachedMediaImage(message) == nil, let image = await matrix.loadMediaImage(message),
-            !Task.isCancelled
-        {
-            withAnimation(Motion.arrival(since: started)) { still = image }
+        if still == nil, matrix.cachedMediaImage(message) == nil {
+            if let image = await matrix.loadMediaImage(message), !Task.isCancelled {
+                loadFailed = false
+                withAnimation(Motion.arrival(since: started)) { still = image }
+            } else if !Task.isCancelled {
+                loadFailed = true
+            }
         }
         // A large GIF plays when asked, not on its own.
         guard animates, animation == nil,

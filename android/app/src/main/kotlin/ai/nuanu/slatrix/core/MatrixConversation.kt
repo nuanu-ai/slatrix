@@ -55,6 +55,7 @@ import org.matrix.rustcomponents.sdk.SendTarget
 import org.matrix.rustcomponents.sdk.Room
 import org.matrix.rustcomponents.sdk.TaskHandle
 import org.matrix.rustcomponents.sdk.TextMessageContent
+import org.matrix.rustcomponents.sdk.ThumbnailInfo
 import org.matrix.rustcomponents.sdk.Timeline
 import org.matrix.rustcomponents.sdk.TimelineConfiguration
 import org.matrix.rustcomponents.sdk.TimelineDiff
@@ -852,9 +853,16 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                             threadRoot?.let(::threadRelation))
                         val size = attachment.size.toULong()
                         val kind = if (attachment.mimeType.startsWith("video/")) VideoUpload.kind(attachment)
-                        else if (attachment.width != null && attachment.height != null) AttachmentKind.Image(
-                            ImageInfo(attachment.height.toULong(), attachment.width.toULong(), attachment.mimeType, size, null, null, null, null),
-                            null)
+                        else if (attachment.width != null && attachment.height != null) {
+                            val thumb = attachment.poster
+                            val thumbInfo = thumb?.let {
+                                ThumbnailInfo(it.height.toULong(), it.width.toULong(), "image/jpeg", it.size.toULong())
+                            }
+                            AttachmentKind.Image(
+                                ImageInfo(attachment.height.toULong(), attachment.width.toULong(), attachment.mimeType, size,
+                                    thumbInfo, null, null, if (attachment.animated) true else null),
+                                thumb?.let { UploadSource.File(it.path) })
+                        }
                         else AttachmentKind.File(FileInfo(attachment.mimeType, size, null, null))
                         timeline().sendAttachment(params, kind).use { it.join() }
                     } finally {
@@ -1276,7 +1284,8 @@ private fun shown(kind: MsgLikeKind): Shown = when (kind) {
             // A caption is the attachment's text; without one the text is its name, which the row doesn't repeat.
             is MessageType.Image -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
                 MessageAttachment.Kind.Image, filename, info?.mimetype, info?.size?.long, info?.width?.int, info?.height?.int,
-                source, info?.thumbnailSource, info?.thumbnailInfo?.size?.long)) }
+                source, info?.thumbnailSource, info?.thumbnailInfo?.size?.long,
+                animated = info?.isAnimated == true || info?.mimetype?.equals("image/gif", ignoreCase = true) == true)) }
             is MessageType.Video -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
                 MessageAttachment.Kind.Video, filename, info?.mimetype, info?.size?.long, info?.width?.int, info?.height?.int,
                 source, info?.thumbnailSource, info?.thumbnailInfo?.size?.long, info?.duration?.toMillis())) }
