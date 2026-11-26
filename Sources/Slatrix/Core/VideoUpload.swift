@@ -108,4 +108,13 @@ enum VideoUpload {
         }
         return (Poster(width: size.width, height: size.height, size: bytes), url)
     }
+
+    /// Reads an audio file's duration via AVFoundation; returns nil when unreadable or non-finite.
+    static func audioDuration(_ url: URL) async -> TimeInterval? {
+        let asset = AVURLAsset(url: url)
+        guard let duration = try? await asset.load(.duration), duration.isNumeric, duration.seconds > 0 else {
+            return nil
+        }
+        return duration.seconds
+    }
 }

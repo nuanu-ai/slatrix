@@ -10,6 +10,8 @@ import Foundation
     private(set) var player: AVPlayer?
     /// The timeline it plays in, since a thread's root also shows in the channel.
     private var owner: ObjectIdentifier?
+    /// Invoked before playback starts so a sibling audio player pauses.
+    @ObservationIgnored var onWillPlay: (() -> Void)?
     @ObservationIgnored private var lease: AttachmentPreviewLease?
     @ObservationIgnored private var loading: Task<Void, Never>?
     @ObservationIgnored private var failure: NSKeyValueObservation?
@@ -33,6 +35,7 @@ import Foundation
 
     /// Plays `message` in the timeline `owner` shows, stopping whatever played before.
     func play(_ message: ChatMessage, matrix: MatrixService, from owner: AnyObject) {
+        onWillPlay?()
         stop()
         let eventID = message.eventID
         let session = matrix.notificationSessionID

@@ -377,6 +377,7 @@ internal fun Attachment(attachment: MessageAttachment, load: PictureLoader, vide
     when (attachment.kind) {
         MessageAttachment.Kind.Image -> InlineImage(attachment, load, onLongPress, onView)
         MessageAttachment.Kind.Video -> InlineVideo(attachment, load, videos, onLongPress)
+        MessageAttachment.Kind.Audio -> InlineAudio(attachment, videos, onLongPress, onOpenFile)
         else -> FileRow(attachment, opening, onLongPress, onOpenFile)
     }
 }
@@ -388,11 +389,15 @@ private fun InlineImage(attachment: MessageAttachment, load: PictureLoader, onLo
     val shape = MaterialTheme.shapes.large
     val reducedMotion = kotlin.coroutines.EmptyCoroutineContext.isMotionReduced(context)
     BoxWithConstraints {
-        val (width, height) = box(attachment.width, attachment.height, maxWidth, UiMetrics.MediaMaxHeight)
+        val maxBoxWidth = if (attachment.isSticker) min(maxWidth, UiMetrics.StickerMaxSize) else maxWidth
+        val maxBoxHeight = if (attachment.isSticker) UiMetrics.StickerMaxSize else UiMetrics.MediaMaxHeight
+        val (width, height) = box(attachment.width, attachment.height, maxBoxWidth, maxBoxHeight)
         val pixels = with(LocalDensity.current) { width.roundToPx() to height.roundToPx() }
         val loaded = pictureState(attachment, pixels.first, pixels.second, false, !reducedMotion, load)
-        val hasDimensions = attachment.width != null && attachment.height != null
-        Box(Modifier.size(width, height).clip(shape).background(colors.sunken)
+        val hasDimensions = !attachment.isSticker && attachment.width != null && attachment.height != null
+        val surface = if (attachment.isSticker) Modifier.size(width, height).clip(shape)
+        else Modifier.size(width, height).clip(shape).background(colors.sunken)
+        Box(surface
             .semantics { contentDescription = attachment.name }
             .combinedClickable(onClickLabel = "View image", onLongClickLabel = "Message actions", onLongClick = onLongPress) { onView(pixels) },
             contentAlignment = Alignment.Center) {

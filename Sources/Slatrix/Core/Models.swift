@@ -145,8 +145,11 @@ struct ChatMessage: Identifiable, Hashable {
     var timelineEventID: String? = nil
     /// The remote event ID, or the transaction ID of a local echo.
     var eventID: String { timelineEventID ?? id }
-    var supportsCaptionEditing: Bool { ["m.image", "m.file"].contains(kind) && attachment != nil }
+    var supportsCaptionEditing: Bool {
+        ["m.image", "m.file", "m.video", "m.audio"].contains(kind) && attachment != nil
+    }
     var showsMessageBody: Bool {
+        if kind == "m.sticker" { return false }
         if supportsCaptionEditing { return mediaCaption.map { !$0.isEmpty } ?? false }
         return !body.isEmpty && (attachment == nil || body != attachment?.name)
     }
@@ -220,6 +223,10 @@ struct MessageAttachment: Hashable {
     var height: UInt64? = nil
     /// A GIF or another animated image, which plays inline.
     var animated = false
-    /// A video's length.
+    /// A video's or audio clip's length.
     var duration: TimeInterval? = nil
+    /// Normalized 0..1024 amplitude samples for voice messages (MSC3245).
+    var waveform: [UInt16]? = nil
+    /// Whether the sender marked this audio as a voice message (`org.matrix.msc3245.voice`).
+    var isVoice = false
 }

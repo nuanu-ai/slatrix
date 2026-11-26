@@ -113,6 +113,13 @@ object UiMetrics {
     val ChipHeight = 28.dp
     /** The tallest an inline image gets; wider ones fill the row. */
     val MediaMaxHeight = 320.dp
+    /** Compact size cap for Matrix stickers. */
+    val StickerMaxSize = 180.dp
+    /** Inline audio player waveform/track dimensions. */
+    val AudioWaveformHeight = 24.dp
+    val AudioTrackHeight = 4.dp
+    val AudioBarMinHeight = 3.dp
+    val AudioCardMinWidth = 220.dp
     val FileTile = 40.dp
     /** What one of an image's own pixels takes inline, so a small image keeps its size, as on the Mac. */
     val MediaPixel = 1.dp

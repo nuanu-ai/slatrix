@@ -263,7 +263,8 @@ struct ForwardMessageView: View {
                             "Image preview: \(image.filename)")
                 }
                 attachmentCard(
-                    filename: image.filename, mimeType: image.info?.mimetype, size: image.info?.size, image: true)
+                    filename: image.filename, mimeType: image.info?.mimetype, size: image.info?.size,
+                    symbol: "photo", fallbackType: "Image")
                 if let caption = image.caption, !caption.isEmpty {
                     NativeMessageBody(body: caption, formattedBody: review.message.formattedBody)
                 }
@@ -271,8 +272,36 @@ struct ForwardMessageView: View {
         case .file(let file):
             VStack(alignment: .leading, spacing: m.sp8) {
                 attachmentCard(
-                    filename: file.filename, mimeType: file.info?.mimetype, size: file.info?.size, image: false)
+                    filename: file.filename, mimeType: file.info?.mimetype, size: file.info?.size, symbol: "doc.text",
+                    fallbackType: "File")
                 if let caption = file.caption, !caption.isEmpty {
+                    NativeMessageBody(body: caption, formattedBody: review.message.formattedBody)
+                }
+            }
+        case .video(let video):
+            VStack(alignment: .leading, spacing: m.sp8) {
+                if let thumbnail {
+                    Image(nsImage: thumbnail).resizable().aspectRatio(contentMode: .fit)
+                        .frame(
+                            maxWidth: m(min(Self.imageMaxSize.width, max(1, thumbnail.size.width))),
+                            maxHeight: m(Self.imageMaxSize.height)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: m.radius)).accessibilityLabel(
+                            "Video preview: \(video.filename)")
+                }
+                attachmentCard(
+                    filename: video.filename, mimeType: video.info?.mimetype, size: video.info?.size,
+                    symbol: "film", fallbackType: "Video")
+                if let caption = video.caption, !caption.isEmpty {
+                    NativeMessageBody(body: caption, formattedBody: review.message.formattedBody)
+                }
+            }
+        case .audio(let audio):
+            VStack(alignment: .leading, spacing: m.sp8) {
+                attachmentCard(
+                    filename: audio.filename, mimeType: audio.info?.mimetype, size: audio.info?.size,
+                    symbol: "waveform", fallbackType: "Audio")
+                if let caption = audio.caption, !caption.isEmpty {
                     NativeMessageBody(body: caption, formattedBody: review.message.formattedBody)
                 }
             }
@@ -281,9 +310,11 @@ struct ForwardMessageView: View {
         }
     }
 
-    private func attachmentCard(filename: String, mimeType: String?, size: UInt64?, image: Bool) -> some View {
+    private func attachmentCard(
+        filename: String, mimeType: String?, size: UInt64?, symbol: String, fallbackType: String
+    ) -> some View {
         HStack(alignment: .center, spacing: m.sp12) {
-            Image(systemName: image ? "photo" : "doc.text")
+            Image(systemName: symbol)
                 .font(m.font(.title2)).foregroundStyle(colors.accent)
                 .frame(width: m(Self.fileTile), height: m(Self.fileTile))
                 .background(colors.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: m.radius))
@@ -292,7 +323,7 @@ struct ForwardMessageView: View {
                 Text(filename).font(m.font(.body, .semibold)).foregroundStyle(colors.textPrimary)
                     .lineLimit(2).textSelection(.enabled).help(filename)
                 HStack(spacing: m.sp8) {
-                    Text(attachmentType(filename: filename, mimeType: mimeType, image: image))
+                    Text(attachmentType(filename: filename, mimeType: mimeType, fallback: fallbackType))
                     if let size {
                         Text("·")
                         Text(ByteCountFormatter.string(fromByteCount: Int64(clamping: size), countStyle: .file))
@@ -306,18 +337,22 @@ struct ForwardMessageView: View {
             .accessibilityElement(children: .combine)
     }
 
-    private func attachmentType(filename: String, mimeType: String?, image: Bool) -> String {
+    private func attachmentType(filename: String, mimeType: String?, fallback: String) -> String {
         let type =
             mimeType.flatMap { UTType(mimeType: $0) } ?? UTType(filenameExtension: (filename as NSString).pathExtension)
         if let type, type != .data, let description = type.localizedDescription { return description }
-        return image ? "Image" : "File"
+        return fallback
     }
 
     @MainActor private func loadThumbnail() async {
         thumbnail = nil
         guard current, !matrix.isPreview, queued == nil, let captured = review,
-            case .image = captured.value, let source = matrix.attachmentSourceRevision(captured.message)
+            let source = matrix.attachmentSourceRevision(captured.message)
         else { return }
+        switch captured.value {
+        case .image, .video: break
+        default: return
+        }
         let session = matrix.notificationSessionID
         @MainActor func isCurrentThumbnail() -> Bool {
             !Task.isCancelled && current && queued == nil && matrix.notificationSessionID == session

@@ -75,6 +75,8 @@ struct MediaCaptionTests {
             #expect(image.info?.blurhash == "fixture-blurhash")
         case .file(let file):
             #expect(file.info?.size == 72 && file.info?.mimetype == "text/plain")
+        case .video, .audio:
+            Issue.record("expected image or file fixture")
         }
     }
 

@@ -79,6 +79,8 @@ struct TimelineMessageEntry: Hashable {
     var onOpenMedia: (ChatMessage) -> Void = { _ in }
     /// The window's one inline video player.
     var inlineVideo: InlineVideo?
+    /// The window's one inline audio/voice player.
+    var inlineAudio: InlineAudio?
     var onReact: (MessageActionTarget, String) -> Void = { _, _ in }
     var onRetrySend: (ChatMessage) -> Void = { _ in }
     var onCancelSend: (ChatMessage) -> Void = { _ in }

@@ -6,11 +6,15 @@ import MatrixRustSDK
 enum MediaCaptionContent {
     case image(ImageMessageContent)
     case file(FileMessageContent)
+    case video(VideoMessageContent)
+    case audio(AudioMessageContent)
 
     init(_ content: MessageContent) throws {
         switch content.msgType {
         case .image(let value): self = .image(value)
         case .file(let value): self = .file(value)
+        case .video(let value): self = .video(value)
+        case .audio(let value): self = .audio(value)
         default: throw MediaCaptionError.unsupported
         }
     }
@@ -18,24 +22,32 @@ enum MediaCaptionContent {
         switch self {
         case .image(let value): value.caption
         case .file(let value): value.caption
+        case .video(let value): value.caption
+        case .audio(let value): value.caption
         }
     }
     var formattedCaption: FormattedBody? {
         switch self {
         case .image(let value): value.formattedCaption
         case .file(let value): value.formattedCaption
+        case .video(let value): value.formattedCaption
+        case .audio(let value): value.formattedCaption
         }
     }
     var source: MediaSource {
         switch self {
         case .image(let value): value.source
         case .file(let value): value.source
+        case .video(let value): value.source
+        case .audio(let value): value.source
         }
     }
     var filename: String {
         switch self {
         case .image(let value): value.filename
         case .file(let value): value.filename
+        case .video(let value): value.filename
+        case .audio(let value): value.filename
         }
     }
     func replacingCaption(_ caption: String?) -> MessageContent {
@@ -49,6 +61,14 @@ enum MediaCaptionContent {
             value.caption = caption
             value.formattedCaption = nil
             type = .file(content: value)
+        case .video(var value):
+            value.caption = caption
+            value.formattedCaption = nil
+            type = .video(content: value)
+        case .audio(var value):
+            value.caption = caption
+            value.formattedCaption = nil
+            type = .audio(content: value)
         }
         return MessageContent(msgType: type, body: caption ?? filename, isEdited: false, mentions: nil)
     }

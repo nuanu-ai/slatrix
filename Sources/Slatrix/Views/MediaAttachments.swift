@@ -10,9 +10,11 @@ struct AttachmentActions {
     var copyLink: (() -> Void)?
     /// Where a video here plays in place rather than in the viewer.
     var inlineVideo: InlineVideo.Slot?
+    /// Where an audio or voice clip here plays in place.
+    var inlineAudio: InlineAudio.Slot?
 }
 
-/// An attachment as Slack shows it: images, GIFs and videos inline under their name, other files as a card.
+/// An attachment as Slack shows it: images, GIFs, stickers and videos inline, audio with a player, other files as a card.
 struct AttachmentView: View {
     let matrix: MatrixService
     let message: ChatMessage
@@ -23,7 +25,11 @@ struct AttachmentView: View {
 
     var body: some View {
         Group {
-            if message.isViewerMedia {
+            if message.kind == "m.audio" {
+                AudioCard(
+                    matrix: matrix, message: message, attachment: attachment, pendingSend: pendingSend,
+                    actions: actions)
+            } else if message.isViewerMedia {
                 InlineMedia(
                     matrix: matrix, message: message, attachment: attachment, collapsed: collapsed,
                     pendingSend: pendingSend, actions: actions)
@@ -178,6 +184,7 @@ extension MatrixService {
 /// the event's size, so nothing moves when it loads.
 private struct InlineMedia: View {
     private static let bounds = CGSize(width: 480, height: 360)
+    private static let stickerBounds = CGSize(width: 180, height: 180)
     @Environment(\.metrics) private var m
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @EnvironmentObject private var appearance: AppearanceStore
@@ -196,6 +203,7 @@ private struct InlineMedia: View {
     @State private var downloading = false
     private var colors: AppColors { appearance.colors }
     private var isVideo: Bool { message.kind == "m.video" }
+    private var isSticker: Bool { message.kind == "m.sticker" }
     private var animates: Bool { attachment.animated && (playing || !reduceMotion) }
     /// Where a video plays in place; nil where a click opens the viewer instead.
     private var inline: InlineVideo.Slot? { isVideo ? actions.inlineVideo : nil }
@@ -203,68 +211,88 @@ private struct InlineMedia: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: m.sp4) {
-            Button {
-                matrix.collapsedMedia.formSymmetricDifference([message.eventID])
-            } label: {
-                HStack(spacing: m.sp4) {
-                    FileNameText(attachment.name, role: .subheadline)
-                    Image(systemName: collapsed ? "chevron.right" : "chevron.down").font(
-                        m.font(.subheadline, .semibold))
-                }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
-            }.buttonStyle(.row).help(collapsed ? "Show" : "Hide")
-                .accessibilityLabel("\(collapsed ? "Show" : "Hide") \(attachment.name)")
-                .opacity(pendingSend ? 0.5 : 1)
-            if !collapsed { media }
+            if !isSticker {
+                Button {
+                    matrix.collapsedMedia.formSymmetricDifference([message.eventID])
+                } label: {
+                    HStack(spacing: m.sp4) {
+                        FileNameText(attachment.name, role: .subheadline)
+                        Image(systemName: collapsed ? "chevron.right" : "chevron.down").font(
+                            m.font(.subheadline, .semibold))
+                    }.font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                }.buttonStyle(.row).help(collapsed ? "Show" : "Hide")
+                    .accessibilityLabel("\(collapsed ? "Show" : "Hide") \(attachment.name)")
+                    .opacity(pendingSend ? 0.5 : 1)
+            }
+            if isSticker || !collapsed { media }
         }
     }
 
     private var media: some View {
+        let maxBounds = isSticker ? Self.stickerBounds : Self.bounds
         let box = MediaBox.fit(
             width: attachment.width, height: attachment.height,
-            within: CGSize(width: m(Self.bounds.width), height: m(Self.bounds.height)))
+            within: CGSize(width: m(maxBounds.width), height: m(maxBounds.height)))
         let shape = RoundedRectangle(cornerRadius: m.radiusLarge)
         let shown = still ?? matrix.cachedMediaImage(message)
-        return Button(action: click) {
-            shape.fill(colors.sunken)
-                .overlay {
-                    if let animation {
-                        MediaImage(image: animation, animates: true)
-                    } else if let shown {
-                        MediaImage(image: NSImage(cgImage: shown, size: .zero)).transition(.opacity)
-                    } else if loadFailed && !isVideo {
-                        VStack(spacing: m.sp8) {
-                            Image(systemName: "photo").font(m.font(.title2)).foregroundStyle(colors.textTertiary)
-                            Text(attachment.name).font(m.font(.caption, .medium)).foregroundStyle(colors.textSecondary)
-                                .lineLimit(1).truncationMode(.middle)
-                            if let size = attachment.size {
-                                Text(ByteCountFormatter.string(fromByteCount: Int64(clamping: size), countStyle: .file))
-                                    .font(m.font(.caption)).foregroundStyle(colors.textTertiary)
+        let activePlayer = playsHere ? inline?.player : nil
+        return Group {
+            if let activePlayer {
+                shape.fill(colors.sunken)
+                    .overlay { InlinePlayer(player: activePlayer) }
+                    .clipShape(shape)
+                    .overlay(shape.strokeBorder(colors.border))
+                    .aspectRatio(box.width / box.height, contentMode: .fit)
+                    .frame(maxWidth: box.width)
+            } else {
+                Button(action: click) {
+                    shape.fill(isSticker ? .clear : colors.sunken)
+                        .overlay {
+                            if let animation {
+                                MediaImage(image: animation, animates: true)
+                            } else if let shown {
+                                MediaImage(image: NSImage(cgImage: shown, size: .zero)).transition(.opacity)
+                            } else if loadFailed && !isVideo {
+                                VStack(spacing: m.sp8) {
+                                    Image(systemName: "photo").font(m.font(.title2))
+                                        .foregroundStyle(colors.textTertiary)
+                                    Text(attachment.name).font(m.font(.caption, .medium))
+                                        .foregroundStyle(colors.textSecondary)
+                                        .lineLimit(1).truncationMode(.middle)
+                                    if let size = attachment.size {
+                                        Text(
+                                            ByteCountFormatter.string(
+                                                fromByteCount: Int64(clamping: size), countStyle: .file)
+                                        )
+                                        .font(m.font(.caption)).foregroundStyle(colors.textTertiary)
+                                    }
+                                }.padding(m.sp16)
                             }
-                        }.padding(m.sp16)
-                    }
+                        }
+                        .overlay { if isVideo { videoOverlay } }
+                        .overlay(alignment: .bottomLeading) { if !playsHere { badge.padding(m.sp8) } }
+                        .opacity(pendingSend ? 0.5 : 1)
+                        .overlay(alignment: .bottom) {
+                            if pendingSend {
+                                PendingUploadProgressOverlay(
+                                    store: matrix.uploadProgress, roomID: message.roomID, messageID: message.eventID)
+                            }
+                        }
+                        .clipShape(shape)
+                        .overlay { if !isSticker { shape.strokeBorder(colors.border) } }
+                        .aspectRatio(box.width / box.height, contentMode: .fit)
+                        .frame(maxWidth: box.width)
                 }
-                .overlay { if isVideo { videoOverlay } }
-                .overlay(alignment: .bottomLeading) { if !playsHere { badge.padding(m.sp8) } }
-                .opacity(pendingSend ? 0.5 : 1)
-                .overlay(alignment: .bottom) {
-                    if pendingSend {
-                        PendingUploadProgressOverlay(
-                            store: matrix.uploadProgress, roomID: message.roomID, messageID: message.eventID)
-                    }
-                }
-                .clipShape(shape)
-                .overlay(shape.strokeBorder(colors.border))
-                .aspectRatio(box.width / box.height, contentMode: .fit)
-                .frame(maxWidth: box.width)
+                .buttonStyle(.row).help(attachment.name)
+                .accessibilityLabel("\(inline == nil ? "Open" : "Play") \(attachment.name)")
+            }
         }
-        .buttonStyle(.row).help(attachment.name)
-        .accessibilityLabel("\(inline == nil ? "Open" : "Play") \(attachment.name)")
         .accessibilityAction(named: "Download") {
             Task { await AttachmentFiles.shared.download(message, matrix: matrix) }
         }
         .accessibilityActions { if inline != nil { Button("Full screen", action: actions.open) } }
         .overlay(alignment: .topTrailing) {
-            if hovering || downloading {
+            if !isSticker && (hovering || downloading) {
                 MediaActionsToolbar(
                     matrix: matrix, message: message, actions: actions, downloading: $downloading,
                     fullScreen: inline == nil ? nil : actions.open
@@ -500,6 +528,206 @@ struct FileCard: View {
             }
                 ?? []))
             .joined(separator: " · ")
+    }
+}
+
+/// An inline audio or voice message card: play/pause button, interactive waveform or scrubber, duration and trailing actions.
+struct AudioCard: View {
+    private static let minWidth: CGFloat = 260
+    private static let maxWidth: CGFloat = 368
+    private static let trailingReserve: CGFloat = 56
+    private static let waveformBars = 36
+    @Environment(\.metrics) private var m
+    @EnvironmentObject private var appearance: AppearanceStore
+    let matrix: MatrixService
+    let message: ChatMessage
+    let attachment: MessageAttachment
+    var pendingSend = false
+    var actions = AttachmentActions()
+    @State private var hovering = false
+    @State private var downloading = false
+
+    private var colors: AppColors { appearance.colors }
+    private var slot: InlineAudio.Slot? { actions.inlineAudio }
+    private var isPlaying: Bool { slot?.isPlaying == true }
+    private var isLoading: Bool { slot?.isLoading == true }
+    private var totalDuration: TimeInterval { slot?.duration ?? attachment.duration ?? 0 }
+    private var currentTime: TimeInterval { slot?.currentTime ?? 0 }
+    private var progress: Double { totalDuration > 0 ? min(max(currentTime / totalDuration, 0), 1) : 0 }
+    private var title: String {
+        if attachment.isVoice {
+            let base = (attachment.name as NSString).deletingPathExtension.lowercased()
+            if base.isEmpty || base == "voice" || base == "audio" || base == "voice-message" {
+                return "Voice message"
+            }
+        }
+        return attachment.name
+    }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: m.radiusLarge)
+        let showActions = hovering || downloading
+        FitWidthLayout(min: m(Self.minWidth), max: m(Self.maxWidth)) {
+            HStack(spacing: m.sp12) {
+                Button {
+                    if let slot { slot.toggle() } else { actions.open() }
+                } label: {
+                    ZStack {
+                        Circle().fill(colors.accentFill)
+                        if isLoading {
+                            DelayedProgress().environment(\.colorScheme, .dark)
+                        } else {
+                            Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                                .font(m.font(.body, .semibold))
+                                .foregroundStyle(colors.onAccent)
+                        }
+                    }
+                    .frame(width: m(FileCard.iconSide), height: m(FileCard.iconSide))
+                }
+                .buttonStyle(.row)
+                .disabled(pendingSend)
+                .accessibilityLabel(isPlaying ? "Pause \(title)" : "Play \(title)")
+                .help(isPlaying ? "Pause" : "Play")
+
+                VStack(alignment: .leading, spacing: m.sp4) {
+                    FileNameText(title, role: .subheadline, weight: .medium).foregroundStyle(colors.textPrimary)
+                    scrubber
+                    if let error = slot?.error {
+                        HStack(spacing: m.sp8) {
+                            Text(error).font(m.font(.caption)).foregroundStyle(colors.destructive).lineLimit(1)
+                            Button("Open in default app") {
+                                Task { await AttachmentFiles.shared.open(message, matrix: matrix) }
+                            }.buttonStyle(.textLink).font(m.font(.caption))
+                        }
+                    } else {
+                        Text(subtitle).font(m.font(.caption)).monospacedDigit().foregroundStyle(colors.textSecondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .padding(.leading, m(10)).padding(.vertical, m(10))
+            .padding(.trailing, m(10) + m(Self.trailingReserve))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .opacity(pendingSend ? 0.5 : 1)
+            .background(colors.surfaceCard, in: shape)
+            .overlay(alignment: .bottom) {
+                if pendingSend {
+                    PendingUploadProgressOverlay(
+                        store: matrix.uploadProgress, roomID: message.roomID, messageID: message.eventID)
+                }
+            }
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(hovering ? colors.borderStrong : colors.border))
+            .overlay(alignment: .trailing) {
+                if showActions {
+                    trailingActions.padding(.trailing, m.sp8).transition(.opacity)
+                }
+            }
+            .animation(Motion.overlay, value: showActions)
+            .onHover { hovering = $0 }
+        }
+    }
+
+    private var scrubber: some View {
+        let samples = normalizedWaveform
+        return GeometryReader { proxy in
+            let width = max(1, proxy.size.width)
+            ZStack(alignment: .leading) {
+                if let samples {
+                    HStack(alignment: .center, spacing: m(2)) {
+                        ForEach(Array(samples.enumerated()), id: \.offset) { index, amp in
+                            let barFrac = Double(index + 1) / Double(samples.count)
+                            let filled = barFrac <= progress && (slot?.isCurrent == true)
+                            Capsule()
+                                .fill(filled ? colors.accent : colors.borderStrong)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: max(m(3), proxy.size.height * CGFloat(amp)))
+                        }
+                    }
+                } else {
+                    Capsule().fill(colors.sunken).frame(height: m(4))
+                    Capsule().fill(colors.accent)
+                        .frame(width: width * CGFloat(progress), height: m(4))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0).onEnded { value in
+                    let fraction = Double(value.location.x / width)
+                    slot?.seek(to: fraction)
+                }
+            )
+        }
+        .frame(height: attachment.waveform != nil ? m(20) : m(12))
+        .accessibilityElement()
+        .accessibilityLabel("Playback position")
+        .accessibilityValue(subtitle)
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: slot?.step(by: 5)
+            case .decrement: slot?.step(by: -5)
+            @unknown default: break
+            }
+        }
+    }
+
+    private var normalizedWaveform: [Double]? {
+        guard let raw = attachment.waveform, !raw.isEmpty else { return nil }
+        let count = Self.waveformBars
+        let maxSample = Double(max(raw.max() ?? 1, 1))
+        return (0..<count).map { idx in
+            let start = idx * raw.count / count
+            let end = max(start + 1, (idx + 1) * raw.count / count)
+            let peak = raw[start..<min(end, raw.count)].max() ?? 0
+            return min(1.0, max(0.15, Double(peak) / maxSample))
+        }
+    }
+
+    private var subtitle: String {
+        let durationText = Self.formatTime(totalDuration)
+        if slot?.isCurrent == true && totalDuration > 0 {
+            return "\(Self.formatTime(currentTime)) / \(durationText)"
+        }
+        var parts: [String] = []
+        if totalDuration > 0 { parts.append(durationText) }
+        if let size = attachment.size {
+            parts.append(ByteCountFormatter.string(fromByteCount: Int64(clamping: size), countStyle: .file))
+        } else if parts.isEmpty {
+            parts.append(attachment.typeLabel)
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    static func formatTime(_ seconds: TimeInterval) -> String {
+        let total = max(0, Int(seconds.rounded()))
+        let h = total / 3_600
+        let m = (total % 3_600) / 60
+        let s = total % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+    }
+
+    private var trailingActions: some View {
+        let side = MessageToolbar.button
+        return HStack(spacing: 0) {
+            if downloading {
+                DelayedProgress().frame(width: m(side), height: m(side))
+            } else {
+                IconButton(symbol: "arrow.down.to.line", label: "Download", role: .body, side: side) {
+                    downloading = true
+                    Task {
+                        await AttachmentFiles.shared.download(message, matrix: matrix)
+                        downloading = false
+                    }
+                }
+            }
+            Menu {
+                AttachmentMenuItems(
+                    matrix: matrix, message: message, copyLink: actions.copyLink, forward: actions.forward)
+            } label: {
+                Image(systemName: "ellipsis").font(m.font(.body)).frame(width: m(side), height: m(side))
+            }.menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: m(side)).help("More actions")
+        }.foregroundStyle(colors.textSecondary)
     }
 }
 

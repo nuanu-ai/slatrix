@@ -10,6 +10,8 @@ enum ForwardMessageContent: Equatable {
     case emote(EmoteMessageContent)
     case image(ImageMessageContent)
     case file(FileMessageContent)
+    case video(VideoMessageContent)
+    case audio(AudioMessageContent)
 
     init(_ content: MessageContent) throws {
         switch content.msgType {
@@ -18,6 +20,8 @@ enum ForwardMessageContent: Equatable {
         case .emote(let value): self = .emote(value)
         case .image(let value): self = .image(value)
         case .file(let value): self = .file(value)
+        case .video(let value): self = .video(value)
+        case .audio(let value): self = .audio(value)
         default: throw ForwardMessageError.unsupported
         }
     }
@@ -25,6 +29,8 @@ enum ForwardMessageContent: Equatable {
         switch self {
         case .image(let value): ForwardMediaRevision(value)
         case .file(let value): ForwardMediaRevision(value)
+        case .video(let value): ForwardMediaRevision(value)
+        case .audio(let value): ForwardMediaRevision(value)
         default: nil
         }
     }
@@ -33,13 +39,14 @@ enum ForwardMessageContent: Equatable {
         case (.text(let a), .text(let b)): a == b
         case (.notice(let a), .notice(let b)): a == b
         case (.emote(let a), .emote(let b)): a == b
-        case (.image, .image), (.file, .file): lhs.mediaRevision == rhs.mediaRevision
+        case (.image, .image), (.file, .file), (.video, .video), (.audio, .audio):
+            lhs.mediaRevision == rhs.mediaRevision
         default: false
         }
     }
     static func supports(_ message: ChatMessage) -> Bool {
-        ["m.text", "m.notice", "m.emote", "m.image", "m.file"].contains(message.kind) && !message.isRedacted
-            && message.sendState == "sent" && message.eventID.hasPrefix("$")
+        ["m.text", "m.notice", "m.emote", "m.image", "m.file", "m.video", "m.audio"].contains(message.kind)
+            && !message.isRedacted && message.sendState == "sent" && message.eventID.hasPrefix("$")
     }
 }
 // Complete identity for the media fields copied by the official helper. No
@@ -48,12 +55,15 @@ struct ForwardMediaRevision: Hashable {
     struct Info: Hashable {
         var height: UInt64? = nil
         var width: UInt64? = nil
+        var duration: TimeInterval? = nil
         let mimetype: String?
         let size: UInt64?
         let thumbnail: ThumbnailInfo?
         let thumbnailSource: Data?
         var blurhash: String? = nil
         var isAnimated: Bool? = nil
+        var waveform: [UInt16]? = nil
+        var isVoice: Bool = false
     }
     let filename: String
     let caption: String?
@@ -86,6 +96,30 @@ struct ForwardMediaRevision: Hashable {
                 mimetype: $0.mimetype, size: $0.size, thumbnail: $0.thumbnailInfo,
                 thumbnailSource: $0.thumbnailSource.map(Self.fingerprint))
         }
+    }
+    init(_ value: VideoMessageContent) {
+        filename = value.filename
+        caption = value.caption
+        formattedCaption = value.formattedCaption
+        source = Self.fingerprint(value.source)
+        info = value.info.map {
+            Info(
+                height: $0.height, width: $0.width, duration: $0.duration, mimetype: $0.mimetype, size: $0.size,
+                thumbnail: $0.thumbnailInfo, thumbnailSource: $0.thumbnailSource.map(Self.fingerprint),
+                blurhash: $0.blurhash)
+        }
+    }
+    init(_ value: AudioMessageContent) {
+        filename = value.filename
+        caption = value.caption
+        formattedCaption = value.formattedCaption
+        source = Self.fingerprint(value.source)
+        info = Info(
+            duration: value.info?.duration ?? value.audio?.duration,
+            mimetype: value.info?.mimetype, size: value.info?.size,
+            thumbnail: nil, thumbnailSource: nil,
+            waveform: value.audio?.waveform.isEmpty == false ? value.audio?.waveform : nil,
+            isVoice: value.voice != nil)
     }
 }
 struct ForwardMessageReview: Identifiable {
