@@ -86,4 +86,37 @@ struct AttachmentPreviewTests {
             #expect(client.downloads == 2)
         }
     }
+
+    @Test(
+        "An inline SVG renders a rasterized still at its aspect ratio and falls back when the server cannot thumbnail"
+    )
+    func inlineSVGPreview() async throws {
+        let svg = Data(
+            """
+            <svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
+              <rect width="200" height="100" fill="#2563eb"/>
+            </svg>
+            """.utf8)
+        client.thumbnail = svg
+        show(try imageEvent("$svg-direct", width: nil, height: nil, mime: "image/svg+xml"))
+        let direct = try #require(service.messages.first)
+        let image = try #require(await service.loadMediaImage(direct))
+        #expect(image.width > 0 && image.height > 0)
+        #expect(image.width == image.height * 2)
+
+        // Unencrypted homeservers (e.g. Synapse) often fail thumbnailing SVG; fall back to the original content.
+        client.thumbnailError = MatrixServiceError.request("Could not thumbnail SVG")
+        client.stored = svg
+        show(try imageEvent("$svg-fallback", width: nil, height: nil, mime: "image/svg+xml"))
+        let fallback = try #require(service.messages.first)
+        let fallbackImage = try #require(await service.loadMediaImage(fallback))
+        #expect(fallbackImage.width == fallbackImage.height * 2)
+
+        // Non-SVG vector data (e.g. a PDF spoofed as m.image) must never be rasterized as an inline image.
+        client.thumbnailError = nil
+        client.thumbnail = Data("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF".utf8)
+        show(try imageEvent("$pdf-spoof", width: nil, height: nil, mime: "image/png"))
+        let spoof = try #require(service.messages.first)
+        #expect(await service.loadMediaImage(spoof) == nil)
+    }
 }

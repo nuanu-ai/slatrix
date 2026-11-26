@@ -1,5 +1,4 @@
 import AppKit
-import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -328,18 +327,8 @@ struct ForwardMessageView: View {
         do {
             let data = try await matrix.thumbnailData(captured.message, width: 880, height: 280)
             guard isCurrentThumbnail() else { return }
-            let image = await Task.detached(priority: .utility) { () -> CGImage? in
-                guard
-                    let source = CGImageSourceCreateWithData(
-                        data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary)
-                else { return nil }
-                return CGImageSourceCreateThumbnailAtIndex(
-                    source, 0,
-                    [
-                        kCGImageSourceCreateThumbnailFromImageAlways: true,
-                        kCGImageSourceCreateThumbnailWithTransform: true, kCGImageSourceThumbnailMaxPixelSize: 880,
-                        kCGImageSourceShouldCacheImmediately: true,
-                    ] as CFDictionary)
+            let image = await Task.detached(priority: .utility) {
+                MediaImageDecoder.decodeStill(data, maxPixels: 880)
             }.value
             guard isCurrentThumbnail(), let image else { return }
             thumbnail = NSImage(cgImage: image, size: .zero)

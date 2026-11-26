@@ -4009,13 +4009,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     /// An image's size upright, from its header alone: EXIF orientations 5 to 8 turn it a quarter, swapping the sides.
     private static func displayedSize(_ url: URL) -> (width: UInt64, height: UInt64)? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+        if let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
             let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
             let width = properties[kCGImagePropertyPixelWidth] as? UInt64,
             let height = properties[kCGImagePropertyPixelHeight] as? UInt64
-        else { return nil }
-        let orientation = properties[kCGImagePropertyOrientation] as? UInt32 ?? 1
-        return orientation >= 5 ? (height, width) : (width, height)
+        {
+            let orientation = properties[kCGImagePropertyOrientation] as? UInt32 ?? 1
+            return orientation >= 5 ? (height, width) : (width, height)
+        }
+        return MediaImageDecoder.svgDimensions(url)
     }
 
     /// The attachment as an open timeline shows it now, or nil once it was deleted, replaced or left the view.
@@ -4265,8 +4267,17 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             }
             source = original
         }
-        let data = try await client.getMediaThumbnail(
-            mediaSource: source, width: min(max(width, 1), 2048), height: min(max(height, 1), 2048))
+        let data: Data
+        do {
+            data = try await client.getMediaThumbnail(
+                mediaSource: source, width: min(max(width, 1), 2048), height: min(max(height, 1), 2048))
+        } catch {
+            // Unencrypted homeservers often refuse to thumbnail SVG; fall back to the size-checked original.
+            guard let attachment = message.attachment, source.url() == original.url(),
+                MediaImageDecoder.isSVGAttachment(name: attachment.name, mimeType: attachment.mimeType)
+            else { throw error }
+            data = try await client.getMediaContent(mediaSource: source)
+        }
         guard data.count <= Int(limit) else {
             throw MatrixServiceError.request(
                 "This thumbnail is too large to preview. Download the attachment to view it.")

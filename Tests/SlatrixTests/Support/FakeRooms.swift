@@ -153,9 +153,11 @@ final class FakeClient: Client, @unchecked Sendable {
 
     /// What every thumbnail request answers, once `thumbnails` lets it through.
     var thumbnail = Data()
+    var thumbnailError: Error?
     let thumbnails = Gate()
     override func getMediaThumbnail(mediaSource: MediaSource, width: UInt64, height: UInt64) async throws -> Data {
         await thumbnails.wait()
+        if let thumbnailError { throw thumbnailError }
         return thumbnail
     }
 

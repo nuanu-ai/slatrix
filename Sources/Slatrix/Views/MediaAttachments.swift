@@ -1,6 +1,5 @@
 import AVKit
 import AppKit
-import ImageIO
 import SwiftUI
 
 /// What an attachment does besides downloading, bound to its message by the timeline.
@@ -107,7 +106,9 @@ extension MatrixService {
         guard let key = mediaImageKey(message) else { return nil }
         if let image = mediaImages.object(forKey: key) { return image }
         guard let data = try? await thumbnailData(message, width: 960, height: 720) else { return nil }
-        let image = await Task.detached(priority: .utility) { Self.decodeStill(data) }.value
+        let image = await Task.detached(priority: .utility) {
+            MediaImageDecoder.decodeStill(data, maxPixels: 960)
+        }.value
         guard let image, mediaImageKey(message) == key else { return nil }
         mediaImages.setObject(image, forKey: key, cost: image.bytesPerRow * image.height)
         return image
@@ -120,18 +121,6 @@ extension MatrixService {
         return attachmentSourceRevision(message).map {
             "\(message.eventID)|\(String(decoding: $0, as: UTF8.self))" as NSString
         }
-    }
-
-    nonisolated private static func decodeStill(_ data: Data) -> CGImage? {
-        guard
-            let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary)
-        else { return nil }
-        return CGImageSourceCreateThumbnailAtIndex(
-            source, 0,
-            [
-                kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: 960, kCGImageSourceShouldCacheImmediately: true,
-            ] as CFDictionary)
     }
 
     /// The whole file as an image, which keeps a GIF's frames.

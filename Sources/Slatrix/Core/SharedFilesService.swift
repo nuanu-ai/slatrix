@@ -431,9 +431,19 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
         }
         guard let client else { throw MatrixServiceError.signedOut }
         do {
+            let isSVG =
+                source.url() == record.source.url()
+                && record.message.attachment.map {
+                    MediaImageDecoder.isSVGAttachment(name: $0.name, mimeType: $0.mimeType)
+                } == true
             let data = try await self.limit.run {
                 try await MainActor.run { try self.validateMedia(item, record, session, token) }
-                return try await client.getMediaThumbnail(mediaSource: source, width: 840, height: 520)
+                do {
+                    return try await client.getMediaThumbnail(mediaSource: source, width: 840, height: 520)
+                } catch {
+                    guard isSVG else { throw error }
+                    return try await client.getMediaContent(mediaSource: source)
+                }
             }
             try validateMedia(item, record, session, token)
             guard data.count <= Int(MatrixMapping.maximumAutomaticPreviewBytes) else {

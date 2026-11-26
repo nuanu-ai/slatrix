@@ -154,15 +154,24 @@ enum ComposerAttachmentImporter {
     /// A queued image as the tray shows it, at most `pixels` on its longer side. Only a staged copy is read, so the
     /// tray never touches the original or the network.
     static func thumbnail(of url: URL, pixels: Int) -> CGImage? {
-        guard url.isFileURL, isStagingFolder(url.deletingLastPathComponent()),
-            let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
+        guard url.isFileURL, isStagingFolder(url.deletingLastPathComponent()) else { return nil }
+        if let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+            let image = CGImageSourceCreateThumbnailAtIndex(
+                source, 0,
+                [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: pixels, kCGImageSourceShouldCacheImmediately: true,
+                ] as CFDictionary)
+        {
+            return image
+        }
+        guard url.pathExtension.lowercased() == "svg",
+            let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+            size > 0, size <= Int(MatrixMapping.maximumAutomaticPreviewBytes),
+            let data = try? Data(contentsOf: url)
         else { return nil }
-        return CGImageSourceCreateThumbnailAtIndex(
-            source, 0,
-            [
-                kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
-                kCGImageSourceThumbnailMaxPixelSize: pixels, kCGImageSourceShouldCacheImmediately: true,
-            ] as CFDictionary)
+        return MediaImageDecoder.decodeStill(data, maxPixels: pixels)
     }
 
     private static func isStagingFolder(_ folder: URL) -> Bool {

@@ -1,6 +1,8 @@
+import AppKit
 import CoreGraphics
 import CoreMedia
 import Foundation
+import ImageIO
 
 /// What a file is, for the colored tile and the type on its card.
 enum FileKind: CaseIterable {
@@ -225,5 +227,94 @@ struct MediaViewerLoadKey: Hashable {
         } else {
             close()
         }
+    }
+}
+
+/// Decodes image attachments to a displayable `CGImage`, using ImageIO for raster formats and AppKit's native SVG
+/// renderer strictly for SVG payloads (never PDF/EPS).
+enum MediaImageDecoder {
+    nonisolated static func isSVGAttachment(name: String, mimeType: String?) -> Bool {
+        if let mime = mimeType?.split(separator: ";").first?.trimmingCharacters(in: .whitespaces).lowercased(),
+            mime == "image/svg+xml"
+        {
+            return true
+        }
+        return (name as NSString).pathExtension.lowercased() == "svg"
+    }
+
+    nonisolated static func looksLikeSVG(_ data: Data) -> Bool {
+        var bytes = data.prefix(2_048)
+        // Strip optional UTF-8 BOM.
+        if bytes.count >= 3, bytes[bytes.startIndex] == 0xEF,
+            bytes[bytes.index(after: bytes.startIndex)] == 0xBB,
+            bytes[bytes.index(bytes.startIndex, offsetBy: 2)] == 0xBF
+        {
+            bytes = bytes.dropFirst(3)
+        }
+        guard let head = String(bytes: bytes, encoding: .utf8) ?? String(bytes: bytes, encoding: .ascii) else {
+            return false
+        }
+        let trimmed = head.drop { $0.isWhitespace }.lowercased()
+        if trimmed.hasPrefix("<svg") {
+            let after = trimmed.dropFirst(4).first
+            return after == nil || after == ">" || after == "/" || after?.isWhitespace == true
+        }
+        if trimmed.hasPrefix("<?xml") || trimmed.hasPrefix("<!--") || trimmed.hasPrefix("<!doctype") {
+            return trimmed.range(of: #"<svg(?=[\s>/]|$)"#, options: .regularExpression) != nil
+        }
+        return false
+    }
+
+    nonisolated static func decodeStill(_ data: Data, maxPixels: Int = 960) -> CGImage? {
+        let clamped = max(1, maxPixels)
+        if let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+            let image = CGImageSourceCreateThumbnailAtIndex(
+                source, 0,
+                [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: clamped,
+                    kCGImageSourceShouldCacheImmediately: true,
+                ] as CFDictionary)
+        {
+            return image
+        }
+        guard looksLikeSVG(data) else { return nil }
+        return rasterizeSVG(data, maxPixels: clamped)
+    }
+
+    nonisolated static func svgDimensions(_ url: URL) -> (width: UInt64, height: UInt64)? {
+        guard url.pathExtension.lowercased() == "svg",
+            let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+            size > 0, size <= Int(MatrixMapping.maximumAutomaticPreviewBytes),
+            let data = try? Data(contentsOf: url), looksLikeSVG(data),
+            let image = NSImage(data: data), !image.representations.isEmpty,
+            image.size.width.isFinite, image.size.height.isFinite,
+            image.size.width > 0, image.size.height > 0
+        else { return nil }
+        return (UInt64(image.size.width.rounded()), UInt64(image.size.height.rounded()))
+    }
+
+    nonisolated private static func rasterizeSVG(_ data: Data, maxPixels: Int) -> CGImage? {
+        guard let image = NSImage(data: data), !image.representations.isEmpty else { return nil }
+        let intrinsic = image.size
+        guard intrinsic.width.isFinite, intrinsic.height.isFinite, intrinsic.width > 0, intrinsic.height > 0 else {
+            return nil
+        }
+        let longest = max(intrinsic.width, intrinsic.height)
+        let scale = CGFloat(maxPixels) / longest
+        let width = max(1, min(maxPixels, Int((intrinsic.width * scale).rounded())))
+        let height = max(1, min(maxPixels, Int((intrinsic.height * scale).rounded())))
+        guard
+            let bitmap = NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4,
+                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+            let context = NSGraphicsContext(bitmapImageRep: bitmap)
+        else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = context
+        image.draw(in: NSRect(x: 0, y: 0, width: width, height: height), from: .zero, operation: .copy, fraction: 1)
+        return bitmap.cgImage
     }
 }
