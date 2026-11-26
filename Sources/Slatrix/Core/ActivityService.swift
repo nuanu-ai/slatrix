@@ -75,6 +75,17 @@ enum ActivityBadge {
         guard let room else { return false }
         return item.hasMention ? room.mentions > 0 : UnreadBadge(room) != .none
     }
+
+    /// Whether a server read receipt at `(receiptEventID, receiptTimestampMs)` covers `item`. Reactions match by
+    /// timestamp only because `item.eventID` is the reacted message, which may have been read before the reaction.
+    static func isCoveredByReceipt(
+        _ item: ActivityItem, receiptEventID: String, receiptTimestampMs: UInt64?
+    ) -> Bool {
+        if item.kind != .reaction, let eventID = item.eventID, receiptEventID == eventID { return true }
+        guard let receiptTimestampMs else { return false }
+        let itemMs = UInt64(max(0, (item.timestamp.timeIntervalSince1970 * 1000).rounded()))
+        return receiptTimestampMs >= itemMs
+    }
 }
 
 @MainActor

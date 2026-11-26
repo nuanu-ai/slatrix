@@ -258,10 +258,36 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
     }
     /// The events looked up one by one.
     let lookups = Recorder<String>()
+    var eventTimestamps: [String: UInt64] = [:]
+    private let receiptLock = NSLock()
+    private var storedReceipts: [ReceiptThread: UserReceipt] = [:]
+    private var storedPrivateReceipts: [ReceiptThread: UserReceipt] = [:]
+    var receipts: [ReceiptThread: UserReceipt] {
+        get { receiptLock.withLock { storedReceipts } }
+        set { receiptLock.withLock { storedReceipts = newValue } }
+    }
+    var privateReceipts: [ReceiptThread: UserReceipt] {
+        get { receiptLock.withLock { storedPrivateReceipts } }
+        set { receiptLock.withLock { storedPrivateReceipts = newValue } }
+    }
+    override func loadUserReceipt(receiptType: ReceiptType, thread: ReceiptThread, userId: String) async throws
+        -> UserReceipt?
+    {
+        switch receiptType {
+        case .read: return receiptLock.withLock { storedReceipts[thread] }
+        case .readPrivate: return receiptLock.withLock { storedPrivateReceipts[thread] }
+        case .fullyRead: return nil
+        }
+    }
     override func loadOrFetchEvent(eventId: String) async throws -> TimelineEvent {
         lookups.append(eventId)
-        guard let root = threadRoots[eventId] else { throw URLError(.resourceUnavailable) }
-        return FakeThreadReply(root: root)
+        if let root = threadRoots[eventId] {
+            return FakeThreadReply(root: root, ts: eventTimestamps[eventId] ?? 0)
+        }
+        if let ts = eventTimestamps[eventId] {
+            return FakeThreadReply(root: nil, ts: ts)
+        }
+        throw URLError(.resourceUnavailable)
     }
     private let queueLock = NSLock()
     private var queueListeners: [(listener: SendQueueListener, handle: FakeCancellableHandle)] = []
@@ -294,13 +320,16 @@ final class FakeOpenRoom: Room, @unchecked Sendable {
 }
 
 private final class FakeThreadReply: TimelineEvent, @unchecked Sendable {
-    let root: String
-    init(root: String) {
+    let root: String?
+    let ts: UInt64
+    init(root: String?, ts: UInt64 = 0) {
         self.root = root
+        self.ts = ts
         super.init(noHandle: .init())
     }
     required init(unsafeFromHandle handle: UInt64) { fatalError("fake only") }
     override func threadRootEventId() -> String? { root }
+    override func timestamp() -> UInt64 { ts }
     // Asked whether it was deleted.
     override func content() throws -> TimelineEventContent {
         .messageLike(

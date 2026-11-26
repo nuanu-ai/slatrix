@@ -12,15 +12,22 @@ import org.matrix.rustcomponents.sdk.NotificationEvent
 import org.matrix.rustcomponents.sdk.NotificationItem
 import org.matrix.rustcomponents.sdk.SyncNotificationListener
 import org.matrix.rustcomponents.sdk.TimelineEventContent
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.matrix.rustcomponents.sdk.Client
+import org.matrix.rustcomponents.sdk.ReceiptThread
+import org.matrix.rustcomponents.sdk.ReceiptType
+import org.matrix.rustcomponents.sdk.Room
+import org.matrix.rustcomponents.sdk.UserReceipt
 import kotlinx.coroutines.launch
 
 enum class ActivityKind { Mention, ThreadReply, Reaction, Message }
@@ -55,12 +62,29 @@ fun List<ActivityItem>.inWorkspace(rooms: List<RoomSummary>, spaceId: String?): 
 }
 
 /**
- * The items as Activity's count holds them: a thread reply stays unread until you open it, anything else also reads
- * once its conversation in [rooms] does.
+ * The items as Activity's count holds them: a thread reply stays unread until you open it or a receipt covers it, a
+ * mention clears once its conversation has no unread mentions, and anything else clears once its conversation reads.
  */
 fun List<ActivityItem>.readWith(rooms: List<RoomSummary>): List<ActivityItem> {
-    val read = rooms.filter { it.unread == UnreadBadge.None }.mapTo(HashSet()) { it.id }
-    return map { if (it.unread && it.kind != ActivityKind.ThreadReply && it.roomId in read) it.copy(unread = false) else it }
+    val byId = rooms.associateBy { it.id }
+    return map { item ->
+        val room = byId[item.roomId]
+        val readByRoom = room != null && when (item.kind) {
+            ActivityKind.ThreadReply -> false
+            ActivityKind.Mention -> room.mentions == 0L || room.unread == UnreadBadge.None
+            else -> room.unread == UnreadBadge.None
+        }
+        if (item.unread && readByRoom) item.copy(unread = false) else item
+    }
+}
+
+/**
+ * Whether a server read receipt at ([receiptEventId], [receiptTimestampMs]) covers this item. Reactions match by
+ * timestamp only because [ActivityItem.eventId] is the reacted message, which may have been read before the reaction.
+ */
+internal fun ActivityItem.isCoveredByReceipt(receiptEventId: String, receiptTimestampMs: Long?): Boolean {
+    if (kind != ActivityKind.Reaction && receiptEventId == eventId) return true
+    return receiptTimestampMs != null && receiptTimestampMs >= timestamp
 }
 
 /** What a reaction reacted to: its text when readable, and its thread root when it's a thread reply. */
@@ -79,6 +103,9 @@ class MatrixActivity(private val userId: String, scope: CoroutineScope,
     private val lookups = CoroutineScope(scope.coroutineContext + SupervisorJob(scope.coroutineContext[Job]))
     private val mutableItems = MutableStateFlow<List<ActivityItem>>(emptyList())
     val items: StateFlow<List<ActivityItem>> = mutableItems.asStateFlow()
+    private val receiptLock = Mutex()
+    /** Cached server origin timestamps for receipt target events (`roomId to eventId`). */
+    private val receiptEventTimestamps = ConcurrentHashMap<Pair<String, String>, Long>()
 
     val listener = object : SyncNotificationListener {
         override fun onNotification(notification: NotificationItem, roomId: String) {
@@ -149,9 +176,96 @@ class MatrixActivity(private val userId: String, scope: CoroutineScope,
         current.map { if (it.roomId == roomId) it.copy(unread = false) else it }
     }
 
-    /** Permanently marks non-thread items in [roomId] read so old mentions don't resurrect on a later mention. */
-    fun markRoomMessagesRead(roomId: String) = mutableItems.update { current ->
-        current.map { if (it.roomId == roomId && it.kind != ActivityKind.ThreadReply) it.copy(unread = false) else it }
+    /**
+     * Permanently marks non-thread items in [roomId] read (bounded by [throughTimestamp] when known) so old mentions
+     * don't resurrect on a later mention while newer items and thread items stay untouched.
+     */
+    fun markRoomMessagesRead(roomId: String, throughTimestamp: Long? = null) = mutableItems.update { current ->
+        current.map {
+            val withinCutoff = throughTimestamp == null || it.timestamp <= throughTimestamp
+            if (it.roomId == roomId && it.threadRoot == null && it.kind != ActivityKind.ThreadReply && withinCutoff) {
+                it.copy(unread = false)
+            } else it
+        }
+    }
+
+    /** Permanently marks non-thread mentions in [roomId] read when the room's mentions drop to zero. */
+    fun markRoomMentionsRead(roomId: String, throughTimestamp: Long? = null) = mutableItems.update { current ->
+        current.map {
+            val withinCutoff = throughTimestamp == null || it.timestamp <= throughTimestamp
+            if (it.roomId == roomId && it.threadRoot == null && it.kind == ActivityKind.Mention && withinCutoff) {
+                it.copy(unread = false)
+            } else it
+        }
+    }
+
+    /**
+     * Reconciles unread Activity items (including thread replies and reactions) against the SDK's synced read receipts
+     * so messages read on another device clear automatically without manual intervention.
+     */
+    suspend fun reconcileReceipts(client: Client, roomIds: Set<String>? = null) = receiptLock.withLock {
+        val pending = mutableItems.value.filter { it.unread && (roomIds == null || it.roomId in roomIds) }
+        if (pending.isEmpty()) return@withLock
+        val byRoom = pending.groupBy { it.roomId }
+        val seenIds = withContext(Dispatchers.Default) {
+            val covered = HashSet<String>()
+            for ((roomId, items) in byRoom) {
+                val room = runCatching { client.getRoom(roomId) }.getOrNull() ?: continue
+                room.use { openRoom ->
+                    val attempted = HashSet<String>()
+                    suspend fun resolvedTimestamp(receipt: UserReceipt): Long? {
+                        val cacheKey = roomId to receipt.eventId
+                        receiptEventTimestamps[cacheKey]?.let { return it }
+                        if (!attempted.add(receipt.eventId)) return null
+                        // Never fall back to client receipt wall-clock time: a failed lookup only matches exact event IDs.
+                        val ts = quietly { openRoom.loadOrFetchEvent(receipt.eventId).use { it.timestamp() } }
+                            ?.coerceAtMost(Long.MAX_VALUE.toULong())?.toLong() ?: return null
+                        receiptEventTimestamps[cacheKey] = ts
+                        return ts
+                    }
+                    suspend fun bestReceipt(thread: ReceiptThread): Pair<String, Long?>? {
+                        val pub = loadReceipt(openRoom, ReceiptType.READ, thread)
+                        val priv = loadReceipt(openRoom, ReceiptType.READ_PRIVATE, thread)
+                        if (pub == null && priv == null) return null
+                        if (pub == null) return priv!!.eventId to resolvedTimestamp(priv)
+                        if (priv == null) return pub.eventId to resolvedTimestamp(pub)
+                        val pubTs = resolvedTimestamp(pub)
+                        val privTs = resolvedTimestamp(priv)
+                        return when {
+                            pubTs != null && privTs != null -> if (privTs > pubTs) priv.eventId to privTs else pub.eventId to pubTs
+                            privTs != null -> priv.eventId to privTs
+                            pubTs != null -> pub.eventId to pubTs
+                            else -> if ((priv.receipt.timestamp ?: 0uL) > (pub.receipt.timestamp ?: 0uL)) priv.eventId to null
+                                else pub.eventId to null
+                        }
+                    }
+                    val unthreaded = bestReceipt(ReceiptThread.Unthreaded)
+                    val main = if (items.any { it.threadRoot == null }) bestReceipt(ReceiptThread.Main) else null
+                    val threads = HashMap<String, Pair<String, Long?>>()
+                    for (root in items.mapNotNull { it.threadRoot }.distinct()) {
+                        bestReceipt(ReceiptThread.Thread(root))?.let { threads[root] = it }
+                    }
+                    for (item in items) {
+                        val coveredUnthreaded = unthreaded?.let { (id, ts) -> item.isCoveredByReceipt(id, ts) } == true
+                        val specific = item.threadRoot?.let { threads[it] } ?: if (item.threadRoot == null) main else null
+                        val coveredSpecific = specific?.let { (id, ts) -> item.isCoveredByReceipt(id, ts) } == true
+                        if (coveredUnthreaded || coveredSpecific) covered += item.id
+                    }
+                }
+            }
+            covered
+        }
+        if (seenIds.isNotEmpty()) {
+            mutableItems.update { current -> current.map { if (it.id in seenIds) it.copy(unread = false) else it } }
+        }
+    }
+
+    private suspend fun loadReceipt(room: Room, type: ReceiptType, thread: ReceiptThread): UserReceipt? = try {
+        room.loadUserReceipt(type, thread, userId)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (_: Exception) {
+        null
     }
 
     private fun add(item: ActivityItem) {

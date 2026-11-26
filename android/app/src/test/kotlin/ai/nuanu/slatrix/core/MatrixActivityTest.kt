@@ -132,8 +132,66 @@ class MatrixActivityTest {
         assertEquals(listOf("\$other", "\$reply"), activity.items.value.filter { it.unread }.map { it.eventId })
 
         // A later unread mention in the same room must not resurrect the earlier read mention.
-        val unreadTeam = listOf(RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.Count("1"), "T", 0))
+        val unreadTeam = listOf(RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.Count("1"), "T", 0, mentions = 1))
         assertEquals(listOf("\$other", "\$reply"), activity.items.value.readWith(unreadTeam).filter { it.unread }.map { it.eventId })
+    }
+
+    // capability: activity.badge
+    @Test fun markingRoomMentionsReadPermanentlyClearsMentionsWithoutClearingMessagesOrThreads() = runTest {
+        val activity = MatrixActivity("@alex:example.org", backgroundScope) { _, _ -> null }
+        activity.listener.onNotification(notification("\$mention", "Ping", at = 1_000u, mention = true), "!team:example.org")
+        activity.listener.onNotification(notification("\$threadMention", "Thread ping", at = 1_500u, mention = true, thread = "\$root"), "!team:example.org")
+        activity.listener.onNotification(notification("\$dm", "Normal", at = 2_000u), "!team:example.org")
+        activity.listener.onNotification(notification("\$newerMention", "Newer ping", at = 5_000u, mention = true), "!team:example.org")
+        activity.listener.onNotification(notification("\$reply", "In thread", at = 3_000u, thread = "\$root"), "!team:example.org")
+        activity.items.first { it.size == 5 }
+
+        activity.markRoomMentionsRead("!team:example.org", throughTimestamp = 2_500L)
+        // `$mention` clears; `$threadMention` (in thread), `$newerMention` (after cutoff), `$dm`, and `$reply` stay unread.
+        assertEquals(listOf("\$newerMention", "\$reply", "\$dm", "\$threadMention"),
+            activity.items.value.filter { it.unread }.map { it.eventId })
+
+        val laterMention = listOf(RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.Count("1"), "T", 0, mentions = 1))
+        assertEquals(listOf("\$newerMention", "\$reply", "\$dm", "\$threadMention"),
+            activity.items.value.readWith(laterMention).filter { it.unread }.map { it.eventId })
+    }
+
+    // capability: activity.badge
+    @Test fun reconcileReceiptsClearsThreadRepliesAndReactionsCoveredByServerReceipts() = runTest {
+        val receipts = mutableMapOf<Pair<ReceiptType, ReceiptThread>, UserReceipt>(
+            (ReceiptType.READ to ReceiptThread.Main) to UserReceipt("\$mine", Receipt(1_000u)),
+            (ReceiptType.READ to ReceiptThread.Thread("\$root")) to UserReceipt("\$r1", Receipt(2_500u)),
+            // Uncached target event `$missing` with a high client receipt timestamp must NOT clear newer items.
+            (ReceiptType.READ to ReceiptThread.Thread("\$other")) to UserReceipt("\$missing", Receipt(9_999u)),
+        )
+        val timestamps = mapOf("\$mine" to 1_000uL, "\$r1" to 2_000uL, "\$newer" to 4_000uL)
+        val client = object : Client(NoHandle) {
+            override fun getRoom(roomId: String): Room? = if (roomId != "!team:example.org") null else object : Room(NoHandle) {
+                override suspend fun loadUserReceipt(receiptType: ReceiptType, thread: ReceiptThread, userId: String): UserReceipt? =
+                    receipts[receiptType to thread]
+                override suspend fun loadOrFetchEvent(eventId: String): TimelineEvent {
+                    val ts = timestamps[eventId] ?: throw IllegalStateException("event not found")
+                    return object : TimelineEvent(NoHandle) {
+                        override fun timestamp(): ULong = ts
+                    }
+                }
+            }
+        }
+        val activity = MatrixActivity("@alex:example.org", backgroundScope) { _, _ -> null }
+        activity.listener.onNotification(notification("\$r1", "Read in thread", at = 2_000u, thread = "\$root"), "!team:example.org")
+        // Older than `$r1` (1500ms < 2000ms) in an unrelated thread, proving `$root`'s receipt stays thread-scoped.
+        activity.listener.onNotification(notification("\$r2", "Other thread", at = 1_500u, thread = "\$other"), "!team:example.org")
+        activity.listener.onNotification(reaction("\$rx", "👍", at = 3_000u, related = "\$mine"), "!team:example.org")
+        activity.items.first { it.size == 3 }
+
+        activity.reconcileReceipts(client)
+        // `$r1` is cleared by its thread receipt; `$r2` and the 3000ms reaction on `$mine` remain unread.
+        assertEquals(listOf("\$mine", "\$r2"), activity.items.value.filter { it.unread }.map { it.eventId })
+
+        // Private unthreaded receipt at 4000ms covers both `$r2` and the 3000ms reaction.
+        receipts[ReceiptType.READ_PRIVATE to ReceiptThread.Unthreaded] = UserReceipt("\$newer", Receipt(4_000u))
+        activity.reconcileReceipts(client, setOf("!team:example.org"))
+        assertTrue(activity.items.value.none { it.unread })
     }
 
     // capability: people.names
@@ -166,11 +224,17 @@ class ActivityWorkspaceTest {
     @Test fun aMentionReadInItsConversationReadsInActivityButAThreadReplyWaitsToBeOpened() {
         fun item(id: String, kind: ActivityKind, root: String? = null) =
             ActivityItem(id, "!team", "\$$id", "", false, "Sam", "S", 0, "Hi", 0, kind, root)
-        val items = listOf(item("mention", ActivityKind.Mention), item("reply", ActivityKind.ThreadReply, "\$root"))
-        fun room(unread: UnreadBadge) = listOf(RoomSummary("!team", "team", false, "", unread, "T", 0, emptySet()))
+        val items = listOf(
+            item("mention", ActivityKind.Mention),
+            item("message", ActivityKind.Message),
+            item("reply", ActivityKind.ThreadReply, "\$root"),
+        )
+        fun room(unread: UnreadBadge, mentions: Long = 0) =
+            listOf(RoomSummary("!team", "team", false, "", unread, "T", 0, emptySet(), mentions = mentions))
 
-        assertEquals(listOf(false, true), items.readWith(room(UnreadBadge.None)).map { it.unread })
-        assertEquals(listOf(true, true), items.readWith(room(UnreadBadge.Count("1"))).map { it.unread })
+        assertEquals(listOf(false, false, true), items.readWith(room(UnreadBadge.None)).map { it.unread })
+        assertEquals(listOf(false, true, true), items.readWith(room(UnreadBadge.Bold, mentions = 0)).map { it.unread })
+        assertEquals(listOf(true, true, true), items.readWith(room(UnreadBadge.Count("1"), mentions = 1)).map { it.unread })
     }
 }
 

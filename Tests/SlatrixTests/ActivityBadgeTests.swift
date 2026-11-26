@@ -1,4 +1,5 @@
 import Foundation
+import MatrixRustSDK
 import Testing
 
 @testable import Slatrix
@@ -150,5 +151,98 @@ struct ActivityBadgeTests {
             threadRootID: nil, kind: .message)
         #expect(!ActivityBadge.isUnread(ordinary, room: mutedChannel))
         #expect(ActivityBadge.isUnread(ordinary, room: mutedMarked))
+    }
+
+    // capability: activity.badge
+    @Test("Reading a room or its mentions on another device permanently marks non-thread Activity items opened")
+    func crossDeviceRoomReadMarksNonThreadItemsOpenedWithoutResurrecting() {
+        let room = FakeOpenRoom("!sync:example.org", cached: [])
+        let matrix = MatrixService.scratch()
+        matrix.configureRoomOpenForChecks(
+            client: FakeClient(rooms: [room]), roomList: FakeRoomListService(),
+            user: ChatUser(id: "@me:example.org", name: "Me"))
+
+        let mention = ActivityItem(
+            id: "old-mention", roomID: "!sync:example.org", eventID: "$m1", roomName: "Sync",
+            senderID: "@alice:example.org", senderName: "Alice", body: "@me look",
+            timestamp: Date(timeIntervalSince1970: 1), hasMention: true, threadRootID: nil, kind: .message)
+        let message = ActivityItem(
+            id: "old-message", roomID: "!sync:example.org", eventID: "$msg1", roomName: "Sync",
+            senderID: "@alice:example.org", senderName: "Alice", body: "Hello",
+            timestamp: Date(timeIntervalSince1970: 2), hasMention: false, threadRootID: nil, kind: .message)
+        let reply = ActivityItem(
+            id: "thread-reply", roomID: "!sync:example.org", eventID: "$r1", roomName: "Sync",
+            senderID: "@alice:example.org", senderName: "Alice", body: "In thread",
+            timestamp: Date(timeIntervalSince1970: 3), hasMention: false, threadRootID: "$root", kind: .message)
+        matrix.activity.record(mention)
+        matrix.activity.record(message)
+        matrix.activity.record(reply)
+
+        // Room starts unread with a mention, then another device reads the mention (while a non-mention remains).
+        matrix.rooms = [ChatRoom(id: "!sync:example.org", name: "Sync", unread: 2, unreadMessages: 2, mentions: 1)]
+        matrix.rooms = [ChatRoom(id: "!sync:example.org", name: "Sync", unread: 1, unreadMessages: 1, mentions: 0)]
+        #expect(matrix.activity.items.first { $0.id == "old-mention" }?.opened == true)
+        #expect(matrix.activity.items.first { $0.id == "old-message" }?.opened == false)
+        #expect(matrix.activity.items.first { $0.id == "thread-reply" }?.opened == false)
+
+        // Next, another device reads the rest of the room; a later mention must not resurrect old items.
+        matrix.rooms = [ChatRoom(id: "!sync:example.org", name: "Sync", unread: 0, unreadMessages: 0, mentions: 0)]
+        #expect(matrix.activity.items.first { $0.id == "old-message" }?.opened == true)
+        #expect(matrix.activity.items.first { $0.id == "thread-reply" }?.opened == false)
+
+        matrix.rooms = [ChatRoom(id: "!sync:example.org", name: "Sync", unread: 1, unreadMessages: 1, mentions: 1)]
+        let currentRoom = matrix.rooms[0]
+        #expect(!ActivityBadge.isUnread(matrix.activity.items.first { $0.id == "old-mention" }!, room: currentRoom))
+        #expect(!ActivityBadge.isUnread(matrix.activity.items.first { $0.id == "old-message" }!, room: currentRoom))
+    }
+
+    // capability: activity.badge
+    @Test("Cross-device thread and unthreaded receipts clear Activity replies without clearing newer reactions")
+    func crossDeviceThreadReceiptsMarkRepliesOpenedAndPreserveNewerReactions() async {
+        let room = FakeOpenRoom("!sync:example.org", cached: [])
+        room.eventTimestamps = ["$mine": 1_000, "$r1": 2_000, "$newer": 4_000]
+        room.receipts = [
+            .main: UserReceipt(eventId: "$mine", receipt: Receipt(timestamp: 1_000)),
+            .thread(threadRootEventId: "$root"): UserReceipt(eventId: "$r1", receipt: Receipt(timestamp: 2_500)),
+            // Uncached target event `$missing` with a high client receipt timestamp must NOT clear newer items.
+            .thread(threadRootEventId: "$other"): UserReceipt(eventId: "$missing", receipt: Receipt(timestamp: 9_999)),
+        ]
+        let matrix = MatrixService.scratch()
+        matrix.configureRoomOpenForChecks(
+            client: FakeClient(rooms: [room]), roomList: FakeRoomListService(),
+            user: ChatUser(id: "@me:example.org", name: "Me"))
+
+        let readReply = ActivityItem(
+            id: "reply-read", roomID: "!sync:example.org", eventID: "$r1", roomName: "Sync",
+            senderID: "@alice:example.org", senderName: "Alice", body: "Read in thread",
+            timestamp: Date(timeIntervalSince1970: 2), hasMention: false, threadRootID: "$root", kind: .message)
+        // Older than `$r1` (1500ms < 2000ms) in an unrelated thread, proving `$root`'s receipt stays thread-scoped.
+        let unreadReply = ActivityItem(
+            id: "reply-unread", roomID: "!sync:example.org", eventID: "$r2", roomName: "Sync",
+            senderID: "@alice:example.org", senderName: "Alice", body: "Still unread",
+            timestamp: Date(timeIntervalSince1970: 1.5), hasMention: false, threadRootID: "$other", kind: .message)
+        let reaction = ActivityItem(
+            id: "reaction-later", roomID: "!sync:example.org", eventID: "$mine", roomName: "Sync",
+            senderID: "@alice:example.org", senderName: "Alice", body: "Reacted 👍",
+            timestamp: Date(timeIntervalSince1970: 3), hasMention: false, threadRootID: nil, kind: .reaction)
+        matrix.activity.record(readReply)
+        matrix.activity.record(unreadReply)
+        matrix.activity.record(reaction)
+
+        // Unread count decreases from sync -> automatically reconciles receipts.
+        matrix.rooms = [ChatRoom(id: "!sync:example.org", name: "Sync", unread: 2, unreadMessages: 2)]
+        matrix.rooms = [ChatRoom(id: "!sync:example.org", name: "Sync", unread: 1, unreadMessages: 1)]
+        #expect(await eventually { matrix.activity.items.first { $0.id == "reply-read" }?.opened == true })
+        #expect(matrix.activity.items.first { $0.id == "reply-unread" }?.opened == false)
+        // A receipt on `$mine` from 1000ms must NOT mark a reaction that arrived at 3000ms read.
+        #expect(matrix.activity.items.first { $0.id == "reaction-later" }?.opened == false)
+        #expect(ActivityBadge.count(rooms: matrix.rooms, items: matrix.activity.items) == 1)
+
+        // Private unthreaded receipt past 4000ms covers both the other thread reply and the 3000ms reaction.
+        room.privateReceipts = [.unthreaded: UserReceipt(eventId: "$newer", receipt: Receipt(timestamp: 4_000))]
+        await matrix.reconcileActivityReceipts().value
+        #expect(matrix.activity.items.first { $0.id == "reply-unread" }?.opened == true)
+        #expect(matrix.activity.items.first { $0.id == "reaction-later" }?.opened == true)
+        #expect(ActivityBadge.count(rooms: matrix.rooms, items: matrix.activity.items) == 0)
     }
 }

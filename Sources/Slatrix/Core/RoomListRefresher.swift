@@ -16,6 +16,8 @@ final class RoomListRefresher {
     /// Whether the room list has been read once: until then, no rooms means not yet, not none.
     private(set) var loaded = false
     var onChange: (() -> Void)?
+    /// Fired with rooms touched by incremental `RoomInfo` updates, even when sidebar fields did not change.
+    var onRoomsTouched: ((Set<String>) -> Void)?
     var onError: ((Error) -> Void)?
     private var client: Client?
     private var generation = UUID()
@@ -125,6 +127,7 @@ final class RoomListRefresher {
                     self.workspaces = workspaces
                 }
                 if first || outcome.sidebar != nil { self.onChange?() }
+                if let only, !only.isEmpty { self.onRoomsTouched?(Set(only.keys)) }
                 if let failure = outcome.failure { self.onError?(failure) }
             }
             if let self, self.generation == generation { self.task = nil }
