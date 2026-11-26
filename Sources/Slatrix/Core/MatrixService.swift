@@ -1293,11 +1293,17 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 decreased.insert(old.id)
             }
         }
-        // Permanently mark non-thread items read so a later message or mention never resurrects them.
+        // Permanently mark non-thread items read (bounded by the room's latest event when known) so a later message
+        // never resurrects old items while a newer notification arriving before a stale summary stays unread.
         if !cleared.isEmpty || !clearedMentions.isEmpty {
+            let cutoffs: [String: Date] = Dictionary(
+                uniqueKeysWithValues: current.compactMap { room in
+                    room.latest.map { (room.id, $0.timestamp) }
+                })
             activity.markSeen { item in
                 if item.kind == .invite { return resolvedInvites.contains(item.roomID) }
                 guard item.threadRootID == nil else { return false }
+                if let cutoff = cutoffs[item.roomID], item.timestamp > cutoff { return false }
                 if cleared.contains(item.roomID) { return true }
                 return item.hasMention && clearedMentions.contains(item.roomID)
             }
@@ -1339,6 +1345,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
     /// The pass that last asked about each copy, so a long list is asked about in turns.
     @ObservationIgnored private var askedInPass: [String: Int] = [:]
     @ObservationIgnored private var passes = 0
+    /// Serialized receipt reconciliation for unopened Activity items; cancelled on sign-out.
+    @ObservationIgnored private var activityReceiptTask: Task<Void, Never>?
+    @ObservationIgnored private var pendingReceiptRoomIDs = Set<String>()
+    @ObservationIgnored private var pendingReceiptAll = false
+    /// Cached server origin timestamps for receipt target events (`"\(roomID)\0\(eventID)"`), cleared on sign-out.
+    @ObservationIgnored private var receiptEventTimestamps: [String: UInt64] = [:]
     var notificationSessionID: UUID { sessionGeneration }
     let notificationRetries = NotificationSettingsRetryState()
     private var client: Client?
@@ -1941,10 +1953,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             listener: NotificationsObserver { [weak self] notification, roomID in
                 Task { @MainActor [weak self] in
                     guard let self, self.sessionGeneration == generation else { return }
-                    let names = await self.memberNames(roomID: roomID, ids: ActivityService.mentionedIDs(notification))
+                    let mentionedIDs = ActivityService.mentionedIDs(notification)
+                    let names = await self.memberNames(roomID: roomID, ids: mentionedIDs)
                     guard self.sessionGeneration == generation,
                         let item = self.activity.receive(notification, roomID: roomID, ownUserID: id, names: names)
                     else { return }
+                    if !mentionedIDs.isEmpty, item.kind != .invite, !item.opened {
+                        self.reconcileActivityReceipts(roomIDs: [roomID])
+                    }
                     // The feed records notifications received this session, before native preference filters.
                     guard item.allowsNativeNotification else { return }
                     if item.kind != .invite, item.timestamp.timeIntervalSince1970 * 1000 < Double(startedAt) {
@@ -2139,6 +2155,11 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         sessionGeneration = UUID()
         asking = []
         askedInPass = [:]
+        activityReceiptTask?.cancel()
+        activityReceiptTask = nil
+        pendingReceiptRoomIDs = []
+        pendingReceiptAll = false
+        receiptEventTimestamps = [:]
         selection = UUID()
         notificationRetries.reset()
         profileLoadTask?.cancel()
@@ -5578,75 +5599,116 @@ extension MatrixService {
     /// Reconciles unopened Activity items (including thread replies and reactions) against the SDK's synced read
     /// receipts so messages read on another device clear automatically without manual intervention.
     @discardableResult func reconcileActivityReceipts(roomIDs: Set<String>? = nil) -> Task<Void, Never> {
-        let session = sessionGeneration
-        guard let client, let ownUserID = user?.id else { return Task {} }
-        let pending = activity.items.filter { item in
-            !item.opened && item.kind != .invite && (roomIDs?.contains(item.roomID) ?? true)
+        guard client != nil, user?.id != nil else { return Task {} }
+        if let roomIDs {
+            pendingReceiptRoomIDs.formUnion(roomIDs)
+        } else {
+            pendingReceiptAll = true
         }
-        guard !pending.isEmpty else { return Task {} }
-        let byRoom = Dictionary(grouping: pending, by: \.roomID)
-        return Task { [weak self] in
-            let seenIDs = await Task.detached(priority: .utility) {
-                var covered = Set<String>()
-                for (roomID, items) in byRoom {
-                    guard !Task.isCancelled else { return covered }
-                    guard let room = try? client.getRoom(roomId: roomID) else { continue }
-                    var eventTimestamps: [String: UInt64?] = [:]
-                    func resolvedTimestamp(for receipt: UserReceipt) async -> UInt64? {
-                        if let cached = eventTimestamps[receipt.eventId] { return cached }
-                        let ts =
-                            (try? await room.loadOrFetchEvent(eventId: receipt.eventId).timestamp())
-                            ?? receipt.receipt.timestamp
-                        eventTimestamps[receipt.eventId] = ts
-                        return ts
-                    }
-                    func bestReceipt(_ thread: ReceiptThread) async -> (eventID: String, timestamp: UInt64?)? {
-                        let pub = try? await room.loadUserReceipt(receiptType: .read, thread: thread, userId: ownUserID)
-                        let priv = try? await room.loadUserReceipt(
-                            receiptType: .readPrivate, thread: thread, userId: ownUserID)
-                        let pubTs = pub != nil ? await resolvedTimestamp(for: pub!) : nil
-                        let privTs = priv != nil ? await resolvedTimestamp(for: priv!) : nil
-                        switch (pub, priv) {
-                        case (nil, nil): return nil
-                        case (let p?, nil): return (p.eventId, pubTs)
-                        case (nil, let q?): return (q.eventId, privTs)
-                        case (let p?, let q?):
-                            return (privTs ?? 0) > (pubTs ?? 0) ? (q.eventId, privTs) : (p.eventId, pubTs)
-                        }
-                    }
-                    let unthreaded = await bestReceipt(.unthreaded)
-                    let needsMain = items.contains { $0.threadRootID == nil }
-                    let main = needsMain ? await bestReceipt(.main) : nil
-                    var threads: [String: (eventID: String, timestamp: UInt64?)] = [:]
-                    for rootID in Set(items.compactMap(\.threadRootID)) {
-                        if let receipt = await bestReceipt(.thread(threadRootEventId: rootID)) {
-                            threads[rootID] = receipt
-                        }
-                    }
-                    for item in items {
-                        let coveredUnthreaded =
-                            unthreaded.map {
-                                ActivityBadge.isCoveredByReceipt(
-                                    item, receiptEventID: $0.eventID, receiptTimestampMs: $0.timestamp)
-                            } ?? false
-                        let specific =
-                            item.threadRootID.flatMap { threads[$0] } ?? (item.threadRootID == nil ? main : nil)
-                        let coveredSpecific =
-                            specific.map {
-                                ActivityBadge.isCoveredByReceipt(
-                                    item, receiptEventID: $0.eventID, receiptTimestampMs: $0.timestamp)
-                            } ?? false
-                        if coveredUnthreaded || coveredSpecific { covered.insert(item.id) }
+        if let running = activityReceiptTask { return running }
+        let session = sessionGeneration
+        let task = Task { @MainActor [weak self] in
+            defer {
+                if let self, self.sessionGeneration == session { self.activityReceiptTask = nil }
+            }
+            while let self, self.sessionGeneration == session, !Task.isCancelled,
+                self.pendingReceiptAll || !self.pendingReceiptRoomIDs.isEmpty
+            {
+                let targetRoomIDs: Set<String>? = self.pendingReceiptAll ? nil : self.pendingReceiptRoomIDs
+                self.pendingReceiptAll = false
+                self.pendingReceiptRoomIDs = []
+                guard let client = self.client, let ownUserID = self.user?.id else { return }
+                let pending = self.activity.items.filter { item in
+                    !item.opened && item.kind != .invite && (targetRoomIDs?.contains(item.roomID) ?? true)
+                }
+                guard !pending.isEmpty else { continue }
+                let byRoom = Dictionary(grouping: pending, by: \.roomID)
+                let knownTimestamps = self.receiptEventTimestamps
+                let result = await Self.scanActivityReceipts(
+                    client: client, ownUserID: ownUserID, byRoom: byRoom, knownTimestamps: knownTimestamps)
+                guard self.sessionGeneration == session, !Task.isCancelled else { return }
+                for (key, ts) in result.timestamps { self.receiptEventTimestamps[key] = ts }
+                if !result.seenIDs.isEmpty {
+                    let seenIDs = result.seenIDs
+                    let withdrawKeys = result.withdrawKeys
+                    self.activity.markSeen { seenIDs.contains($0.id) }
+                    if let notifications = self.notifications {
+                        Task { await notifications.withdraw(withdrawKeys) }
                     }
                 }
-                return covered
-            }.value
-            guard let self, self.sessionGeneration == session, !seenIDs.isEmpty else { return }
-            self.activity.markSeen { seenIDs.contains($0.id) }
-            if let notifications = self.notifications {
-                Task { await notifications.withdraw(seenIDs) }
             }
         }
+        activityReceiptTask = task
+        return task
+    }
+
+    private nonisolated static func scanActivityReceipts(
+        client: Client, ownUserID: String, byRoom: [String: [ActivityItem]], knownTimestamps: [String: UInt64]
+    ) async -> (seenIDs: Set<String>, withdrawKeys: Set<String>, timestamps: [String: UInt64]) {
+        var covered = Set<String>()
+        var withdrawKeys = Set<String>()
+        var discoveredTimestamps: [String: UInt64] = [:]
+        for (roomID, items) in byRoom {
+            guard !Task.isCancelled else { break }
+            guard let room = try? client.getRoom(roomId: roomID) else { continue }
+            var attempted = Set<String>()
+            func resolvedTimestamp(for receipt: UserReceipt) async -> UInt64? {
+                let cacheKey = "\(roomID)\0\(receipt.eventId)"
+                if let cached = discoveredTimestamps[cacheKey] ?? knownTimestamps[cacheKey] { return cached }
+                guard attempted.insert(receipt.eventId).inserted else { return nil }
+                // Never fall back to client receipt wall-clock time: a failed lookup only matches exact event IDs.
+                guard let ts = try? await room.loadOrFetchEvent(eventId: receipt.eventId).timestamp() else {
+                    return nil
+                }
+                discoveredTimestamps[cacheKey] = ts
+                return ts
+            }
+            func bestReceipt(_ thread: ReceiptThread) async -> (eventID: String, timestamp: UInt64?)? {
+                let pub = try? await room.loadUserReceipt(receiptType: .read, thread: thread, userId: ownUserID)
+                let priv = try? await room.loadUserReceipt(
+                    receiptType: .readPrivate, thread: thread, userId: ownUserID)
+                let pubTs = pub != nil ? await resolvedTimestamp(for: pub!) : nil
+                let privTs = priv != nil ? await resolvedTimestamp(for: priv!) : nil
+                switch (pub, priv) {
+                case (nil, nil): return nil
+                case (let p?, nil): return (p.eventId, pubTs)
+                case (nil, let q?): return (q.eventId, privTs)
+                case (let p?, let q?):
+                    if let privTs, let pubTs { return privTs > pubTs ? (q.eventId, privTs) : (p.eventId, pubTs) }
+                    if privTs != nil { return (q.eventId, privTs) }
+                    if pubTs != nil { return (p.eventId, pubTs) }
+                    return (q.receipt.timestamp ?? 0) > (p.receipt.timestamp ?? 0) ? (q.eventId, nil) : (p.eventId, nil)
+                }
+            }
+            let unthreaded = await bestReceipt(.unthreaded)
+            let needsMain = items.contains { $0.threadRootID == nil }
+            let main = needsMain ? await bestReceipt(.main) : nil
+            var threads: [String: (eventID: String, timestamp: UInt64?)] = [:]
+            for rootID in Set(items.compactMap(\.threadRootID)) {
+                if let receipt = await bestReceipt(.thread(threadRootEventId: rootID)) { threads[rootID] = receipt }
+            }
+            for item in items {
+                let coveredUnthreaded =
+                    unthreaded.map {
+                        ActivityBadge.isCoveredByReceipt(
+                            item, receiptEventID: $0.eventID, receiptTimestampMs: $0.timestamp)
+                    } ?? false
+                let specific = item.threadRootID.flatMap { threads[$0] } ?? (item.threadRootID == nil ? main : nil)
+                let coveredSpecific =
+                    specific.map {
+                        ActivityBadge.isCoveredByReceipt(
+                            item, receiptEventID: $0.eventID, receiptTimestampMs: $0.timestamp)
+                    } ?? false
+                if coveredUnthreaded || coveredSpecific {
+                    covered.insert(item.id)
+                    withdrawKeys.insert(item.id)
+                    if let eventID = item.eventID {
+                        withdrawKeys.insert(ActivityService.key(roomID: item.roomID, eventID: eventID))
+                    }
+                }
+            }
+        }
+        return (covered, withdrawKeys, discoveredTimestamps)
     }
 
     /// Deleted messages, by Activity key, leave Activity and Notification Center.

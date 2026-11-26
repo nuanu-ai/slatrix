@@ -1628,10 +1628,20 @@ struct RootView: View {
                 },
                 onMarkAllRead: { markAllRead(inWorkspace: workspaceID) }
             )
-            // For deletions or cross-device reads since the app last synced.
+            // For deletions or cross-device reads since the app last synced, including receipt-only thread reads
+            // that arrive quietly without changing RoomInfo while Activity stays open.
             .onAppear {
                 matrix.recheckCopies()
                 matrix.reconcileActivityReceipts()
+            }
+            .task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(5))
+                    guard !Task.isCancelled else { break }
+                    if matrix.activity.items.contains(where: { !$0.opened && $0.kind != .invite }) {
+                        await matrix.reconcileActivityReceipts().value
+                    }
+                }
             }
         case .search:
             SearchResultsView(

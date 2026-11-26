@@ -277,7 +277,7 @@ internal fun SlatrixApp(
                     launch {
                         source.readRooms.collect { read ->
                             PushNotifications(context).clearMessages(read.roomId, throughTimestamp = read.throughTimestamp)
-                            activity?.markRoomMessagesRead(read.roomId)
+                            activity?.markRoomMessagesRead(read.roomId, throughTimestamp = read.throughTimestamp)
                             activity?.let { act -> launch { act.reconcileReceipts(source.client, setOf(read.roomId)) } }
                         }
                     }
@@ -290,8 +290,14 @@ internal fun SlatrixApp(
                                 val changed = HashSet<String>()
                                 for ((id, summary) in current) {
                                     val before = previous?.get(id) ?: continue
-                                    if (before.mentions > 0 && summary.mentions == 0L) act.markRoomMentionsRead(id)
-                                    if (before != summary && act.items.value.any { it.unread && it.roomId == id }) {
+                                    if (before.mentions > 0 && summary.mentions == 0L) {
+                                        act.markRoomMentionsRead(id, throughTimestamp = summary.latest?.timestamp)
+                                    }
+                                    val readRelevantChanged = before.unread != summary.unread ||
+                                        before.mentions != summary.mentions ||
+                                        before.resumeAt != summary.resumeAt ||
+                                        before.latest != summary.latest
+                                    if (readRelevantChanged && act.items.value.any { it.unread && it.roomId == id }) {
                                         changed += id
                                     }
                                 }
@@ -716,7 +722,12 @@ private fun LiveActivity(activity: MatrixActivity?, rooms: MatrixRooms?, threads
     val items = remember(all, known, selectedSpaceId) { all.inWorkspace(known, selectedSpaceId).readWith(known) }
     LaunchedEffect(activity, rooms) {
         val client = rooms?.client ?: return@LaunchedEffect
-        activity?.reconcileReceipts(client)
+        val act = activity ?: return@LaunchedEffect
+        act.reconcileReceipts(client)
+        while (true) {
+            kotlinx.coroutines.delay(5_000L)
+            if (act.items.value.any { it.unread }) act.reconcileReceipts(client)
+        }
     }
     ActivityScreen(items, { item -> activity?.markRead(item.id); room(item.roomId)?.let { jump(it, item.eventId, item.threadRoot) } },
         { thread -> room(thread.roomId)?.let { threads?.open(it, thread) } },

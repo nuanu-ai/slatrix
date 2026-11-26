@@ -140,15 +140,20 @@ class MatrixActivityTest {
     @Test fun markingRoomMentionsReadPermanentlyClearsMentionsWithoutClearingMessagesOrThreads() = runTest {
         val activity = MatrixActivity("@alex:example.org", backgroundScope) { _, _ -> null }
         activity.listener.onNotification(notification("\$mention", "Ping", at = 1_000u, mention = true), "!team:example.org")
+        activity.listener.onNotification(notification("\$threadMention", "Thread ping", at = 1_500u, mention = true, thread = "\$root"), "!team:example.org")
         activity.listener.onNotification(notification("\$dm", "Normal", at = 2_000u), "!team:example.org")
+        activity.listener.onNotification(notification("\$newerMention", "Newer ping", at = 5_000u, mention = true), "!team:example.org")
         activity.listener.onNotification(notification("\$reply", "In thread", at = 3_000u, thread = "\$root"), "!team:example.org")
-        activity.items.first { it.size == 3 }
+        activity.items.first { it.size == 5 }
 
-        activity.markRoomMentionsRead("!team:example.org")
-        assertEquals(listOf("\$reply", "\$dm"), activity.items.value.filter { it.unread }.map { it.eventId })
+        activity.markRoomMentionsRead("!team:example.org", throughTimestamp = 2_500L)
+        // `$mention` clears; `$threadMention` (in thread), `$newerMention` (after cutoff), `$dm`, and `$reply` stay unread.
+        assertEquals(listOf("\$newerMention", "\$reply", "\$dm", "\$threadMention"),
+            activity.items.value.filter { it.unread }.map { it.eventId })
 
         val laterMention = listOf(RoomSummary("!team:example.org", "Team", false, "", UnreadBadge.Count("1"), "T", 0, mentions = 1))
-        assertEquals(listOf("\$reply", "\$dm"), activity.items.value.readWith(laterMention).filter { it.unread }.map { it.eventId })
+        assertEquals(listOf("\$newerMention", "\$reply", "\$dm", "\$threadMention"),
+            activity.items.value.readWith(laterMention).filter { it.unread }.map { it.eventId })
     }
 
     // capability: activity.badge
@@ -156,20 +161,26 @@ class MatrixActivityTest {
         val receipts = mutableMapOf<Pair<ReceiptType, ReceiptThread>, UserReceipt>(
             (ReceiptType.READ to ReceiptThread.Main) to UserReceipt("\$mine", Receipt(1_000u)),
             (ReceiptType.READ to ReceiptThread.Thread("\$root")) to UserReceipt("\$r1", Receipt(2_500u)),
+            // Uncached target event `$missing` with a high client receipt timestamp must NOT clear newer items.
+            (ReceiptType.READ to ReceiptThread.Thread("\$other")) to UserReceipt("\$missing", Receipt(9_999u)),
         )
         val timestamps = mapOf("\$mine" to 1_000uL, "\$r1" to 2_000uL, "\$newer" to 4_000uL)
         val client = object : Client(NoHandle) {
             override fun getRoom(roomId: String): Room? = if (roomId != "!team:example.org") null else object : Room(NoHandle) {
                 override suspend fun loadUserReceipt(receiptType: ReceiptType, thread: ReceiptThread, userId: String): UserReceipt? =
                     receipts[receiptType to thread]
-                override suspend fun loadOrFetchEvent(eventId: String): TimelineEvent = object : TimelineEvent(NoHandle) {
-                    override fun timestamp(): ULong = timestamps[eventId] ?: 0uL
+                override suspend fun loadOrFetchEvent(eventId: String): TimelineEvent {
+                    val ts = timestamps[eventId] ?: throw IllegalStateException("event not found")
+                    return object : TimelineEvent(NoHandle) {
+                        override fun timestamp(): ULong = ts
+                    }
                 }
             }
         }
         val activity = MatrixActivity("@alex:example.org", backgroundScope) { _, _ -> null }
         activity.listener.onNotification(notification("\$r1", "Read in thread", at = 2_000u, thread = "\$root"), "!team:example.org")
-        activity.listener.onNotification(notification("\$r2", "Other thread", at = 2_500u, thread = "\$other"), "!team:example.org")
+        // Older than `$r1` (1500ms < 2000ms) in an unrelated thread, proving `$root`'s receipt stays thread-scoped.
+        activity.listener.onNotification(notification("\$r2", "Other thread", at = 1_500u, thread = "\$other"), "!team:example.org")
         activity.listener.onNotification(reaction("\$rx", "👍", at = 3_000u, related = "\$mine"), "!team:example.org")
         activity.items.first { it.size == 3 }
 

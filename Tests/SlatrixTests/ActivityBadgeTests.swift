@@ -204,6 +204,8 @@ struct ActivityBadgeTests {
         room.receipts = [
             .main: UserReceipt(eventId: "$mine", receipt: Receipt(timestamp: 1_000)),
             .thread(threadRootEventId: "$root"): UserReceipt(eventId: "$r1", receipt: Receipt(timestamp: 2_500)),
+            // Uncached target event `$missing` with a high client receipt timestamp must NOT clear newer items.
+            .thread(threadRootEventId: "$other"): UserReceipt(eventId: "$missing", receipt: Receipt(timestamp: 9_999)),
         ]
         let matrix = MatrixService.scratch()
         matrix.configureRoomOpenForChecks(
@@ -214,10 +216,11 @@ struct ActivityBadgeTests {
             id: "reply-read", roomID: "!sync:example.org", eventID: "$r1", roomName: "Sync",
             senderID: "@alice:example.org", senderName: "Alice", body: "Read in thread",
             timestamp: Date(timeIntervalSince1970: 2), hasMention: false, threadRootID: "$root", kind: .message)
+        // Older than `$r1` (1500ms < 2000ms) in an unrelated thread, proving `$root`'s receipt stays thread-scoped.
         let unreadReply = ActivityItem(
             id: "reply-unread", roomID: "!sync:example.org", eventID: "$r2", roomName: "Sync",
             senderID: "@alice:example.org", senderName: "Alice", body: "Still unread",
-            timestamp: Date(timeIntervalSince1970: 2.5), hasMention: false, threadRootID: "$other", kind: .message)
+            timestamp: Date(timeIntervalSince1970: 1.5), hasMention: false, threadRootID: "$other", kind: .message)
         let reaction = ActivityItem(
             id: "reaction-later", roomID: "!sync:example.org", eventID: "$mine", roomName: "Sync",
             senderID: "@alice:example.org", senderName: "Alice", body: "Reacted 👍",
