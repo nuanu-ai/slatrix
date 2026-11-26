@@ -24,6 +24,8 @@ struct MessageComposer: View {
     var onCancelEdit: (() -> Void)? = nil
     var onSendText: ((String) async throws -> Void)? = nil
     var onSendFile: ((URL) async throws -> Void)? = nil
+    /// Sends text paired with a single attachment as one captioned media message.
+    var onSendCaptionedFile: ((URL, String) async throws -> Void)? = nil
     var queuedFiles: Binding<[URL]>? = nil
     var sendingState: Binding<Bool>? = nil
     var onError: ((String) -> Void)? = nil
@@ -614,16 +616,25 @@ struct MessageComposer: View {
         Task { @MainActor in
             do {
                 if let onSendText, let onSendFile {
-                    if !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        try await onSendText(body)
+                    let hasBody = !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    if !isEditing, hasBody, files.count == 1, let onSendCaptionedFile {
+                        let file = files[0]
+                        try await onSendCaptionedFile(file, body)
                         text = ""
-                        if isEditing { onCancelEdit?() }
-                    }
-                    if !isEditing {
-                        for file in files {
-                            try await onSendFile(file)
-                            attachments.removeAll { $0 == file }
-                            discardAttachments([file])
+                        attachments.removeAll { $0 == file }
+                        discardAttachments([file])
+                    } else {
+                        if hasBody {
+                            try await onSendText(body)
+                            text = ""
+                            if isEditing { onCancelEdit?() }
+                        }
+                        if !isEditing {
+                            for file in files {
+                                try await onSendFile(file)
+                                attachments.removeAll { $0 == file }
+                                discardAttachments([file])
+                            }
                         }
                     }
                 } else {

@@ -383,8 +383,28 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
     // The row and its tile's pixels, saved, so the viewer stays open on the same image when the phone turns.
     var viewing by rememberSaveable { mutableStateOf<Pair<String, Pair<Int, Int>>?>(null) }
     viewing?.let { (id, tile) ->
-        (state.rows.find { it.id == id } as? ConversationMessage)?.let { message ->
-            message.attachment?.let { MediaViewer(it, tile, loadPicture, message.senderName, message.timestamp, loadFile) { viewing = null } }
+        val viewerItems = remember(state.rows) {
+            state.rows.filterIsInstance<ConversationMessage>().mapNotNull { row ->
+                val att = row.attachment?.takeIf { it.kind == MessageAttachment.Kind.Image && row.kind != MessageKind.Deleted }
+                    ?: return@mapNotNull null
+                ViewerMediaItem(row.id, att, row.senderName, row.timestamp, row.caption, row)
+            }
+        }
+        val index = viewerItems.indexOfFirst { it.id == id }
+        if (index >= 0) {
+            MediaViewer(
+                items = viewerItems,
+                initialIndex = index,
+                tile = tile,
+                load = loadPicture,
+                loadFile = loadFile,
+                onForward = actions.onForward?.let { forward ->
+                    { item ->
+                        viewing = null
+                        item.message?.let(forward)
+                    }
+                },
+            ) { viewing = null }
         }
     }
     val files = rememberCoroutineScope()

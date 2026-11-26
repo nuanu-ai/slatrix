@@ -1,11 +1,13 @@
 package ai.nuanu.slatrix.ui.account
 
+import ai.nuanu.slatrix.core.ConversationMessage
 import ai.nuanu.slatrix.core.FileKind
 import ai.nuanu.slatrix.core.MatrixMedia
 import ai.nuanu.slatrix.core.MessageAttachment
 import ai.nuanu.slatrix.core.SvgDecoder
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.Motion
+import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import ai.nuanu.slatrix.ui.designsystem.UiMetrics
 import ai.nuanu.slatrix.ui.designsystem.isMotionReduced
@@ -30,9 +32,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import kotlin.math.abs
@@ -473,38 +478,128 @@ internal fun FileTile(kind: FileKind) {
 
 private val OffsetSaver = Saver<Offset, List<Float>>({ listOf(it.x, it.y) }, { Offset(it[0], it[1]) })
 
-/**
- * An image full screen on black, as in Slack: pinch or double-tap to zoom, drag to look around, Close to leave, with who
- * sent it and when, and Share and Save to device once [loadFile] can download it. Until the image loads, the picture its
- * [tile] showed holds the image's box; one already loaded shows at once.
- */
+/** One slide in Android's full-screen media viewer. */
+internal data class ViewerMediaItem(
+    val id: String,
+    val attachment: MessageAttachment,
+    val sender: String,
+    val timestamp: Long,
+    val caption: String? = null,
+    val message: ConversationMessage? = null,
+)
+
+/** Pure focal-point zoom and image-bounded pan math for [MediaViewer]. */
+internal object ViewerZoom {
+    fun fittedSize(viewport: IntSize, contentAspect: Float?): Pair<Float, Float> {
+        val vw = viewport.width.toFloat()
+        val vh = viewport.height.toFloat()
+        if (vw <= 0f || vh <= 0f) return 0f to 0f
+        val aspect = contentAspect?.takeIf { it > 0f } ?: return vw to vh
+        return if (vw / vh > aspect) (vh * aspect) to vh else vw to (vw / aspect)
+    }
+
+    fun clamp(offset: Offset, scale: Float, viewport: IntSize, contentAspect: Float?): Offset {
+        if (scale <= 1f || viewport.width <= 0 || viewport.height <= 0) return Offset.Zero
+        val (fittedW, fittedH) = fittedSize(viewport, contentAspect)
+        val maxX = max(0f, (fittedW * scale - viewport.width) / 2f)
+        val maxY = max(0f, (fittedH * scale - viewport.height) / 2f)
+        return Offset(offset.x.coerceIn(-maxX, maxX), offset.y.coerceIn(-maxY, maxY))
+    }
+
+    fun pinch(
+        currentScale: Float,
+        currentOffset: Offset,
+        zoomChange: Float,
+        panChange: Offset,
+        centroid: Offset,
+        viewport: IntSize,
+        contentAspect: Float?,
+        maxScale: Float,
+    ): Pair<Float, Offset> {
+        val nextScale = (currentScale * zoomChange).coerceIn(1f, maxScale)
+        if (nextScale <= 1f) return 1f to Offset.Zero
+        val ratio = nextScale / max(currentScale, 0.0001f)
+        val center = Offset(viewport.width / 2f, viewport.height / 2f)
+        val focal = centroid - center
+        val shifted = (currentOffset - focal) * ratio + focal + panChange
+        return nextScale to clamp(shifted, nextScale, viewport, contentAspect)
+    }
+
+    fun doubleTap(
+        currentScale: Float,
+        tap: Offset,
+        viewport: IntSize,
+        contentAspect: Float?,
+        targetScale: Float,
+    ): Pair<Float, Offset> {
+        if (currentScale > 1.01f) return 1f to Offset.Zero
+        val center = Offset(viewport.width / 2f, viewport.height / 2f)
+        val focal = tap - center
+        val shifted = -focal * (targetScale - 1f)
+        return targetScale to clamp(shifted, targetScale, viewport, contentAspect)
+    }
+}
+
+/** Single-item convenience wrapper delegating to the multi-item [MediaViewer]. */
 @Composable
 internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, load: PictureLoader, sender: String, timestamp: Long,
     loadFile: FileLoader?, onDismiss: () -> Unit) {
+    MediaViewer(
+        items = listOf(ViewerMediaItem(attachment.source.toJson(), attachment, sender, timestamp)),
+        initialIndex = 0,
+        tile = tile,
+        load = load,
+        loadFile = loadFile,
+        onDismiss = onDismiss,
+    )
+}
+
+/**
+ * Full-screen media viewer on black, as in Slack: swipe between images in the conversation or Files list, focal-point
+ * pinch or double-tap to zoom, image-bounded pan, vertical drag to dismiss, caption display, and Forward / Share / Save.
+ */
+@Composable
+internal fun MediaViewer(
+    items: List<ViewerMediaItem>,
+    initialIndex: Int,
+    tile: Pair<Int, Int>,
+    load: PictureLoader,
+    loadFile: FileLoader?,
+    onForward: ((ViewerMediaItem) -> Unit)? = null,
+    onDismiss: () -> Unit,
+) {
+    if (items.isEmpty()) return
     val colors = SlatrixTheme.colors
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val safeInitial = initialIndex.coerceIn(0, items.lastIndex)
+    val pagerState = rememberPagerState(initialPage = safeInitial) { items.size }
+    val currentItem = items.getOrElse(pagerState.currentPage) { items[safeInitial] }
     var notice by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(notice) { if (notice != null) { delay(UiMetrics.NoticeMillis); notice = null } }
     // Saved with the screen rather than in the dialog, whose window keeps its saved state apart.
     var scale by rememberSaveable { mutableFloatStateOf(1f) }
     var offset by rememberSaveable(stateSaver = OffsetSaver) { mutableStateOf(Offset.Zero) }
+    LaunchedEffect(pagerState.currentPage) {
+        scale = 1f
+        offset = Offset.Zero
+    }
     val currentDismiss by rememberUpdatedState(onDismiss)
     val enter = remember { Animatable(0f) }
     val dismissDrag = remember { Animatable(0f) }
     var dismissing by remember { mutableStateOf(false) }
-    fun withFile(action: suspend (File) -> String?) {
+    fun withFile(item: ViewerMediaItem, action: suspend (File) -> String?) {
         if (dismissing) return
         val files = loadFile ?: return
         scope.launch {
-            val file = try { files(attachment) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
+            val file = try { files(item.attachment) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
             if (dismissing) return@launch
-            notice = if (file == null) "Couldn’t download ${attachment.name}." else try {
+            notice = if (file == null) "Couldn’t download ${item.attachment.name}." else try {
                 action(file)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                "Couldn’t save ${attachment.name}."
+                "Couldn’t save ${item.attachment.name}."
             }
         }
     }
@@ -522,19 +617,9 @@ internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, lo
             else enter.animateTo(1f, Motion.spatial(Motion.UnitThreshold))
         }
         val reducedMotion = kotlin.coroutines.EmptyCoroutineContext.isMotionReduced(context)
-        val fullState = pictureState(attachment, UiMetrics.ViewerPixels, UiMetrics.ViewerPixels, true, !reducedMotion, load)
-        val full = fullState.bitmap
-        val animatedFull = fullState.animated
-        val placeholder = if (full == null && animatedFull == null) picture(attachment, tile.first, tile.second, false, load) else null
         var size by remember { mutableStateOf(IntSize.Zero) }
         val dismissReach = with(LocalDensity.current) { UiMetrics.ViewerDismiss.toPx() }
         val dismissFlick = with(LocalDensity.current) { UiMetrics.SheetDismissVelocity.toPx() }
-        // Zoomed in, the picture moves only as far as its edges.
-        fun bounded(value: Offset): Offset {
-            val x = size.width * (scale - 1) / 2
-            val y = size.height * (scale - 1) / 2
-            return Offset(value.x.coerceIn(-x, x), value.y.coerceIn(-y, y))
-        }
         fun dragProgress(): Float =
             if (size.height > 0) (abs(dismissDrag.value) / (size.height * 0.5f)).coerceIn(0f, 1f) else 0f
         BoxWithConstraints(Modifier.fillMaxSize()
@@ -547,117 +632,155 @@ internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, lo
                 val alpha = (1f - dragProgress()) * enter.value.coerceIn(0f, 1f)
                 if (alpha > 0f) drawRect(colors.mediaBackdrop, alpha = alpha)
             }.onSizeChanged { size = it }) {
-            // The image's box fitted to the screen, from its size in the event; unknown, the small picture isn't stretched.
-            val (w, h) = (attachment.width ?: 0) to (attachment.height ?: 0)
-            val fit = if (w > 0 && h > 0) minOf(maxWidth / w, maxHeight / h) else null
-            Box(Modifier.fillMaxSize()
-                .pointerInput(dismissReach, dismissFlick) {
-                    val slop = viewConfiguration.touchSlop
-                    awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false)
-                        if (dismissing) return@awaitEachGesture
-                        val velocityTracker = VelocityTracker()
-                        var totalPan = Offset.Zero
-                        var currentDrag = dismissDrag.value
-                        var draggingDismiss = false
-                        var transforming = false
-                        var cancelled = false
-                        do {
-                            val event = awaitPointerEvent()
-                            if (dismissing) {
-                                cancelled = true
-                                break
-                            }
-                            val active = event.changes.filter { it.pressed }
-                            if (active.isEmpty()) {
-                                val up = event.changes.firstOrNull()
-                                // ACTION_CANCEL arrives as a consumed synthetic up; treat it as cancel rather than release,
-                                // and feed genuine up timestamps to VelocityTracker so pausing before lifting zeros velocity.
-                                if (up == null || up.isConsumed || !up.changedToUp()) {
+            HorizontalPager(
+                state = pagerState,
+                userScrollEnabled = scale <= 1.01f && !dismissing,
+                modifier = Modifier.fillMaxSize(),
+            ) { page ->
+                val item = items[page]
+                val attachment = item.attachment
+                val isCurrentPage = page == pagerState.currentPage
+                val fullState = pictureState(attachment, UiMetrics.ViewerPixels, UiMetrics.ViewerPixels, true, !reducedMotion, load)
+                val full = fullState.bitmap
+                val animatedFull = fullState.animated
+                val placeholder = if (full == null && animatedFull == null) picture(attachment, tile.first, tile.second, false, load) else null
+                val contentAspect = when {
+                    full != null && full.height > 0 -> full.width.toFloat() / full.height.toFloat()
+                    animatedFull != null && animatedFull.intrinsicHeight > 0 ->
+                        animatedFull.intrinsicWidth.toFloat() / animatedFull.intrinsicHeight.toFloat()
+                    attachment.width != null && attachment.height != null && attachment.height > 0 ->
+                        attachment.width.toFloat() / attachment.height.toFloat()
+                    else -> null
+                }
+                val (w, h) = (attachment.width ?: 0) to (attachment.height ?: 0)
+                val fit = if (w > 0 && h > 0) minOf(maxWidth / w, maxHeight / h) else null
+                val pageScale = if (isCurrentPage) scale else 1f
+                val pageOffset = if (isCurrentPage) offset else Offset.Zero
+                Box(Modifier.fillMaxSize()
+                    .pointerInput(dismissReach, dismissFlick, contentAspect, page) {
+                        val slop = viewConfiguration.touchSlop
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            if (dismissing || page != pagerState.currentPage) return@awaitEachGesture
+                            val velocityTracker = VelocityTracker()
+                            var totalPan = Offset.Zero
+                            var currentDrag = dismissDrag.value
+                            var draggingDismiss = false
+                            var transforming = false
+                            var cancelled = false
+                            do {
+                                val event = awaitPointerEvent()
+                                if (dismissing) {
                                     cancelled = true
-                                } else if (draggingDismiss) {
-                                    velocityTracker.addPosition(up.uptimeMillis, up.position)
+                                    break
                                 }
-                                break
-                            }
-                            val zoom = event.calculateZoom()
-                            val pan = event.calculatePan()
-                            if (active.size > 1 || zoom != 1f || scale > 1f || transforming) {
-                                transforming = true
-                                if (draggingDismiss) {
-                                    draggingDismiss = false
-                                    currentDrag = 0f
-                                    scope.launch { dismissDrag.snapTo(0f) }
-                                }
-                                scale = (scale * zoom).coerceIn(1f, UiMetrics.ViewerMaxZoom)
-                                offset = bounded(offset + pan)
-                                if (active.size > 1 || abs(pan.x) > 0f || abs(pan.y) > 0f) {
-                                    event.changes.forEach { it.consume() }
-                                }
-                            } else {
-                                totalPan += pan
-                                if (!draggingDismiss && abs(totalPan.y) > slop && abs(totalPan.y) > abs(totalPan.x)) {
-                                    draggingDismiss = true
-                                }
-                                if (draggingDismiss) {
-                                    val pointer = active.first()
-                                    velocityTracker.addPosition(pointer.uptimeMillis, pointer.position)
-                                    currentDrag += pan.y
-                                    val snapped = currentDrag
-                                    scope.launch { dismissDrag.snapTo(snapped) }
-                                    event.changes.forEach { it.consume() }
-                                }
-                            }
-                        } while (event.changes.any { it.pressed })
-                        if (draggingDismiss && !dismissing) {
-                            val vy = if (cancelled) 0f else velocityTracker.calculateVelocity().y
-                            val distance = currentDrag
-                            val shouldDismiss = !cancelled && (abs(distance) > dismissReach ||
-                                (abs(distance) > 0f && abs(vy) > dismissFlick && sign(vy) == sign(distance)))
-                            if (shouldDismiss) {
-                                dismissing = true
-                                val exitTarget = (if (distance >= 0f) 1f else -1f) * max(size.height.toFloat(), dismissReach * 2f)
-                                scope.launch {
-                                    if (!coroutineContext.isMotionReduced(context)) {
-                                        dismissDrag.animateTo(exitTarget, Motion.gentle(Motion.PixelThreshold), initialVelocity = vy)
+                                val active = event.changes.filter { it.pressed }
+                                if (active.isEmpty()) {
+                                    val up = event.changes.firstOrNull()
+                                    if (up == null || up.isConsumed || !up.changedToUp()) {
+                                        cancelled = true
+                                    } else if (draggingDismiss) {
+                                        velocityTracker.addPosition(up.uptimeMillis, up.position)
                                     }
-                                    currentDismiss()
+                                    break
                                 }
-                            } else {
-                                scope.launch {
-                                    if (coroutineContext.isMotionReduced(context)) dismissDrag.snapTo(0f)
-                                    else dismissDrag.animateTo(0f, Motion.snappy(Motion.PixelThreshold), initialVelocity = vy)
+                                val zoom = event.calculateZoom()
+                                val pan = event.calculatePan()
+                                val centroid = event.calculateCentroid(useCurrent = false)
+                                if (active.size > 1 || zoom != 1f || scale > 1f || transforming) {
+                                    transforming = true
+                                    if (draggingDismiss) {
+                                        draggingDismiss = false
+                                        currentDrag = 0f
+                                        scope.launch { dismissDrag.snapTo(0f) }
+                                    }
+                                    val (nextScale, nextOffset) = ViewerZoom.pinch(
+                                        currentScale = scale,
+                                        currentOffset = offset,
+                                        zoomChange = zoom,
+                                        panChange = pan,
+                                        centroid = if (centroid == Offset.Unspecified) Offset(size.width / 2f, size.height / 2f) else centroid,
+                                        viewport = size,
+                                        contentAspect = contentAspect,
+                                        maxScale = UiMetrics.ViewerMaxZoom,
+                                    )
+                                    scale = nextScale
+                                    offset = nextOffset
+                                    if (active.size > 1 || abs(pan.x) > 0f || abs(pan.y) > 0f) {
+                                        event.changes.forEach { it.consume() }
+                                    }
+                                } else {
+                                    totalPan += pan
+                                    if (!draggingDismiss && abs(totalPan.y) > slop && abs(totalPan.y) > abs(totalPan.x)) {
+                                        draggingDismiss = true
+                                    }
+                                    if (draggingDismiss) {
+                                        val pointer = active.first()
+                                        velocityTracker.addPosition(pointer.uptimeMillis, pointer.position)
+                                        currentDrag += pan.y
+                                        val snapped = currentDrag
+                                        scope.launch { dismissDrag.snapTo(snapped) }
+                                        event.changes.forEach { it.consume() }
+                                    }
+                                }
+                            } while (event.changes.any { it.pressed })
+                            if (draggingDismiss && !dismissing) {
+                                val vy = if (cancelled) 0f else velocityTracker.calculateVelocity().y
+                                val distance = currentDrag
+                                val shouldDismiss = !cancelled && (abs(distance) > dismissReach ||
+                                    (abs(distance) > 0f && abs(vy) > dismissFlick && sign(vy) == sign(distance)))
+                                if (shouldDismiss) {
+                                    dismissing = true
+                                    val exitTarget = (if (distance >= 0f) 1f else -1f) * max(size.height.toFloat(), dismissReach * 2f)
+                                    scope.launch {
+                                        if (!coroutineContext.isMotionReduced(context)) {
+                                            dismissDrag.animateTo(exitTarget, Motion.gentle(Motion.PixelThreshold), initialVelocity = vy)
+                                        }
+                                        currentDismiss()
+                                    }
+                                } else {
+                                    scope.launch {
+                                        if (coroutineContext.isMotionReduced(context)) dismissDrag.snapTo(0f)
+                                        else dismissDrag.animateTo(0f, Motion.snappy(Motion.PixelThreshold), initialVelocity = vy)
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                .pointerInput(Unit) {
-                    detectTapGestures(onDoubleTap = {
-                        if (dismissing) return@detectTapGestures
-                        scale = if (scale > 1f) 1f else UiMetrics.ViewerDoubleTapZoom
-                        offset = Offset.Zero
-                        if (dismissDrag.value != 0f) scope.launch { dismissDrag.snapTo(0f) }
-                    })
-                }
-                .graphicsLayer {
-                    val dragScale = 1f - 0.18f * dragProgress()
-                    val enterScale = 0.92f + 0.08f * enter.value
-                    scaleX = scale * dragScale * enterScale
-                    scaleY = scale * dragScale * enterScale
-                    translationX = offset.x
-                    translationY = offset.y + dismissDrag.value
-                    alpha = enter.value.coerceIn(0f, 1f)
-                },
-                contentAlignment = Alignment.Center) {
-                when {
-                    animatedFull != null -> AnimatedPictureView(
-                        animatedFull, attachment.name, Modifier.fillMaxSize(), ImageView.ScaleType.FIT_CENTER)
-                    full != null -> Image(full, attachment.name, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
-                    placeholder != null && fit != null ->
-                        Image(placeholder, attachment.name, Modifier.size(fit * w, fit * h), contentScale = ContentScale.Crop)
-                    placeholder != null ->
-                        Image(placeholder, attachment.name, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                    .pointerInput(contentAspect, page) {
+                        detectTapGestures(onDoubleTap = { tap ->
+                            if (dismissing || page != pagerState.currentPage) return@detectTapGestures
+                            val (nextScale, nextOffset) = ViewerZoom.doubleTap(
+                                currentScale = scale,
+                                tap = tap,
+                                viewport = size,
+                                contentAspect = contentAspect,
+                                targetScale = UiMetrics.ViewerDoubleTapZoom,
+                            )
+                            scale = nextScale
+                            offset = nextOffset
+                            if (dismissDrag.value != 0f) scope.launch { dismissDrag.snapTo(0f) }
+                        })
+                    }
+                    .graphicsLayer {
+                        val dragScale = 1f - 0.18f * dragProgress()
+                        val enterScale = 0.92f + 0.08f * enter.value
+                        scaleX = pageScale * dragScale * enterScale
+                        scaleY = pageScale * dragScale * enterScale
+                        translationX = pageOffset.x
+                        translationY = pageOffset.y + dismissDrag.value
+                        alpha = enter.value.coerceIn(0f, 1f)
+                    },
+                    contentAlignment = Alignment.Center) {
+                    when {
+                        animatedFull != null -> AnimatedPictureView(
+                            animatedFull, attachment.name, Modifier.fillMaxSize(), ImageView.ScaleType.FIT_CENTER)
+                        full != null -> Image(full, attachment.name, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                        placeholder != null && fit != null ->
+                            Image(placeholder, attachment.name, Modifier.size(fit * w, fit * h), contentScale = ContentScale.Crop)
+                        placeholder != null ->
+                            Image(placeholder, attachment.name, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+                    }
                 }
             }
             Row(Modifier.fillMaxWidth()
@@ -665,25 +788,52 @@ internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, lo
                 .background(colors.mediaShade).statusBarsPadding(), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = ::closeSmoothly, enabled = !dismissing) { Icon(Icons.Outlined.Close, "Close", tint = colors.onMedia) }
                 Column(Modifier.weight(1f)) {
-                    Text(sender, style = MaterialTheme.typography.titleSmall, color = colors.onMedia, maxLines = 1,
+                    Text(currentItem.sender, style = MaterialTheme.typography.titleSmall, color = colors.onMedia, maxLines = 1,
                         overflow = TextOverflow.Ellipsis)
-                    Text("${dayLabel(timestamp)} at ${timeLabel(timestamp)}", style = MaterialTheme.typography.bodySmall,
-                        color = colors.onMedia, maxLines = 1)
+                    val subtitle = if (items.size > 1) {
+                        "${dayLabel(currentItem.timestamp)} at ${timeLabel(currentItem.timestamp)} · ${pagerState.currentPage + 1}/${items.size}"
+                    } else {
+                        "${dayLabel(currentItem.timestamp)} at ${timeLabel(currentItem.timestamp)}"
+                    }
+                    Text(subtitle, style = MaterialTheme.typography.bodySmall, color = colors.onMedia, maxLines = 1)
+                }
+                if (onForward != null) {
+                    IconButton(onClick = { onForward(currentItem) }, enabled = !dismissing) {
+                        Icon(SlackIcons.Forward, "Forward", tint = colors.onMedia)
+                    }
                 }
                 if (loadFile != null) {
-                    IconButton(onClick = { withFile { shareFile(context, it, attachment); null } }, enabled = !dismissing) {
+                    IconButton(onClick = { withFile(currentItem) { shareFile(context, it, currentItem.attachment); null } }, enabled = !dismissing) {
                         Icon(Icons.Outlined.Share, "Share", tint = colors.onMedia)
                     }
-                    IconButton(onClick = { withFile { saveFile(context, it, attachment) } }, enabled = !dismissing) {
+                    IconButton(onClick = { withFile(currentItem) { saveFile(context, it, currentItem.attachment) } }, enabled = !dismissing) {
                         Icon(Icons.Outlined.FileDownload, "Save to device", tint = colors.onMedia)
                     }
                 }
             }
-            notice?.let {
-                Text(it, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(UiMetrics.GapLarge)
-                    .background(colors.mediaShade, MaterialTheme.shapes.extraLarge)
-                    .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
-                    style = MaterialTheme.typography.bodyMedium, color = colors.onMedia)
+            Column(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                    .graphicsLayer { alpha = ((1f - dragProgress() * 2.5f) * enter.value).coerceIn(0f, 1f) }
+                    .navigationBarsPadding(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                notice?.let {
+                    Text(it, Modifier.padding(UiMetrics.GapSmall)
+                        .background(colors.mediaShade, MaterialTheme.shapes.extraLarge)
+                        .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapSmall),
+                        style = MaterialTheme.typography.bodyMedium, color = colors.onMedia)
+                }
+                currentItem.caption?.takeIf { it.isNotBlank() }?.let { caption ->
+                    Text(
+                        caption,
+                        Modifier.fillMaxWidth().background(colors.mediaShade)
+                            .padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapMedium),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onMedia,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }

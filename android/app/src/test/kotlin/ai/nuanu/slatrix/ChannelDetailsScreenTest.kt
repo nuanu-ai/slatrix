@@ -430,6 +430,25 @@ class ChannelDetailsScreenTest {
         compose.onNodeWithText("Workspaces").assertDoesNotExist()
     }
 
+    @Test fun pinsPageShowsAttachmentDetailsForPinnedFilesAndImages() {
+        val pdf = pinned("report.pdf").copy(
+            kind = MessageKind.Attachment,
+            attachment = MessageAttachment(
+                MessageAttachment.Kind.File, "report.pdf", "application/pdf", 2048, null, null,
+                TestMediaSource("mxc://example.org/report"),
+            ),
+        )
+        details(
+            room.copy(pinned = listOf("\$report.pdf")),
+            ChannelDetailsActions(pins = {
+                PinnedMessages(ConversationState(listOf(pdf), loading = false))
+            }),
+        )
+        compose.onNodeWithText("Pinned messages").performClick()
+        compose.onNodeWithText("report.pdf").assertIsDisplayed()
+        compose.onNodeWithText("PDF", substring = true).assertIsDisplayed()
+    }
+
     private fun pinned(body: String) = ConversationMessage(body, "\$$body", "@mira:example.org", "Mira", body, null,
         1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "M", 0)
 

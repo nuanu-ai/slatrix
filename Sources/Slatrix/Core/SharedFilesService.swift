@@ -60,6 +60,11 @@ enum SharedContentMapping {
         }
         return urls
     }
+
+    /// Which URL a shared row should display as a link row: always in the Links tab, otherwise only when there is no attachment.
+    static func displayedLink(for message: ChatMessage, links: [URL], preferLink: Bool) -> URL? {
+        (preferLink || message.attachment == nil) ? links.first : nil
+    }
 }
 
 private final class SharedFilesTimelineObserver: TimelineListener, @unchecked Sendable {
@@ -251,7 +256,7 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
             }
             timelineHandle = handle
             observer = listener
-            await loadPage(session: session, token: token)
+            await loadInitialPages(session: session, token: token)
         } catch {
             guard account == session, scope == token else { return }
             if error is CancellationError {
@@ -295,6 +300,37 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
 
     func retry() async {
         if timeline != nil { await loadMore() } else if let roomID { await open(roomID: roomID) }
+    }
+
+    private static let maxInitialAutoPages = 5
+
+    /// Paginates past up to 5 text-only pages on open so active channels don't open on an empty Files tab.
+    private func loadInitialPages(session: UUID, token: UUID) async {
+        for _ in 0..<Self.maxInitialAutoPages {
+            await loadPage(session: session, token: token)
+            guard account == session, scope == token, errorMessage == nil, hasMore else { break }
+            if let snapshot = observer?.snapshot.values, Self.containsSharedCandidate(in: snapshot) { break }
+        }
+    }
+
+    private static func containsSharedCandidate(in values: [TimelineItem]) -> Bool {
+        for item in values {
+            guard let event = item.asEvent(), event.isRemote,
+                case .msgLike(let content) = event.content
+            else { continue }
+            switch content.kind {
+            case .sticker: return true
+            case .message(let msg):
+                switch msg.msgType {
+                case .image, .file, .video, .audio: return true
+                case .text, .notice, .emote:
+                    if msg.body.contains("http://") || msg.body.contains("https://") { return true }
+                default: break
+                }
+            default: break
+            }
+        }
+        return false
     }
 
     private func loadPage(session: UUID, token: UUID) async {

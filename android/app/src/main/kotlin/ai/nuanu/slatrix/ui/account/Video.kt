@@ -615,7 +615,7 @@ private fun DelayedSpinner() {
 
 /** A video full screen on black with the player's controls, Share and Save, carrying on from where it played in the row. */
 @Composable
-private fun VideoViewer(attachment: MessageAttachment, player: Player, videos: VideoPlayback, onDismiss: () -> Unit) {
+internal fun VideoViewer(attachment: MessageAttachment, player: Player, videos: VideoPlayback, onDismiss: () -> Unit) {
     val colors = SlatrixTheme.colors
     val context = LocalContext.current
     val scope = rememberCoroutineScope()

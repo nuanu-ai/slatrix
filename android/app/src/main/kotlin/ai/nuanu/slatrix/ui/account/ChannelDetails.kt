@@ -11,6 +11,7 @@ import ai.nuanu.slatrix.core.NotificationSetting
 import ai.nuanu.slatrix.core.PinOrder
 import ai.nuanu.slatrix.core.RoomSummary
 import ai.nuanu.slatrix.core.SpaceSummary
+import ai.nuanu.slatrix.core.caption
 import ai.nuanu.slatrix.ui.designsystem.ListHeading
 import ai.nuanu.slatrix.ui.designsystem.SlackIcons
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
@@ -37,6 +38,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.text.format.Formatter
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.clip
@@ -84,7 +88,11 @@ data class SharedFiles(val state: ConversationState = ConversationState(), val l
     val onOpenFile: suspend (MessageAttachment) -> String? = { null }, val loadFile: FileLoader? = null, val onLoadMore: () -> Unit = {})
 
 /** A conversation's pinned messages as they load, and unpinning one. */
-data class PinnedMessages(val state: ConversationState = ConversationState(), val onUnpin: (ConversationMessage) -> Unit = {})
+data class PinnedMessages(
+    val state: ConversationState = ConversationState(),
+    val loadPicture: PictureLoader = { _, _, _, _ -> null },
+    val onUnpin: (ConversationMessage) -> Unit = {},
+)
 
 private enum class DetailsPage { Details, Members, Edit, Notifications, AddPeople, Pins, Files }
 
@@ -332,6 +340,8 @@ private fun MembersPage(room: RoomSummary, me: String?, actions: ChannelDetailsA
 @Composable
 private fun PinsPage(room: RoomSummary, me: String?, pins: PinnedMessages, onOpenMessage: (String) -> Unit, onBack: () -> Unit) {
     val colors = SlatrixTheme.colors
+    val context = LocalContext.current
+    val tile = with(LocalDensity.current) { UiMetrics.FileTile.roundToPx() }
     val messages = remember(pins.state.rows, room.pinned) {
         PinOrder.arrange(room.pinned, pins.state.rows.filterIsInstance<ConversationMessage>()) { it.eventId }
     }
@@ -341,14 +351,51 @@ private fun PinsPage(room: RoomSummary, me: String?, pins: PinnedMessages, onOpe
                 .padding(start = UiMetrics.GapLarge, top = UiMetrics.GapMedium, bottom = UiMetrics.GapMedium),
                 horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
                 LiveAvatar(message.initials, message.colorIndex, url = message.avatarUrl)
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall)) {
                         Text(message.senderName, Modifier.weight(1f, fill = false), style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold, color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text("${dayLabel(message.timestamp)} at ${timeLabel(message.timestamp)}", style = MaterialTheme.typography.bodySmall,
                             color = colors.textSecondary, maxLines = 1)
                     }
-                    MessageBody(message, colors.textBody, me, pins.state.names)
+                    val attachment = message.attachment
+                    if (attachment == null || message.caption != null) {
+                        MessageBody(message, colors.textBody, me, pins.state.names)
+                    }
+                    attachment?.let { att ->
+                        val kind = remember(att) { FileKind.of(att.name, att.mimeType) }
+                        val thumb = if (att.kind == MessageAttachment.Kind.Image || att.kind == MessageAttachment.Kind.Video) {
+                            picture(att, tile, tile, false, pins.loadPicture)
+                        } else null
+                        val meta = remember(att) {
+                            listOfNotNull(
+                                kind.label(att.name),
+                                att.durationMillis?.takeIf { it > 0L }?.let(::durationLabel),
+                                att.size?.let { Formatter.formatShortFileSize(context, it) },
+                            ).joinToString(" · ")
+                        }
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (att.kind == MessageAttachment.Kind.Image || att.kind == MessageAttachment.Kind.Video) {
+                                Box(Modifier.size(UiMetrics.FileTile).clip(MaterialTheme.shapes.medium), contentAlignment = Alignment.Center) {
+                                    FileTile(kind)
+                                    thumb?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+                                    if (att.kind == MessageAttachment.Kind.Video) {
+                                        Icon(Icons.Filled.PlayArrow, null, Modifier.size(UiMetrics.SmallIcon), tint = colors.onMedia)
+                                    }
+                                }
+                            } else {
+                                FileTile(kind)
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text(att.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium,
+                                    color = colors.textPrimary, maxLines = 1, overflow = TextOverflow.MiddleEllipsis)
+                                Text(meta, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary, maxLines = 1)
+                            }
+                        }
+                    }
                 }
                 // Holds its place without the power to unpin, so rows line up either way.
                 Box(Modifier.size(UiMetrics.Touch), contentAlignment = Alignment.Center) {
@@ -388,18 +435,37 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
     val tile = with(LocalDensity.current) { UiMetrics.FileTile.roundToPx() }
     // Saved, so the viewer stays open on the same image when the phone turns.
     var viewing by rememberSaveable { mutableStateOf<String?>(null) }
-    viewing?.let { id ->
-        (files.state.rows.find { it.id == id } as? ConversationMessage)?.let { message ->
-            message.attachment?.let {
-                MediaViewer(it, tile to tile, files.loadPicture, message.senderName, message.timestamp, files.loadFile) { viewing = null }
-            }
-        }
-    }
     val shared = remember(files.state.rows) {
         files.state.rows.asReversed().filterIsInstance<ConversationMessage>().flatMap { message ->
             if (message.kind == MessageKind.Attachment) listOf(message to null)
             else message.runs.mapNotNull { run -> run.link?.takeIf { it.startsWith("https://") || it.startsWith("http://") } }
                 .distinct().map { message to it }
+        }
+    }
+    viewing?.let { id ->
+        val viewerItems = remember(shared) {
+            shared.mapNotNull { (message, link) ->
+                val att = message.attachment?.takeIf { link == null && it.kind == MessageAttachment.Kind.Image }
+                    ?: return@mapNotNull null
+                ViewerMediaItem(message.id, att, message.senderName, message.timestamp, message.caption, message)
+            }
+        }
+        val index = viewerItems.indexOfFirst { it.id == id }
+        if (index >= 0) {
+            MediaViewer(viewerItems, index, tile to tile, files.loadPicture, files.loadFile) { viewing = null }
+        }
+    }
+    val videos = files.loadFile?.let { rememberVideoPlayback(it) }
+    var playingVideo by rememberSaveable { mutableStateOf<String?>(null) }
+    playingVideo?.let { id ->
+        val msg = files.state.rows.find { it.id == id } as? ConversationMessage
+        val att = msg?.attachment
+        val player = videos?.player?.takeIf { att != null && videos.playing == att.source.toJson() }
+        if (att != null && videos != null && player != null) {
+            VideoViewer(att, player, videos) {
+                videos.stop(att.source.toJson())
+                playingVideo = null
+            }
         }
     }
     val shown = remember(shared, filter) {
@@ -426,13 +492,25 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
                 // A file shows by its name and type, as its row in the conversation does, not by its caption.
                 val file = message.attachment.takeIf { link == null }
                 val kind = file?.let { FileKind.of(it.name, it.mimeType) }
-                val thumbnail = if (file?.kind == MessageAttachment.Kind.Image) {
+                val thumbnail = if (file?.kind == MessageAttachment.Kind.Image || file?.kind == MessageAttachment.Kind.Video) {
                     picture(file, tile, tile, false, files.loadPicture)
                 } else null
                 Row(Modifier.fillMaxWidth().clickable(enabled = message.id !in opening) {
                     when {
                         link != null -> uris.openUri(link)
                         file?.kind == MessageAttachment.Kind.Image -> viewing = message.id
+                        file?.kind == MessageAttachment.Kind.Video && videos != null -> {
+                            opening = opening + message.id
+                            scope.launch {
+                                try {
+                                    videos.start(file)
+                                    if (videos.playing == file.source.toJson()) playingVideo = message.id
+                                    else videos.errorMessage?.let { error = it }
+                                } finally {
+                                    opening = opening - message.id
+                                }
+                            }
+                        }
                         // Marked before it starts, so a second tap before the row disables opens nothing more.
                         file != null -> if (message.id !in opening) {
                             opening = opening + message.id
@@ -445,11 +523,15 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
                 }.padding(horizontal = UiMetrics.GapLarge, vertical = UiMetrics.GapMedium),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium)) {
                     when {
-                        // An image shows its own small picture over its kind's tile, which holds the place while it loads.
-                        file?.kind == MessageAttachment.Kind.Image -> Box(Modifier.size(UiMetrics.FileTile).clip(MaterialTheme.shapes.medium)) {
-                            FileTile(kind ?: FileKind.Image)
-                            thumbnail?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
-                        }
+                        // An image or video shows its own small picture over its kind's tile, which holds the place while it loads.
+                        file?.kind == MessageAttachment.Kind.Image || file?.kind == MessageAttachment.Kind.Video ->
+                            Box(Modifier.size(UiMetrics.FileTile).clip(MaterialTheme.shapes.medium), contentAlignment = Alignment.Center) {
+                                FileTile(kind ?: FileKind.Image)
+                                thumbnail?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+                                if (file.kind == MessageAttachment.Kind.Video) {
+                                    Icon(Icons.Filled.PlayArrow, null, Modifier.size(UiMetrics.SmallIcon), tint = colors.onMedia)
+                                }
+                            }
                         kind != null -> FileTile(kind)
                         else -> Box(Modifier.size(UiMetrics.FileTile).background(colors.raised, MaterialTheme.shapes.medium),
                             contentAlignment = Alignment.Center) {

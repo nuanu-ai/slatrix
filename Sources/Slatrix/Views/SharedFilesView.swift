@@ -91,7 +91,7 @@ struct SharedFilesView: View {
                             ForEach(shown) { item in
                                 let session = matrix.notificationSessionID
                                 SharedFileRow(
-                                    matrix: matrix, item: item,
+                                    matrix: matrix, item: item, preferLink: filter == .links,
                                     onOpen: {
                                         guard matrix.notificationSessionID == session else { return }
                                         onOpenMedia(item.message, shown.map(\.message))
@@ -182,6 +182,7 @@ private struct SharedFileRow: View {
     @Environment(Toasts.self) private var toasts: Toasts?
     let matrix: MatrixService
     let item: SharedContentItem
+    var preferLink = false
     let onOpen: () -> Void
     let onOpenMessage: () -> Void
     @State private var still: CGImage?
@@ -190,9 +191,9 @@ private struct SharedFileRow: View {
     private var message: ChatMessage { item.message }
 
     var body: some View {
-        let link = message.attachment == nil ? item.links.first : nil
+        let link = SharedContentMapping.displayedLink(for: message, links: item.links, preferLink: preferLink)
         FileRow(
-            tile: tile, name: message.attachment?.name ?? link?.absoluteString ?? "",
+            tile: link != nil ? .link : tile, name: link?.absoluteString ?? message.attachment?.name ?? "",
             caption: SharedContentMapping.caption(
                 sender: message.senderName, room: matrix.rooms.first { $0.id == message.roomID },
                 date: message.timestamp),
