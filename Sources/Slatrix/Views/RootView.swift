@@ -460,6 +460,7 @@ struct RootView: View {
                     Task { await matrix.refreshOwnProfile() }
                     // Nothing says when a message is deleted in a conversation that isn't open, so coming back asks.
                     matrix.recheckCopies()
+                    matrix.reconcileActivityReceipts()
                 }
             }
             .background(
@@ -1627,8 +1628,11 @@ struct RootView: View {
                 },
                 onMarkAllRead: { markAllRead(inWorkspace: workspaceID) }
             )
-            // For a deletion since the app last became active.
-            .onAppear { matrix.recheckCopies() }
+            // For deletions or cross-device reads since the app last synced.
+            .onAppear {
+                matrix.recheckCopies()
+                matrix.reconcileActivityReceipts()
+            }
         case .search:
             SearchResultsView(
                 matrix: matrix, bar: searchBar,

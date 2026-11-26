@@ -1265,20 +1265,56 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         if room != selectedRoom { selectedRoom = room }
     }
     private func withdrawReadRooms(from previous: [ChatRoom], to current: [ChatRoom]) {
-        guard let notifications, client != nil, connectionStopTask == nil, !previous.isEmpty else { return }
+        guard client != nil, connectionStopTask == nil, !previous.isEmpty else { return }
         let currentByID = Dictionary(current.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let cleared = Set(
-            previous.compactMap { old -> String? in
-                let now = currentByID[old.id]
-                let wasUnread = old.membership == "join" && (old.hasUnread || old.mentions > 0)
-                let nowReadOrGone =
-                    now == nil || now?.membership == "leave"
-                    || (now?.membership == "join" && now?.hasUnread == false && now?.mentions == 0)
-                let resolvedInvite = old.membership == "invite" && now?.membership != "invite"
-                return (wasUnread && nowReadOrGone) || resolvedInvite ? old.id : nil
-            })
-        guard !cleared.isEmpty else { return }
-        Task { await notifications.withdrawRooms(cleared) }
+        var cleared = Set<String>()
+        var resolvedInvites = Set<String>()
+        var clearedMentions = Set<String>()
+        var decreased = Set<String>()
+        for old in previous {
+            let now = currentByID[old.id]
+            let wasUnread = old.membership == "join" && (old.hasUnread || old.mentions > 0)
+            let nowReadOrGone =
+                now == nil || now?.membership == "leave"
+                || (now?.membership == "join" && now?.hasUnread == false && now?.mentions == 0)
+            let resolvedInvite = old.membership == "invite" && now?.membership != "invite"
+            if wasUnread && nowReadOrGone { cleared.insert(old.id) }
+            if resolvedInvite {
+                cleared.insert(old.id)
+                resolvedInvites.insert(old.id)
+            }
+            if old.membership == "join", old.mentions > 0, now?.membership == "join", now?.mentions == 0 {
+                clearedMentions.insert(old.id)
+            }
+            if old.membership == "join", let now, now.membership == "join",
+                now.unread < old.unread || now.unreadMessages < old.unreadMessages || now.mentions < old.mentions
+                    || now.fullyReadEventID != old.fullyReadEventID || (old.isMarkedUnread && !now.isMarkedUnread)
+            {
+                decreased.insert(old.id)
+            }
+        }
+        // Permanently mark non-thread items read so a later message or mention never resurrects them.
+        if !cleared.isEmpty || !clearedMentions.isEmpty {
+            activity.markSeen { item in
+                if item.kind == .invite { return resolvedInvites.contains(item.roomID) }
+                guard item.threadRootID == nil else { return false }
+                if cleared.contains(item.roomID) { return true }
+                return item.hasMention && clearedMentions.contains(item.roomID)
+            }
+        }
+        if !cleared.isEmpty, let notifications {
+            let roomsToWithdraw = cleared
+            Task { await notifications.withdrawRooms(roomsToWithdraw) }
+        }
+        // Check server receipts for any remaining unopened items (thread replies, partial reads, reactions).
+        let candidateRooms = cleared.union(clearedMentions).union(decreased)
+        if !candidateRooms.isEmpty {
+            let roomsWithUnopened = Set(
+                activity.items.compactMap { item in
+                    !item.opened && item.kind != .invite && candidateRooms.contains(item.roomID) ? item.roomID : nil
+                })
+            if !roomsWithUnopened.isEmpty { reconcileActivityReceipts(roomIDs: roomsWithUnopened) }
+        }
     }
     var typingUsers: [String] = []
     var isPreview = false
@@ -1612,6 +1648,14 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             {
                 self.scheduleWarmStarredRooms()
             }
+        }
+        refresher.onRoomsTouched = { [weak self] touched in
+            guard let self else { return }
+            let roomsWithUnopened = Set(
+                self.activity.items.compactMap { item in
+                    !item.opened && item.kind != .invite && touched.contains(item.roomID) ? item.roomID : nil
+                })
+            if !roomsWithUnopened.isEmpty { self.reconcileActivityReceipts(roomIDs: roomsWithUnopened) }
         }
         refresher.onError = { [weak self] error in self?.errorMessage = Self.safeError(error) }
         return refresher
@@ -5016,6 +5060,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                 if threadPageError != nil { retryThreadPage() }
                 if openState == .failed { Task { [weak self] in await self?.retryOpenRoom() } }
                 if let id = failedSubscriptionRoomID, id == selectedRoomID { updateSubscriptions(id) }
+                reconcileActivityReceipts()
                 if needsInitialProfileLoad { loadInitialProfile() }
                 if let liveRoom = projectedLiveRoomID, liveRoom == selectedRoomID, focusedEventID == nil {
                     reconcileLiveTimelineSendQueue(roomID: liveRoom)
@@ -5526,6 +5571,80 @@ extension MatrixService {
                 guard session == sessionGeneration else { return }
                 asking.remove(copy.key)
                 if !exists { messagesGone([copy.key]) }
+            }
+        }
+    }
+
+    /// Reconciles unopened Activity items (including thread replies and reactions) against the SDK's synced read
+    /// receipts so messages read on another device clear automatically without manual intervention.
+    @discardableResult func reconcileActivityReceipts(roomIDs: Set<String>? = nil) -> Task<Void, Never> {
+        let session = sessionGeneration
+        guard let client, let ownUserID = user?.id else { return Task {} }
+        let pending = activity.items.filter { item in
+            !item.opened && item.kind != .invite && (roomIDs?.contains(item.roomID) ?? true)
+        }
+        guard !pending.isEmpty else { return Task {} }
+        let byRoom = Dictionary(grouping: pending, by: \.roomID)
+        return Task { [weak self] in
+            let seenIDs = await Task.detached(priority: .utility) {
+                var covered = Set<String>()
+                for (roomID, items) in byRoom {
+                    guard !Task.isCancelled else { return covered }
+                    guard let room = try? client.getRoom(roomId: roomID) else { continue }
+                    var eventTimestamps: [String: UInt64?] = [:]
+                    func resolvedTimestamp(for receipt: UserReceipt) async -> UInt64? {
+                        if let cached = eventTimestamps[receipt.eventId] { return cached }
+                        let ts =
+                            (try? await room.loadOrFetchEvent(eventId: receipt.eventId).timestamp())
+                            ?? receipt.receipt.timestamp
+                        eventTimestamps[receipt.eventId] = ts
+                        return ts
+                    }
+                    func bestReceipt(_ thread: ReceiptThread) async -> (eventID: String, timestamp: UInt64?)? {
+                        let pub = try? await room.loadUserReceipt(receiptType: .read, thread: thread, userId: ownUserID)
+                        let priv = try? await room.loadUserReceipt(
+                            receiptType: .readPrivate, thread: thread, userId: ownUserID)
+                        let pubTs = pub != nil ? await resolvedTimestamp(for: pub!) : nil
+                        let privTs = priv != nil ? await resolvedTimestamp(for: priv!) : nil
+                        switch (pub, priv) {
+                        case (nil, nil): return nil
+                        case (let p?, nil): return (p.eventId, pubTs)
+                        case (nil, let q?): return (q.eventId, privTs)
+                        case (let p?, let q?):
+                            return (privTs ?? 0) > (pubTs ?? 0) ? (q.eventId, privTs) : (p.eventId, pubTs)
+                        }
+                    }
+                    let unthreaded = await bestReceipt(.unthreaded)
+                    let needsMain = items.contains { $0.threadRootID == nil }
+                    let main = needsMain ? await bestReceipt(.main) : nil
+                    var threads: [String: (eventID: String, timestamp: UInt64?)] = [:]
+                    for rootID in Set(items.compactMap(\.threadRootID)) {
+                        if let receipt = await bestReceipt(.thread(threadRootEventId: rootID)) {
+                            threads[rootID] = receipt
+                        }
+                    }
+                    for item in items {
+                        let coveredUnthreaded =
+                            unthreaded.map {
+                                ActivityBadge.isCoveredByReceipt(
+                                    item, receiptEventID: $0.eventID, receiptTimestampMs: $0.timestamp)
+                            } ?? false
+                        let specific =
+                            item.threadRootID.flatMap { threads[$0] } ?? (item.threadRootID == nil ? main : nil)
+                        let coveredSpecific =
+                            specific.map {
+                                ActivityBadge.isCoveredByReceipt(
+                                    item, receiptEventID: $0.eventID, receiptTimestampMs: $0.timestamp)
+                            } ?? false
+                        if coveredUnthreaded || coveredSpecific { covered.insert(item.id) }
+                    }
+                }
+                return covered
+            }.value
+            guard let self, self.sessionGeneration == session, !seenIDs.isEmpty else { return }
+            self.activity.markSeen { seenIDs.contains($0.id) }
+            if let notifications = self.notifications {
+                Task { await notifications.withdraw(seenIDs) }
             }
         }
     }

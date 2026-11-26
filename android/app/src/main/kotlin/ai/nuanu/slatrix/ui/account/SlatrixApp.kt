@@ -271,11 +271,34 @@ internal fun SlatrixApp(
                         if (activeThreadFeed === feed) activeThreadFeed = null
                     }
                 }
-                // Cross-device reads clear stale message alerts (without erasing newer pushes) and keep Activity mentions read.
+                // Cross-device reads clear stale message alerts (without erasing newer pushes) and keep Activity read.
                 LaunchedEffect(rooms, activity) {
-                    rooms?.readRooms?.collect { read ->
-                        PushNotifications(context).clearMessages(read.roomId, throughTimestamp = read.throughTimestamp)
-                        activity?.markRoomMessagesRead(read.roomId)
+                    val source = rooms ?: return@LaunchedEffect
+                    launch {
+                        source.readRooms.collect { read ->
+                            PushNotifications(context).clearMessages(read.roomId, throughTimestamp = read.throughTimestamp)
+                            activity?.markRoomMessagesRead(read.roomId)
+                            activity?.let { act -> launch { act.reconcileReceipts(source.client, setOf(read.roomId)) } }
+                        }
+                    }
+                    launch {
+                        var previous: Map<String, RoomSummary>? = null
+                        source.state.collect { roomState ->
+                            val current = roomState.rooms.associateBy { it.id }
+                            val act = activity
+                            if (act != null && previous != null) {
+                                val changed = HashSet<String>()
+                                for ((id, summary) in current) {
+                                    val before = previous?.get(id) ?: continue
+                                    if (before.mentions > 0 && summary.mentions == 0L) act.markRoomMentionsRead(id)
+                                    if (before != summary && act.items.value.any { it.unread && it.roomId == id }) {
+                                        changed += id
+                                    }
+                                }
+                                if (changed.isNotEmpty()) launch { act.reconcileReceipts(source.client, changed) }
+                            }
+                            previous = current
+                        }
                     }
                 }
                 LaunchedEffect(rooms, activeThreadFeed) {
@@ -691,6 +714,10 @@ private fun LiveActivity(activity: MatrixActivity?, rooms: MatrixRooms?, threads
     val inScope = remember(known, selectedSpaceId) { known.filter { WorkspaceMembership.includes(it.direct, it.spaceIds, selectedSpaceId) } }
     val mentionRooms = remember(inScope) { inScope.filter { it.mentions > 0 } }
     val items = remember(all, known, selectedSpaceId) { all.inWorkspace(known, selectedSpaceId).readWith(known) }
+    LaunchedEffect(activity, rooms) {
+        val client = rooms?.client ?: return@LaunchedEffect
+        activity?.reconcileReceipts(client)
+    }
     ActivityScreen(items, { item -> activity?.markRead(item.id); room(item.roomId)?.let { jump(it, item.eventId, item.threadRoot) } },
         { thread -> room(thread.roomId)?.let { threads?.open(it, thread) } },
         invitations = invitations, mentionRooms = mentionRooms, onOpenInvitation = onInvitation, onOpenRoom = onOpenRoom) { onOpenThread, unreadOnly ->
