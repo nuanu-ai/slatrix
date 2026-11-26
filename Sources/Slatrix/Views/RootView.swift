@@ -702,7 +702,10 @@ struct RootView: View {
             }
             .modal(item: $forwarding) { selection in
                 ForwardMessageView(
-                    matrix: matrix, target: selection.target,
+                    matrix: matrix, target: selection.target, visited: history.entries,
+                    onForwarded: { room in
+                        toasts.show(room.isDirect ? "Forwarded to \(room.name)" : "Forwarded to #\(room.name)")
+                    },
                     onClose: {
                         guard forwarding?.id == selection.id else { return }
                         forwarding = nil
@@ -1530,8 +1533,15 @@ struct RootView: View {
                             .font(m.font(.subheadline))
                             .foregroundStyle(colors.textSecondary)
                     }.lineLimit(1)
-                } else if route != .search {
-                    // Search results title themselves with the query.
+                } else if route == .search {
+                    HStack(spacing: m.sp8) {
+                        Image(systemName: "magnifyingglass").font(m.font(.title3)).foregroundStyle(colors.textSecondary)
+                        let submittedText = searchBar.submitted?.text ?? ""
+                        Text(submittedText.isEmpty ? "Search" : "“\(submittedText)”")
+                            .font(m.font(.title3, .semibold)).foregroundStyle(colors.textPrimary).lineLimit(1)
+                            .accessibilityAddTraits(.isHeader)
+                    }
+                } else {
                     Text(route.title).font(m.font(.title3, .semibold)).foregroundStyle(colors.textPrimary)
                 }
             } trailing: {

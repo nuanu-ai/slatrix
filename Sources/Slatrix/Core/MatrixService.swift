@@ -889,6 +889,9 @@ private final class SearchResultsObserver: SearchServiceResultsListener, @unchec
     private var revision = 0
     let callback: @Sendable ([SearchServiceResult], Int) -> Void
     init(_ callback: @escaping @Sendable ([SearchServiceResult], Int) -> Void) { self.callback = callback }
+    func hasMatch(in roomID: String) -> Bool {
+        lock.withLock { !MatrixMapping.searchMessages(results, roomID: roomID).isEmpty }
+    }
     func onUpdate(updates: [SearchServiceResultsUpdate]) {
         lock.lock()
         results.apply(updates.map(\.change))
@@ -3751,7 +3754,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             throw error
         }
     }
-    func forwardMessage(_ review: ForwardMessageReview, to roomID: String) async throws -> ForwardMessageQueuedResult {
+    func forwardMessage(
+        _ review: ForwardMessageReview, to roomID: String, note: String = ""
+    ) async throws -> ForwardMessageQueuedResult {
         try assertActiveSession()
         try validateMessageAction(review.target)
         guard forwardingReviews.insert(review.id).inserted else { throw ForwardMessageError.busy }
@@ -3792,6 +3797,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             guard current.value == review.value else { throw ForwardMessageReviewChanged(review: current) }
             try validate()
             let content = try current.payload()
+            let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedNote.isEmpty {
+                let noteContent = try messageEventContentNew(
+                    msgtype: .text(content: TextMessageContent(body: trimmedNote, formatted: nil)))
+                _ = try await destinationTimeline.send(msg: noteContent)
+            }
             _ = try await destinationTimeline.send(msg: content)
             // Queued: a failure reported after this point would invite a duplicate resend.
             return ForwardMessageQueuedResult(reviewID: review.id, destinationRoomID: roomID)
@@ -4983,21 +4994,27 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
         let token = searchGeneration
         let session = sessionGeneration
+        // Automatically index recent history on the first search of a session so search finds messages across rooms
+        // that haven't been opened yet, without requiring a manual button click.
+        if searchIndexingState == .idle, connectionStopTask == nil {
+            try? await startSearchBackfill()
+        }
+        guard token == searchGeneration, session == sessionGeneration else { return }
         let service = client.searchService()
         activeSearch = service
         searchState = "loading"
         do {
-            let resultHandle = await service.subscribeToResults(
-                listener: SearchResultsObserver { [weak self] results, revision in
-                    Task { @MainActor [weak self] in
-                        guard let self, token == self.searchGeneration, session == self.sessionGeneration,
-                            revision > self.searchResultRevision
-                        else { return }
-                        self.searchResultRevision = revision
-                        let mapped = MatrixMapping.searchMessages(results, roomID: roomID)
-                        self.searchResults = mapped
-                    }
-                })
+            let observer = SearchResultsObserver { [weak self] results, revision in
+                Task { @MainActor [weak self] in
+                    guard let self, token == self.searchGeneration, session == self.sessionGeneration,
+                        revision > self.searchResultRevision
+                    else { return }
+                    self.searchResultRevision = revision
+                    let mapped = MatrixMapping.searchMessages(results, roomID: roomID)
+                    self.searchResults = mapped
+                }
+            }
+            let resultHandle = await service.subscribeToResults(listener: observer)
             guard token == searchGeneration, session == sessionGeneration else {
                 resultHandle.cancel()
                 return
@@ -5016,6 +5033,18 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                     }))
             try await service.setQuery(query: term)
             guard token == searchGeneration, session == sessionGeneration else { return }
+            // When narrowed to one conversation (`in:`), pull a few more global pages if page 1 held hits only from
+            // other rooms, so the reader sees matches immediately instead of "No matches yet".
+            if let roomID {
+                var extraPages = 0
+                while extraPages < 5, !observer.hasMatch(in: roomID),
+                    case .idle(let endReached) = service.paginationState(), !endReached
+                {
+                    try await service.paginate()
+                    guard token == searchGeneration, session == sessionGeneration else { return }
+                    extraPages += 1
+                }
+            }
             searchQueryCompleted = true
             updateSearchPagination(service.paginationState())
         } catch {

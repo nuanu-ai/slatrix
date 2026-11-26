@@ -1,13 +1,17 @@
 import Foundation
 
 /// A message search: the text, and Slack's filters. Serializes for the SDK's existing Tantivy query parser, whose
-/// index has `body`, `sender` (an exact user ID) and `date` fields. Phrase mode uses one literal: the pinned grammar
-/// consumes backslash + any character inside double quotes (tantivy-query-grammar 0.26, simple_term).
+/// index has `body`, `sender` (an exact user ID) and `date` fields. Query mode requires every word (AND), expands
+/// 3+ character words into exact-boosted prefix ranges so inflected forms (such as Russian stems) match, supports
+/// quoted phrases and `-term` exclusions, and strips raw punctuation so normal queries never fail parsing.
 struct MessageSearchQuery: Hashable {
     enum Mode: String, CaseIterable, Hashable {
         case query = "Query"
         case phrase = "Phrase"
     }
+    private static let prefixUpperSuffix = "\u{FF5A}"
+    private static let minPrefixLength = 3
+
     let text: String
     var mode: Mode
     /// One conversation's hits; each room has its own index, so this filters hits rather than the query.
@@ -26,15 +30,104 @@ struct MessageSearchQuery: Hashable {
     }
 
     func sdkQuery(now: Date = Date(), calendar: Calendar = .current) -> String? {
-        let body = text.isEmpty ? nil : mode == .query ? text : Self.literal(text)
         var filters: [String] = []
         if let senderID { filters.append("+sender:" + Self.literal(senderID)) }
         if let date {
             let since = ISO8601DateFormatter().string(from: date.since(now, calendar: calendar))
             filters.append("+date:[\(since) TO *]")
         }
-        guard !filters.isEmpty else { return body }
-        return ((body.map { mode == .query ? ["+(\($0))"] : ["+" + $0] } ?? []) + filters).joined(separator: " ")
+        guard !text.isEmpty else { return filters.isEmpty ? nil : filters.joined(separator: " ") }
+        if mode == .phrase {
+            let phrase = Self.literal(text)
+            guard !filters.isEmpty else { return phrase }
+            return (["+" + phrase] + filters).joined(separator: " ")
+        }
+        let parsed = Self.tokenize(text)
+        var positive = parsed.positive
+        var negative = parsed.negative
+        if positive.isEmpty && filters.isEmpty {
+            if !negative.isEmpty {
+                positive = negative
+                negative = []
+            } else {
+                positive = [Self.literal(text)]
+            }
+        }
+        if positive.count == 1 && negative.isEmpty && filters.isEmpty { return positive[0] }
+        return (positive.map { "+" + $0 } + negative.map { "-" + $0 } + filters).joined(separator: " ")
+    }
+
+    private struct Tokenized {
+        var positive: [String] = []
+        var negative: [String] = []
+        var exactHighlights: [String] = []
+        var prefixHighlights: [String] = []
+        var negativeExactHighlights: [String] = []
+        var negativePrefixHighlights: [String] = []
+    }
+
+    private static func tokenize(_ input: String) -> Tokenized {
+        var result = Tokenized()
+        var index = input.startIndex
+        while index < input.endIndex {
+            while index < input.endIndex, input[index].isWhitespace { index = input.index(after: index) }
+            guard index < input.endIndex else { break }
+            var negated = false
+            if input[index] == "-" {
+                let next = input.index(after: index)
+                if next < input.endIndex,
+                    input[next] == "\"" || input[next].isLetter || input[next].isNumber
+                {
+                    negated = true
+                    index = next
+                }
+            }
+            if input[index] == "\"" {
+                let contentStart = input.index(after: index)
+                if let closing = input[contentStart...].firstIndex(of: "\"") {
+                    let inner = String(input[contentStart..<closing]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    index = input.index(after: closing)
+                    if !inner.isEmpty {
+                        let clause = literal(inner)
+                        if negated {
+                            result.negative.append(clause)
+                            result.negativeExactHighlights.append(contentsOf: words(in: inner))
+                        } else {
+                            result.positive.append(clause)
+                            result.exactHighlights.append(contentsOf: words(in: inner))
+                        }
+                    }
+                    continue
+                }
+                index = contentStart
+                continue
+            }
+            let chunkEnd = input[index...].firstIndex { $0.isWhitespace || $0 == "\"" } ?? input.endIndex
+            let chunk = String(input[index..<chunkEnd])
+            index = chunkEnd
+            for word in words(in: chunk) {
+                let clause = wordClause(word)
+                if negated {
+                    result.negative.append(clause)
+                    result.negativePrefixHighlights.append(word)
+                } else {
+                    result.positive.append(clause)
+                    result.prefixHighlights.append(word)
+                }
+            }
+        }
+        return result
+    }
+
+    private static func words(in value: String) -> [String] {
+        value.split { !$0.isLetter && !$0.isNumber }.map { $0.lowercased() }.filter { !$0.isEmpty }
+    }
+
+    private static func wordClause(_ word: String) -> String {
+        if word.count >= minPrefixLength {
+            return "(body:\(word)^2 OR body:[\(word) TO \(word)\(prefixUpperSuffix)])"
+        }
+        return "body:\(word)"
     }
 
     private static func literal(_ value: String) -> String {
@@ -79,20 +172,37 @@ struct MessageSearchQuery: Hashable {
         return MessageSearchQuery(text.joined(separator: " "), roomID: roomID, senderID: senderID)
     }
 
-    /// Where the words the index matched appear in `body`. The index lowercases whole words split at anything that
-    /// isn't a letter or digit, so a match is a whole word in any case.
+    /// Where the words the index matched appear in `body`. Phrase mode and quoted phrases mark exact whole words;
+    /// unquoted query terms mark words starting with any 3+ character positive term or matching a shorter term exactly.
     func highlights(in body: String) -> [Range<String.Index>] {
-        let operators: Set<String> = mode == .query ? ["AND", "OR", "NOT"] : []
-        let terms = Set(
-            text.split { !$0.isLetter && !$0.isNumber }.map(String.init).filter { !operators.contains($0) }.map {
-                $0.lowercased()
-            })
+        let exactTerms: [String]
+        let prefixTerms: [String]
+        if mode == .phrase {
+            exactTerms = Self.words(in: text)
+            prefixTerms = []
+        } else {
+            let parsed = Self.tokenize(text)
+            if parsed.positive.isEmpty && senderID == nil && date == nil && !parsed.negative.isEmpty {
+                exactTerms = parsed.negativeExactHighlights
+                prefixTerms = parsed.negativePrefixHighlights
+            } else {
+                exactTerms = parsed.exactHighlights
+                prefixTerms = parsed.prefixHighlights
+            }
+        }
+        guard !exactTerms.isEmpty || !prefixTerms.isEmpty else { return [] }
         var ranges: [Range<String.Index>] = []
         var start = body.startIndex
         while start < body.endIndex {
             guard let wordStart = body[start...].firstIndex(where: { $0.isLetter || $0.isNumber }) else { break }
             let wordEnd = body[wordStart...].firstIndex { !$0.isLetter && !$0.isNumber } ?? body.endIndex
-            if terms.contains(body[wordStart..<wordEnd].lowercased()) { ranges.append(wordStart..<wordEnd) }
+            let lower = body[wordStart..<wordEnd].lowercased()
+            let matched =
+                exactTerms.contains(lower)
+                || prefixTerms.contains { term in
+                    term.count >= Self.minPrefixLength ? lower.hasPrefix(term) : lower == term
+                }
+            if matched { ranges.append(wordStart..<wordEnd) }
             start = wordEnd
         }
         return ranges

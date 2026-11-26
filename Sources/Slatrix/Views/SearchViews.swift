@@ -241,11 +241,6 @@ struct SearchResultsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: m.sp8) {
-                Image(systemName: "magnifyingglass").font(m.font(.title3)).foregroundStyle(colors.textSecondary)
-                Text(query.text.isEmpty ? "Search" : query.text).font(m.font(.title3, .bold))
-                    .foregroundStyle(colors.textPrimary).lineLimit(1).accessibilityAddTraits(.isHeader)
-            }.padding(.horizontal, m.sp20).frame(height: m.paneHeader)
             TabBar(
                 tabs: [
                     .init(value: Tab.messages, title: "Messages"), .init(value: Tab.files, title: "Files"),
@@ -274,9 +269,11 @@ struct SearchResultsView: View {
         VStack(spacing: 0) {
             filters.padding(.horizontal, m.sp20).padding(.vertical, m.sp12)
             messageResults.frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider().overlay(colors.border)
-            indexingFooter
         }
+    }
+
+    private var hasActiveFilters: Bool {
+        query.senderID != nil || query.roomID != nil || query.date != nil || query.mode == .phrase
     }
 
     private var filters: some View {
@@ -291,12 +288,17 @@ struct SearchResultsView: View {
             Menu {
                 Button("Anywhere") { bar.submitted?.roomID = nil }
                 Divider()
-                ForEach(ConversationSwitcher.results(matrix.rooms, query: "", visited: []).prefix(20)) { room in
-                    Button(room.name) { bar.submitted?.roomID = room.id }
+                ForEach(
+                    ConversationSwitcher.results(matrix.rooms, query: "", visited: [])
+                        .filter { $0.membership == "join" && !$0.isSpace }.prefix(30)
+                ) { room in
+                    Button(room.isDirect ? room.name : "#\(room.name)") { bar.submitted?.roomID = room.id }
                 }
             } label: {
                 FilterChip(
-                    title: matrix.rooms.first { $0.id == query.roomID }.map { "In: \($0.name)" } ?? "In",
+                    title: matrix.rooms.first { $0.id == query.roomID }.map {
+                        $0.isDirect ? "In: \($0.name)" : "In: #\($0.name)"
+                    } ?? "In",
                     active: query.roomID != nil)
             }
             Menu {
@@ -313,8 +315,27 @@ struct SearchResultsView: View {
             } label: {
                 FilterChip(title: "Exact phrase", active: query.mode == .phrase, menu: false)
             }
+            if hasActiveFilters {
+                Button("Clear") {
+                    bar.submitted?.senderID = nil
+                    bar.submitted?.roomID = nil
+                    bar.submitted?.date = nil
+                    bar.submitted?.mode = .query
+                }.buttonStyle(.textLink).font(m.font(.subheadline))
+            }
             Spacer(minLength: 0)
-            if searchBusy && !messages.isEmpty {
+            if indexBusy {
+                HStack(spacing: m.sp8) {
+                    DelayedProgress().accessibilityLabel("Indexing recent messages")
+                    Text(matrix.searchIndexingState == .stopping ? "Stopping…" : "Indexing recent messages…")
+                        .font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                    if matrix.searchIndexingState == .running {
+                        Button("Stop") { [session = matrix.notificationSessionID] in
+                            matrix.cancelSearchBackfill(sessionID: session)
+                        }.buttonStyle(.textLink).font(m.font(.subheadline))
+                    }
+                }
+            } else if searchBusy && !messages.isEmpty {
                 DelayedProgress(interval: .searchLoading).accessibilityLabel("Searching")
             }
         }
@@ -348,13 +369,17 @@ struct SearchResultsView: View {
             }
         } else if messages.isEmpty {
             if indexBusy {
-                EmptyStateView(symbol: "clock.arrow.circlepath", title: "Still indexing recent messages") {
+                EmptyStateView(symbol: "clock.arrow.circlepath", title: "Indexing recent messages…") {
                     if matrix.searchHasMore { loadMoreButton }
                 }
             } else if matrix.searchHasMore {
                 EmptyStateView(symbol: "text.magnifyingglass", title: "No matches yet") { loadMoreButton }
             } else {
-                EmptyStateView(symbol: "magnifyingglass", title: "No matches")
+                EmptyStateView(symbol: "magnifyingglass", title: "No matches") {
+                    if matrix.searchIndexingState == .stopped && !matrix.isPreview {
+                        Button("Resume indexing", action: indexRecentHistory)
+                    }
+                }
             }
         } else {
             ScrollView {
@@ -387,34 +412,6 @@ struct SearchResultsView: View {
             .overlay(alignment: .leading) {
                 if paging { DelayedProgress(interval: .searchLoading).offset(x: -m.sp24) }
             }
-    }
-
-    private var indexingTitle: String {
-        switch matrix.searchIndexingState {
-        case .stopping: return "Stopping…"
-        case .stopped: return "Indexing stopped"
-        case .completed: return "Recent messages indexed"
-        case .running: return "Indexing recent messages…"
-        case .idle: return startingIndex ? "Starting…" : "Looking for an older message?"
-        }
-    }
-
-    private var indexingFooter: some View {
-        HStack(alignment: .center, spacing: m.sp12) {
-            Text(indexingTitle).font(m.font(.subheadline, .medium))
-            Spacer(minLength: 0)
-            if indexBusy { DelayedProgress().accessibilityLabel(indexingTitle) }
-            if matrix.searchIndexingState.isBusy {
-                Button(matrix.searchIndexingState == .stopping ? "Stopping…" : "Stop") {
-                    [session = matrix.notificationSessionID] in
-                    matrix.cancelSearchBackfill(sessionID: session)
-                }.font(m.font(.subheadline, .medium)).disabled(matrix.searchIndexingState == .stopping)
-            } else {
-                Button(startingIndex ? "Starting…" : "Search older messages", action: indexRecentHistory)
-                    .font(m.font(.subheadline, .medium)).disabled(indexBusy || matrix.isPreview)
-            }
-        }
-        .buttonStyle(.textLink).padding(.horizontal, m.sp20).padding(.vertical, m.sp12).background(colors.raised)
     }
 
     private func search(_ run: Run) async {
@@ -575,14 +572,17 @@ struct MessageResultRow: View {
                     Image(systemName: room?.isDirect == true ? "person" : room?.channelSymbol ?? "number")
                     Text(room?.name ?? message.roomID)
                 }.font(m.font(.subheadline, .semibold)).foregroundStyle(colors.textSecondary).lineLimit(1)
-                HStack(alignment: .top, spacing: m.sp8) {
+                HStack(alignment: .top, spacing: m.sp12) {
                     AvatarView(name: message.senderName, size: m.avatar, matrix: matrix, source: message.avatarURL)
                     VStack(alignment: .leading, spacing: m.sp2) {
                         HStack(alignment: .firstTextBaseline, spacing: m.sp8) {
                             Text(message.senderName).font(m.font(.reading, .semibold)).foregroundStyle(
                                 colors.textPrimary)
-                            Text(message.timestamp.formatted(.dateTime.month(.abbreviated).day().hour().minute()))
+                            Text(LatestMessage(body: nil, timestamp: message.timestamp, isOwn: false).time())
                                 .font(m.font(.subheadline)).foregroundStyle(colors.textSecondary)
+                                .help(
+                                    message.timestamp.formatted(
+                                        .dateTime.month(.abbreviated).day().year().hour().minute()))
                         }.lineLimit(1)
                         Text(snippet(colors)).font(m.font(.reading)).foregroundStyle(colors.textBody).lineLimit(3)
                             .multilineTextAlignment(.leading)
@@ -612,7 +612,10 @@ struct MessageResultRow: View {
         }
         var text = AttributedString(body)
         for range in query.highlights(in: body) {
-            if let range = Range(range, in: text) { text[range].backgroundColor = colors.highlight }
+            if let range = Range(range, in: text) {
+                text[range].backgroundColor = colors.highlight
+                text[range].font = m.font(.reading, .semibold)
+            }
         }
         return text
     }

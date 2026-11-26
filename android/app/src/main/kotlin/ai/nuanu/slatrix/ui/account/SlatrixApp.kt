@@ -570,8 +570,9 @@ internal fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: 
         }
         }
         forwarding?.let { (message, content) ->
-            ForwardScreen(message, room, roomList?.value?.rooms.orEmpty().filter { it.canPost }, { destination ->
-                rooms?.client?.let { MatrixForward(it).forward(content, open.room.id, destination.id) } ?: "Couldn’t forward this message."
+            ForwardScreen(message, room, roomList?.value?.rooms.orEmpty().filter { it.canPost }, { destination, note ->
+                rooms?.client?.let { MatrixForward(it).forward(content, open.room.id, destination.id, note) }
+                    ?: "Couldn’t forward this message."
             }, { destination ->
                 forwarding = null
                 notice = if (destination.direct) "Forwarded to ${destination.name}." else "Forwarded to #${destination.name}."

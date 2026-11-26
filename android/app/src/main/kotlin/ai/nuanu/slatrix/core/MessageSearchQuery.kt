@@ -8,8 +8,9 @@ import java.util.Objects
 
 /**
  * A message search: the text, and Slack's filters. Serializes for the SDK's Tantivy query parser, whose index has
- * `body`, `sender` (an exact user ID) and `date` fields. Phrase mode is one literal: the pinned grammar reads a
- * backslash and any character after it inside double quotes.
+ * `body`, `sender` (an exact user ID) and `date` fields. Query mode requires every word (AND), expands 3+ character
+ * words into exact-boosted prefix ranges so inflected forms match, supports quoted phrases and `-term` exclusions,
+ * and strips raw punctuation so normal queries never fail parsing.
  */
 class MessageSearchQuery(text: String, val mode: Mode = Mode.Query, val roomId: String? = null, val senderId: String? = null,
     val date: SearchDate? = null) {
@@ -25,23 +26,135 @@ class MessageSearchQuery(text: String, val mode: Mode = Mode.Query, val roomId: 
     override fun toString() = "MessageSearchQuery($text, $mode, in: $roomId, from: $senderId, $date)"
 
     fun sdkQuery(now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): String? {
-        val body = text.takeIf { it.isNotEmpty() }?.let { if (mode == Mode.Query) it else literal(it) }
         val filters = listOfNotNull(
             senderId?.let { "+sender:" + literal(it) },
             date?.let { "+date:[${DateTimeFormatter.ISO_INSTANT.format(it.since(now, zone))} TO *]" },
         )
-        if (filters.isEmpty()) return body
-        return (listOfNotNull(body?.let { if (mode == Mode.Query) "+($it)" else "+$it" }) + filters).joinToString(" ")
+        if (text.isEmpty()) return filters.takeIf { it.isNotEmpty() }?.joinToString(" ")
+        if (mode == Mode.Phrase) {
+            val phrase = literal(text)
+            if (filters.isEmpty()) return phrase
+            return (listOf("+$phrase") + filters).joinToString(" ")
+        }
+        val parsed = tokenize(text)
+        var positive = parsed.positive
+        var negative = parsed.negative
+        if (positive.isEmpty() && filters.isEmpty()) {
+            if (negative.isNotEmpty()) {
+                positive = negative
+                negative = emptyList()
+            } else {
+                positive = listOf(literal(text))
+            }
+        }
+        if (positive.size == 1 && negative.isEmpty() && filters.isEmpty()) return positive.first()
+        return (positive.map { "+$it" } + negative.map { "-$it" } + filters).joinToString(" ")
     }
 
-    /** Where the index matched in [body]: it lowercases whole words split at anything not a letter or digit. */
+    /** Where the index matched in [body]: exact whole words for phrases, or prefix (3+ chars) / exact (1-2 chars) for unquoted query terms. */
     fun highlights(body: String): List<IntRange> {
-        val operators = if (mode == Mode.Query) setOf("AND", "OR", "NOT") else emptySet()
-        val terms = text.split(Separators).filter { it.isNotEmpty() && it !in operators }.map { it.lowercase() }.toSet()
-        return Word.findAll(body).filter { it.value.lowercase() in terms }.map { it.range }.toList()
+        val exactTerms: List<String>
+        val prefixTerms: List<String>
+        if (mode == Mode.Phrase) {
+            exactTerms = words(text)
+            prefixTerms = emptyList()
+        } else {
+            val parsed = tokenize(text)
+            if (parsed.positive.isEmpty() && senderId == null && date == null && parsed.negative.isNotEmpty()) {
+                exactTerms = parsed.negativeExactHighlights
+                prefixTerms = parsed.negativePrefixHighlights
+            } else {
+                exactTerms = parsed.exactHighlights
+                prefixTerms = parsed.prefixHighlights
+            }
+        }
+        if (exactTerms.isEmpty() && prefixTerms.isEmpty()) return emptyList()
+        return Word.findAll(body).filter { match ->
+            val lower = match.value.lowercase()
+            lower in exactTerms ||
+                prefixTerms.any { term -> if (term.length >= MinPrefixLength) lower.startsWith(term) else lower == term }
+        }.map { it.range }.toList()
     }
 
     companion object {
+        private const val PrefixUpperSuffix = "\uff5a"
+        private const val MinPrefixLength = 3
+
+        private data class Tokenized(
+            val positive: List<String>,
+            val negative: List<String>,
+            val exactHighlights: List<String>,
+            val prefixHighlights: List<String>,
+            val negativeExactHighlights: List<String>,
+            val negativePrefixHighlights: List<String>,
+        )
+
+        private fun tokenize(input: String): Tokenized {
+            val positive = mutableListOf<String>()
+            val negative = mutableListOf<String>()
+            val exactHighlights = mutableListOf<String>()
+            val prefixHighlights = mutableListOf<String>()
+            val negativeExactHighlights = mutableListOf<String>()
+            val negativePrefixHighlights = mutableListOf<String>()
+            var index = 0
+            while (index < input.length) {
+                while (index < input.length && input[index].isWhitespace()) index++
+                if (index >= input.length) break
+                var negated = false
+                if (input[index] == '-' && index + 1 < input.length) {
+                    val next = input[index + 1]
+                    if (next == '"' || next.isLetterOrDigit()) {
+                        negated = true
+                        index++
+                    }
+                }
+                if (input[index] == '"') {
+                    val contentStart = index + 1
+                    val closing = input.indexOf('"', contentStart)
+                    if (closing >= 0) {
+                        val inner = input.substring(contentStart, closing).trim()
+                        index = closing + 1
+                        if (inner.isNotEmpty()) {
+                            val clause = literal(inner)
+                            if (negated) {
+                                negative += clause
+                                negativeExactHighlights += words(inner)
+                            } else {
+                                positive += clause
+                                exactHighlights += words(inner)
+                            }
+                        }
+                        continue
+                    }
+                    index = contentStart
+                    continue
+                }
+                var chunkEnd = index
+                while (chunkEnd < input.length && !input[chunkEnd].isWhitespace() && input[chunkEnd] != '"') chunkEnd++
+                val chunk = input.substring(index, chunkEnd)
+                index = chunkEnd
+                for (word in words(chunk)) {
+                    val clause = wordClause(word)
+                    if (negated) {
+                        negative += clause
+                        negativePrefixHighlights += word
+                    } else {
+                        positive += clause
+                        prefixHighlights += word
+                    }
+                }
+            }
+            return Tokenized(
+                positive, negative, exactHighlights, prefixHighlights, negativeExactHighlights, negativePrefixHighlights)
+        }
+
+        private fun words(value: String): List<String> =
+            value.split(Separators).filter { it.isNotEmpty() }.map { it.lowercase() }
+
+        private fun wordClause(word: String): String =
+            if (word.length >= MinPrefixLength) "(body:$word^2 OR body:[$word TO $word$PrefixUpperSuffix])"
+            else "body:$word"
+
         private fun literal(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
         /**

@@ -1,5 +1,5 @@
 {
-  "about": "Message search, as Slack writes it, turned into the query the SDK's search index parses (Tantivy's query grammar, with body, sender and date fields). parse reads Slack's in: and from: out of typed text: a room by its sidebar name, with an optional # or @ and quotes around spaces; a person by Matrix ID or me. What doesn't resolve stays in the text. query turns text, a mode, and the From, In and date filters into the index query, or null when there is nothing to search; the In filter narrows hits rather than the query. Dates count from the start of the day that far back, computed here in UTC from now. highlights lists the words of body a search would mark, in order: whole words the query names, in any case, without AND, OR and NOT in query mode.",
+  "about": "Message search, as Slack writes it, turned into the query the SDK's search index parses (Tantivy's query grammar, with body, sender and date fields). parse reads Slack's in: and from: out of typed text: a room by its sidebar name, with an optional # or @ and quotes around spaces; a person by Matrix ID or me. What doesn't resolve stays in the text. query turns text, a mode, and the From, In and date filters into the index query, or null when there is nothing to search; the In filter narrows hits rather than the query. In query mode, every word is required (AND), words of 3+ characters match prefixes via a lexicographic range (using U+FF5A as the upper bound) while boosting exact matches, quoted strings require exact phrases, leading - excludes a term when paired with a positive term or filter, and punctuation never breaks the parser. Dates count from the start of the day that far back, computed here in UTC from now. highlights lists the words of body a search would mark, in order: exact whole words in phrase mode, and prefix matches (3+ chars) or exact words (1-2 chars) for positive terms in query mode.",
   "parse": [
     {
       "name": "in: and from: become filters",
@@ -35,15 +35,50 @@
     { "name": "A space searches nothing as a phrase", "text": " ", "mode": "phrase", "query": null },
     { "name": "Line breaks and tabs search nothing as a phrase", "text": "\t\n\r", "mode": "phrase", "query": null },
     { "name": "A no-break space searches nothing as a phrase", "text": "\u00a0", "mode": "phrase", "query": null },
-    { "name": "Surrounding whitespace is trimmed", "text": "  two words\n", "mode": "query", "query": "two words" },
+    {
+      "name": "A single 3+ char word matches exact and prefix forms",
+      "text": "рассыл",
+      "mode": "query",
+      "query": "(body:рассыл^2 OR body:[рассыл TO рассыл\uff5a])"
+    },
+    {
+      "name": "A short 1-2 char word matches exact only",
+      "text": "UI",
+      "mode": "query",
+      "query": "body:ui"
+    },
+    {
+      "name": "Multiple words are all required (AND) with prefix matching",
+      "text": "  two words\n",
+      "mode": "query",
+      "query": "+(body:two^2 OR body:[two TO two\uff5a]) +(body:words^2 OR body:[words TO words\uff5a])"
+    },
     { "name": "Surrounding whitespace is trimmed from a phrase", "text": "  two words\n", "mode": "phrase", "query": "\"two words\"" },
     {
-      "name": "Query mode passes boolean and quote syntax through",
-      "text": "  Browser AND sync OR \"two words\"  ",
+      "name": "Quoted phrases and negations work in query mode",
+      "text": "  \"two words\" launch -draft  ",
       "mode": "query",
-      "query": "Browser AND sync OR \"two words\""
+      "query": "+\"two words\" +(body:launch^2 OR body:[launch TO launch\uff5a]) -(body:draft^2 OR body:[draft TO draft\uff5a])"
     },
-    { "name": "Query mode passes fields and escapes through", "text": "body:word\\*", "mode": "query", "query": "body:word\\*" },
+    {
+      "name": "Punctuation and colons become safe word terms without breaking Tantivy",
+      "text": "foo:bar (test) C++",
+      "mode": "query",
+      "query": "+(body:foo^2 OR body:[foo TO foo\uff5a]) +(body:bar^2 OR body:[bar TO bar\uff5a]) +(body:test^2 OR body:[test TO test\uff5a]) +body:c"
+    },
+    {
+      "name": "A standalone leading dash searches the word instead of an empty negation",
+      "text": "--verbose",
+      "mode": "query",
+      "query": "(body:verbose^2 OR body:[verbose TO verbose\uff5a])"
+    },
+    {
+      "name": "Uppercase Tantivy operators stay safe lowercase word terms",
+      "text": "AND OR NOT TO",
+      "mode": "query",
+      "query": "+(body:and^2 OR body:[and TO and\uff5a]) +body:or +(body:not^2 OR body:[not TO not\uff5a]) +body:to"
+    },
+    { "name": "Punctuation-only query stays a safe literal", "text": "!!!", "mode": "query", "query": "\"!!!\"" },
     { "name": "A phrase is one quoted literal", "text": "Browser sync check", "mode": "phrase", "query": "\"Browser sync check\"" },
     { "name": "A phrase escapes quotes", "text": "a\"b", "mode": "phrase", "query": "\"a\\\"b\"" },
     { "name": "A phrase escapes backslashes", "text": "C:\\temp\\file", "mode": "phrase", "query": "\"C:\\\\temp\\\\file\"" },
@@ -53,12 +88,12 @@
     { "name": "A phrase keeps punctuation", "text": "!!!", "mode": "phrase", "query": "\"!!!\"" },
     {
       "name": "From and date filters become required clauses",
-      "text": "budget OR plan",
+      "text": "budget plan",
       "mode": "query",
       "senderID": "@alice:example.org",
       "date": "today",
       "now": "2026-10-26T12:00:00Z",
-      "query": "+(budget OR plan) +sender:\"@alice:example.org\" +date:[2026-10-26T00:00:00Z TO *]"
+      "query": "+(body:budget^2 OR body:[budget TO budget\uff5a]) +(body:plan^2 OR body:[plan TO plan\uff5a]) +sender:\"@alice:example.org\" +date:[2026-10-26T00:00:00Z TO *]"
     },
     {
       "name": "A phrase with a date filter",
@@ -74,7 +109,7 @@
       "mode": "query",
       "date": "month",
       "now": "2026-10-26T12:00:00Z",
-      "query": "+(plan) +date:[2026-09-26T00:00:00Z TO *]"
+      "query": "+(body:plan^2 OR body:[plan TO plan\uff5a]) +date:[2026-09-26T00:00:00Z TO *]"
     },
     {
       "name": "The last 12 months",
@@ -82,7 +117,7 @@
       "mode": "query",
       "date": "year",
       "now": "2026-10-26T12:00:00Z",
-      "query": "+(plan) +date:[2025-10-26T00:00:00Z TO *]"
+      "query": "+(body:plan^2 OR body:[plan TO plan\uff5a]) +date:[2025-10-26T00:00:00Z TO *]"
     },
     {
       "name": "A From filter searches on its own",
@@ -91,23 +126,50 @@
       "senderID": "@alice:example.org",
       "query": "+sender:\"@alice:example.org\""
     },
-    { "name": "The In filter stays out of the query", "text": "budget", "mode": "query", "roomID": "!design:example.org", "query": "budget" },
+    {
+      "name": "The In filter stays out of the query",
+      "text": "budget",
+      "mode": "query",
+      "roomID": "!design:example.org",
+      "query": "(body:budget^2 OR body:[budget TO budget\uff5a])"
+    },
     { "name": "The In filter can't search on its own", "text": "", "mode": "query", "roomID": "!design:example.org", "query": null }
   ],
   "highlights": [
     {
-      "name": "Whole words in any case, without operators",
-      "text": "sync AND plan",
+      "name": "Prefix matches (3+ chars) and exact short words in query mode, skipping excluded terms",
+      "text": "рассыл ui -draft",
       "mode": "query",
-      "body": "Sync the async SYNC job and plan",
-      "words": ["Sync", "SYNC", "plan"]
+      "body": "Инструменты для рассылок, Рассылка UI, building a draft",
+      "words": ["рассылок", "Рассылка", "UI"]
     },
     {
-      "name": "A phrase marks each of its words",
+      "name": "Words starting with the term match in query mode",
+      "text": "sync plan",
+      "mode": "query",
+      "body": "Sync the async SYNC job and planned",
+      "words": ["Sync", "SYNC", "planned"]
+    },
+    {
+      "name": "A phrase marks each of its exact words",
       "text": "the async",
       "mode": "phrase",
       "body": "Sync the async SYNC job and plan",
       "words": ["the", "async"]
+    },
+    {
+      "name": "A quoted phrase inside query mode marks exact words while unquoted words match prefixes",
+      "text": "\"рассыл\" plan",
+      "mode": "query",
+      "body": "рассылок и рассыл planned",
+      "words": ["рассыл", "planned"]
+    },
+    {
+      "name": "A standalone leading dash highlights its promoted word",
+      "text": "--verbose",
+      "mode": "query",
+      "body": "Verbose and verbosely logged",
+      "words": ["Verbose", "verbosely"]
     }
   ]
 }

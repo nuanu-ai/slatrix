@@ -7,10 +7,17 @@ import Testing
 private final class Hits: SearchServiceResultsListener, @unchecked Sendable {
     private let lock = NSLock()
     private var results: [SearchServiceResult] = []
+    private var updatesCount = 0
     var eventIDs: Set<String> {
         lock.withLock { Set(MatrixMapping.searchMessages(results, roomID: nil).map(\.id)) }
     }
-    func onUpdate(updates: [SearchServiceResultsUpdate]) { lock.withLock { results.apply(updates.map(\.change)) } }
+    var revision: Int { lock.withLock { updatesCount } }
+    func onUpdate(updates: [SearchServiceResultsUpdate]) {
+        lock.withLock {
+            results.apply(updates.map(\.change))
+            updatesCount += 1
+        }
+    }
 }
 
 /// The From and Date filters as the SDK's own search index reads them: a real client pages through synthetic history
@@ -93,5 +100,88 @@ struct SearchIndexTests {
         // A page of hits lands at once, after the query returns; every case finds fewer than all.
         _ = await eventually { !hits.eventIDs.isEmpty && hits.eventIDs != everything }
         return hits.eventIDs
+    }
+
+    // capability: search.messages
+    @Test(
+        "Prefix and multi-word queries match Russian and English word forms in a real index without crashing on punctuation"
+    )
+    func prefixAndMorphology() async throws {
+        let now = Date()
+        func message(_ id: String, _ body: String) -> [String: Any] {
+            [
+                "type": "m.room.message", "event_id": id, "sender": Self.alice,
+                "origin_server_ts": Int(now.timeIntervalSince1970 * 1_000),
+                "content": ["msgtype": "m.text", "body": body],
+            ]
+        }
+        let server = try await FakeHomeserver(
+            room: "!room:localhost",
+            messages: [
+                message("$ru-genitive", "жду инструменты для рассылок, под коммерцию и сканер"),
+                message("$ru-nominative", "Рассылка ушла всем клиентам"),
+                message("$ru-other", "нужны инструменты для сканера"),
+                message("$en-deploy", "Production deployment succeeded on staging"),
+                message("$punct", "Fixed C++ parser in foo:bar (test)"),
+            ])
+        let scratch = try TemporaryDirectory()
+        let client = try await ClientBuilder().homeserverUrl(url: server.url).sessionPaths(
+            dataPath: scratch.path("data").path, cachePath: scratch.path("cache").path
+        ).withSearchIndexStore(path: scratch.path("index").path, password: nil).build()
+        try await client.restoreSession(
+            session: Session(
+                accessToken: "token", refreshToken: nil, userId: "@me:localhost", deviceId: "DEVICE",
+                homeserverUrl: server.url, oauthData: nil, slidingSyncVersion: .native))
+        let room = try await client.joinRoomById(roomId: server.room)
+        _ = try await room.timeline().paginateBackwards(numEvents: 20)
+
+        let hits = Hits()
+        let service = client.searchService()
+        let handle = await service.subscribeToResults(listener: hits)
+        defer { handle.cancel() }
+
+        // Wait for the event cache to index all 5 messages.
+        let deadline = ContinuousClock.now + .seconds(30)
+        repeat {
+            try await service.setQuery(query: "сканер OR сканера OR deployment OR parser OR клиентам")
+        } while await !eventually(
+            timeout: .milliseconds(200),
+            { hits.eventIDs == ["$ru-genitive", "$ru-nominative", "$ru-other", "$en-deploy", "$punct"] })
+            && ContinuousClock.now < deadline
+        try #require(hits.eventIDs.count == 5)
+
+        func run(_ text: String, mode: MessageSearchQuery.Mode = .query, expectNonEmpty: Bool = true) async throws
+            -> Set<String>
+        {
+            let sdk = try #require(MessageSearchQuery(text, mode: mode).sdkQuery())
+            let queryHits = Hits()
+            let queryService = client.searchService()
+            let queryHandle = await queryService.subscribeToResults(listener: queryHits)
+            defer { queryHandle.cancel() }
+            try await queryService.setQuery(query: sdk)
+            _ = await eventually(timeout: .seconds(5)) {
+                expectNonEmpty ? !queryHits.eventIDs.isEmpty : queryHits.revision > 0
+            }
+            return queryHits.eventIDs
+        }
+
+        // Russian prefix matches both "рассылок" and "Рассылка".
+        let ruPrefix = try await run("рассыл")
+        #expect(ruPrefix == ["$ru-genitive", "$ru-nominative"])
+        // Multi-word search requires every term (AND), so "$ru-other" (which only has "инструменты") is excluded.
+        let ruAnd = try await run("инструменты рассыл")
+        #expect(ruAnd == ["$ru-genitive"])
+        // English prefix matches "deployment".
+        let enPrefix = try await run("deploy")
+        #expect(enPrefix == ["$en-deploy"])
+        // Punctuation and colons/parens never crash Tantivy's parser.
+        let punct = try await run("foo:bar (test)")
+        #expect(punct == ["$punct"])
+        // Uppercase Tantivy operators stay safe lowercase word terms and never crash the parser.
+        let operators = try await run("AND OR NOT TO", expectNonEmpty: false)
+        #expect(operators.isEmpty)
+        // Exact phrase mode still requires exact words in order.
+        let phrase = try await run("рассыл", mode: .phrase, expectNonEmpty: false)
+        #expect(phrase.isEmpty)
     }
 }
