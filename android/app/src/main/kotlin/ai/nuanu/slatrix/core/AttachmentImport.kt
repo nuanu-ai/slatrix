@@ -39,12 +39,23 @@ class AttachmentImport(context: Context) {
             if (cursor.moveToFirst()) cursor.getString(0) else null
         } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "file"
         val rawMime = resolver.getType(uri)?.substringBefore(';')?.trim()?.lowercase()
-        val extensionMime = MimeTypeMap.getSingleton()
-            .getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase())
+        val ext = name.substringAfterLast('.', "").lowercase()
+        val extensionMime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: when (ext) {
+            "webm" -> "video/webm"
+            "mkv" -> "video/x-matroska"
+            "avi" -> "video/x-msvideo"
+            "ogg", "opus" -> "audio/ogg"
+            "flac" -> "audio/flac"
+            "m4a" -> "audio/mp4"
+            "mp3" -> "audio/mpeg"
+            "wav" -> "audio/wav"
+            "aac" -> "audio/aac"
+            "svg" -> "image/svg+xml"
+            else -> null
+        }
         val mimeType = when {
             !rawMime.isNullOrBlank() && rawMime != "application/octet-stream" && rawMime != "*/*" -> rawMime
             !extensionMime.isNullOrBlank() -> extensionMime
-            name.endsWith(".svg", ignoreCase = true) -> "image/svg+xml"
             else -> rawMime ?: "application/octet-stream"
         }
         // Its own folder, so the name stays the one people see and two picks of the same name don't collide.
@@ -58,6 +69,7 @@ class AttachmentImport(context: Context) {
             throw failure
         }
         if (mimeType.startsWith("video/")) return@withContext video(copy, name, mimeType)
+        if (mimeType.startsWith("audio/")) return@withContext audio(copy, name, mimeType)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             .takeIf { mimeType.startsWith("image/") }?.also { BitmapFactory.decodeFile(copy.path, it) }
             ?.takeIf { it.outWidth > 0 && it.outHeight > 0 }
@@ -107,6 +119,19 @@ class AttachmentImport(context: Context) {
             bitmap.recycle()
         }
     }.getOrNull()
+
+    private fun audio(copy: File, name: String, mimeType: String): OutgoingAttachment {
+        val retriever = MediaMetadataRetriever()
+        val duration = try {
+            FileInputStream(copy).use { retriever.setDataSource(it.fd) }
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?.takeIf { it > 0L }
+        } catch (_: RuntimeException) {
+            null
+        } finally {
+            retriever.release()
+        }
+        return OutgoingAttachment(copy.path, name, mimeType, copy.length(), null, null, durationMillis = duration)
+    }
 
     /**
      * A video's shown size and length, and its poster from a frame near the start, as Slack's videos carry, so others can

@@ -646,13 +646,20 @@ enum MatrixMapping {
                     name: file.filename, url: file.source.url(), mimeType: file.info?.mimetype, size: file.info?.size)
             case .video(let file):
                 message.kind = "m.video"
+                message.mediaCaption = file.caption
+                message.formattedBody = htmlBody(file.formattedCaption)
                 message.attachment = MessageAttachment(
                     name: file.filename, url: file.source.url(), mimeType: file.info?.mimetype, size: file.info?.size,
                     width: file.info?.width, height: file.info?.height, duration: file.info?.duration)
             case .audio(let file):
                 message.kind = "m.audio"
+                message.mediaCaption = file.caption
+                message.formattedBody = htmlBody(file.formattedCaption)
                 message.attachment = MessageAttachment(
-                    name: file.filename, url: file.source.url(), mimeType: file.info?.mimetype, size: file.info?.size)
+                    name: file.filename, url: file.source.url(), mimeType: file.info?.mimetype, size: file.info?.size,
+                    duration: file.info?.duration ?? file.audio?.duration,
+                    waveform: file.audio?.waveform.isEmpty == false ? file.audio?.waveform : nil,
+                    isVoice: file.voice != nil)
             case .location: message.kind = "m.location"
             case .gallery: message.kind = "m.gallery"
             case .other(let kind, _): message.kind = kind
@@ -670,9 +677,13 @@ enum MatrixMapping {
             message.body = mapped.body
             message.kind = "m.room.encrypted"
             message.isUnlockable = mapped.unlockable
-        case .sticker(let body, _, _):
+        case .sticker(let body, let info, let source):
             message.body = body
             message.kind = "m.sticker"
+            message.attachment = MessageAttachment(
+                name: body.isEmpty ? "Sticker" : body, url: source.url(), mimeType: info.mimetype, size: info.size,
+                width: info.width, height: info.height,
+                animated: info.isAnimated ?? (info.mimetype == "image/gif"))
         case .poll(let question, _, _, _, _, _, _):
             message.body = question
             message.kind = "m.poll"
@@ -684,6 +695,29 @@ enum MatrixMapping {
             message.kind = "other"
         }
         return message
+    }
+
+    /// Resolves a file's upload MIME type, falling back to well-known extensions macOS UTType omits (webm, mkv, ogg, opus, flac).
+    static func resolvedUploadMIMEType(for url: URL, contentType: UTType?) -> String {
+        if let preferred = contentType?.preferredMIMEType, !preferred.isEmpty, preferred != "application/octet-stream" {
+            return preferred
+        }
+        switch url.pathExtension.lowercased() {
+        case "webm": return "video/webm"
+        case "mkv": return "video/x-matroska"
+        case "avi": return "video/x-msvideo"
+        case "mp4": return "video/mp4"
+        case "mov": return "video/quicktime"
+        case "m4v": return "video/x-m4v"
+        case "ogg", "opus": return "audio/ogg"
+        case "flac": return "audio/flac"
+        case "mp3": return "audio/mpeg"
+        case "m4a": return "audio/mp4"
+        case "wav": return "audio/wav"
+        case "aac": return "audio/aac"
+        case "svg": return "image/svg+xml"
+        default: return contentType?.preferredMIMEType ?? "application/octet-stream"
+        }
     }
 
     /// `uniqueID` is the timeline item's own ID, which outlives the switch from a local echo to its remote event.
@@ -2912,28 +2946,38 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         result.hasPendingDependentChange = event.editSendState != nil || event.redactionSendState != nil
         result.failure = MessageSendFailure.failure(event.localSendState)
         result.uploadProgress = MatrixMapping.uploadProgress(from: event.localSendState)
-        if case .msgLike(let content) = event.content, case .message(let message) = content.kind {
-            result.forwardMedia = (try? ForwardMessageContent(message))?.mediaRevision
-            switch message.msgType {
-            case .image(let value):
-                result.media = value.source
+        if case .msgLike(let content) = event.content {
+            switch content.kind {
+            case .message(let message):
+                result.forwardMedia = (try? ForwardMessageContent(message))?.mediaRevision
+                switch message.msgType {
+                case .image(let value):
+                    result.media = value.source
+                    result.thumbnail = .some(
+                        value.info?.thumbnailSource.map {
+                            ThumbnailSource(source: $0, size: value.info?.thumbnailInfo?.size)
+                        })
+                case .file(let value):
+                    result.media = value.source
+                    result.thumbnail = .some(
+                        value.info?.thumbnailSource.map {
+                            ThumbnailSource(source: $0, size: value.info?.thumbnailInfo?.size)
+                        })
+                case .video(let value):
+                    result.media = value.source
+                    result.thumbnail = .some(
+                        value.info?.thumbnailSource.map {
+                            ThumbnailSource(source: $0, size: value.info?.thumbnailInfo?.size)
+                        })
+                case .audio(let value): result.media = value.source
+                default: break
+                }
+            case .sticker(_, let info, let source):
+                result.media = source
                 result.thumbnail = .some(
-                    value.info?.thumbnailSource.map {
-                        ThumbnailSource(source: $0, size: value.info?.thumbnailInfo?.size)
+                    info.thumbnailSource.map {
+                        ThumbnailSource(source: $0, size: info.thumbnailInfo?.size)
                     })
-            case .file(let value):
-                result.media = value.source
-                result.thumbnail = .some(
-                    value.info?.thumbnailSource.map {
-                        ThumbnailSource(source: $0, size: value.info?.thumbnailInfo?.size)
-                    })
-            case .video(let value):
-                result.media = value.source
-                result.thumbnail = .some(
-                    value.info?.thumbnailSource.map {
-                        ThumbnailSource(source: $0, size: value.info?.thumbnailInfo?.size)
-                    })
-            case .audio(let value): result.media = value.source
             default: break
             }
         }
@@ -3927,7 +3971,7 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         let values = try url.resourceValues(forKeys: [.fileSizeKey, .contentTypeKey])
-        let mime = values.contentType?.preferredMIMEType ?? "application/octet-stream"
+        let mime = MatrixMapping.resolvedUploadMIMEType(for: url, contentType: values.contentType)
         let relation: String? = try threadRootID.map {
             try Self.json([
                 "m.relates_to": [
@@ -3948,6 +3992,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             try assertActiveSession()
             try assertDestination(roomID)
             kind = .video(videoInfo: info, thumbnailSource: poster.map { .file(filename: $0.path) })
+        } else if mime.hasPrefix("audio/") {
+            let fileBytes = values.fileSize.map(UInt64.init)
+            let duration = await VideoUpload.audioDuration(url)
+            try assertActiveSession()
+            try assertDestination(roomID)
+            kind = .audio(audioInfo: AudioInfo(duration: duration, size: fileBytes, mimetype: mime))
         } else if mime.hasPrefix("image/") {
             let shape = Self.displayedSize(url)
             let fileBytes = values.fileSize.map(UInt64.init)

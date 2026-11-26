@@ -16,12 +16,18 @@ data class MessageAttachment(
     /** The sender's own small picture of it, when they attached one. */
     val thumbnail: MediaSource? = null,
     val thumbnailSize: Long? = null,
-    /** A video's length. */
+    /** A video's or audio clip's length. */
     val durationMillis: Long? = null,
     /** Sent by you, so the SDK's store may hold it from the upload. */
     val own: Boolean = false,
     /** Animated GIF or WebP, so inline and viewer play its frames unless Reduce Motion is on. */
     val animated: Boolean = false,
+    /** Normalized 0..1024 amplitude samples for voice messages (MSC3245). */
+    val waveform: List<Int> = emptyList(),
+    /** Whether the sender marked this audio as a voice message (`org.matrix.msc3245.voice`). */
+    val isVoice: Boolean = false,
+    /** A Matrix m.sticker image shown compactly without cropping or caption chrome. */
+    val isSticker: Boolean = false,
 ) {
     enum class Kind { Image, Video, Audio, File }
 }

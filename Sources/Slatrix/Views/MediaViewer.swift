@@ -55,11 +55,16 @@ private struct MediaViewerPage: View {
         VStack(spacing: 0) {
             header
             // Margins wide enough for the arrows, so they never sit on the picture.
-            MediaStage(content: content(current), onStep: step, onClose: viewer.close)
-                .overlay { placeholder(current) }
-                .padding(.horizontal, m.sp40 + m.sp32).padding(.bottom, m.sp40)
-                .overlay(alignment: .leading) { arrow(-1) }
-                .overlay(alignment: .trailing) { arrow(1) }
+            MediaStage(
+                content: content(current), onStep: step, onClose: viewer.close,
+                onVideoError: { messageError in
+                    loaded = Loaded(eventID: message.eventID, error: messageError)
+                }
+            )
+            .overlay { placeholder(current) }
+            .padding(.horizontal, m.sp40 + m.sp32).padding(.bottom, m.sp40)
+            .overlay(alignment: .leading) { arrow(-1) }
+            .overlay(alignment: .trailing) { arrow(1) }
         }
         .background(colors.mediaBackdrop)
         .accessibilityAddTraits(.isModal)
@@ -72,6 +77,7 @@ private struct MediaViewerPage: View {
         let size = attachment.width.flatMap { width in
             attachment.height.map { CGSize(width: CGFloat(width), height: CGFloat($0)) }
         }
+        if message.kind == "m.audio" { return .empty }
         if message.kind == "m.video", let url = loaded?.lease?.url {
             return .video(url, from: viewer.videoStart(message))
         }
@@ -87,13 +93,24 @@ private struct MediaViewerPage: View {
         return .image(id: message.eventID, image, size: size ?? image.size, animates: false)
     }
 
-    /// What stands in until the file arrives: a file's tile and name, and the spinner once the wait is long.
+    /// What stands in until the file arrives: a file's tile and name, an audio card, or an error with fallback.
     @ViewBuilder private func placeholder(_ loaded: Loaded?) -> some View {
         if let error = loaded?.error {
             VStack(spacing: m.sp12) {
                 Text(error).font(m.font(.body)).foregroundStyle(colors.onMedia)
-                Button("Retry") { Task { await load() } }.buttonStyle(.secondary)
+                HStack(spacing: m.sp12) {
+                    Button("Open in default app") {
+                        Task { await AttachmentFiles.shared.open(message, matrix: matrix) }
+                    }.buttonStyle(.secondary)
+                    Button("Retry") { Task { await load() } }.buttonStyle(.secondary)
+                }
             }
+        } else if message.kind == "m.audio", message.sendState == "sent" {
+            AudioCard(
+                matrix: matrix, message: message, attachment: attachment,
+                actions: AttachmentActions(
+                    open: {}, copyLink: copyLink,
+                    inlineAudio: viewer.inlineAudio.slot(message, matrix: matrix, in: viewer)))
         } else if message.sendState != "sent" {
             if !message.isViewerMedia {
                 VStack(spacing: m.sp16) {
@@ -201,7 +218,7 @@ private struct MediaViewerPage: View {
     private func load() async {
         let eventID = message.eventID
         loaded = nil
-        guard message.sendState == "sent" else { return }
+        guard message.sendState == "sent", message.kind != "m.audio" else { return }
         do {
             if message.isViewerMedia && message.kind != "m.video" {
                 let image = try await matrix.loadFullImage(message)
@@ -256,12 +273,14 @@ struct MediaStage: NSViewRepresentable {
     let content: MediaStageView.Content
     let onStep: (Int) -> Void
     let onClose: () -> Void
+    var onVideoError: (String) -> Void = { _ in }
 
     func makeNSView(context: Context) -> MediaStageView { MediaStageView() }
 
     func updateNSView(_ view: MediaStageView, context: Context) {
         view.onStep = onStep
         view.onClose = onClose
+        view.onVideoError = onVideoError
         view.show(content)
     }
 
@@ -290,10 +309,12 @@ final class MediaStageView: NSView {
 
     var onStep: (Int) -> Void = { _ in }
     var onClose: () -> Void = {}
+    var onVideoError: (String) -> Void = { _ in }
     private var content = Content.empty
     private let scroll = NSScrollView()
     private let picture = MediaImageView()
     private var player: AVPlayerView?
+    private var videoFailureObserver: NSKeyValueObservation?
     private var preview: QLPreviewView?
     /// Whether the picture follows the window's size, until the reader zooms.
     private var fitted = true
@@ -372,6 +393,7 @@ final class MediaStageView: NSView {
         scroll.isHidden = true
         if case .video = next {
         } else {
+            videoFailureObserver = nil
             player?.player?.pause()
             player?.removeFromSuperview()
             player = nil
@@ -398,6 +420,18 @@ final class MediaStageView: NSView {
             view.controlsStyle = .floating
             let video = AVPlayer(url: url)
             if start > .zero { video.seek(to: start, toleranceBefore: .zero, toleranceAfter: .zero) }
+            videoFailureObserver = video.currentItem?.observe(\.status, options: [.initial, .new]) {
+                [weak self] item, _ in
+                guard item.status == .failed else { return }
+                Task { @MainActor in
+                    guard let self, self.player?.player === video else { return }
+                    self.videoFailureObserver = nil
+                    self.player?.player?.pause()
+                    self.player?.removeFromSuperview()
+                    self.player = nil
+                    self.onVideoError("This video can’t be played.")
+                }
+            }
             view.player = video
             if player == nil { addSubview(view) }
             player = view

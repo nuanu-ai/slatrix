@@ -1067,6 +1067,61 @@ class MatrixConversationTest {
     }
 
     // capability: message.copy-link
+    @Test fun audioMessagePreservesDurationWaveformAndVoiceFlag() = runTest {
+        val source = TestMediaSource("mxc://example.org/voice")
+        val content = TimelineItemContent.MsgLike(
+            MsgLikeContent(
+                MsgLikeKind.Message(
+                    MessageContent(
+                        MessageType.Audio(
+                            AudioMessageContent(
+                                filename = "voice.ogg",
+                                caption = "Quick note",
+                                formattedCaption = null,
+                                source = source,
+                                info = AudioInfo(java.time.Duration.ofMillis(14_000), 32_000u, "audio/ogg"),
+                                audio = UnstableAudioDetailsContent(java.time.Duration.ofMillis(14_000), listOf(100u, 700u, 300u)),
+                                voice = UnstableVoiceContent(),
+                            )
+                        ),
+                        body = "Quick note",
+                        isEdited = false,
+                        mentions = null,
+                    )
+                ),
+                null, null, null,
+            )
+        )
+        val timeline = ConversationTimeline(listOf(conversationItem("a", "\$a", "Quick note", content = content)))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val msg = conversation.state.first { it.rows.messages.isNotEmpty() }.rows.messages.single()
+        val att = checkNotNull(msg.attachment)
+        assertEquals(MessageAttachment.Kind.Audio, att.kind)
+        assertEquals(14_000L, att.durationMillis)
+        assertEquals(listOf(100, 700, 300), att.waveform)
+        assertTrue(att.isVoice)
+        assertEquals("Quick note", msg.caption)
+        conversation.close()
+    }
+
+    @Test fun stickerMessageMapsToInlineImageAttachment() = runTest {
+        val source = TestMediaSource("mxc://example.org/sticker")
+        val info = ImageInfo(128u, 128u, "image/webp", 8_192u, null, null, null, false)
+        val content = TimelineItemContent.MsgLike(
+            MsgLikeContent(MsgLikeKind.Sticker("Party parrot", info, source), null, null, null)
+        )
+        val timeline = ConversationTimeline(listOf(conversationItem("s", "\$s", "Party parrot", content = content)))
+        val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))
+        val msg = conversation.state.first { it.rows.messages.isNotEmpty() }.rows.messages.single()
+        val att = checkNotNull(msg.attachment)
+        assertEquals(MessageAttachment.Kind.Image, att.kind)
+        assertTrue(att.isSticker)
+        assertEquals("Party parrot", att.name)
+        assertEquals(128 to 128, att.width to att.height)
+        assertNull("Sticker body is alt text, not a caption", msg.caption)
+        conversation.close()
+    }
+
     @Test fun aMessageLinksToItsEventInTheRoom() = runTest {
         val timeline = ConversationTimeline(listOf(conversationItem("stable-1", "\$one", "Hello")))
         val conversation = MatrixConversation(backgroundScope, ConversationRoom(timeline))

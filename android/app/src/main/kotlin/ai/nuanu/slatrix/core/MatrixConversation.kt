@@ -30,6 +30,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.matrix.rustcomponents.sdk.AttachmentKind
+import org.matrix.rustcomponents.sdk.AudioInfo
 import org.matrix.rustcomponents.sdk.DateDividerMode
 import org.matrix.rustcomponents.sdk.FileInfo
 import org.matrix.rustcomponents.sdk.ImageInfo
@@ -853,6 +854,11 @@ class MatrixConversation(scope: CoroutineScope, private val room: Room, private 
                             threadRoot?.let(::threadRelation))
                         val size = attachment.size.toULong()
                         val kind = if (attachment.mimeType.startsWith("video/")) VideoUpload.kind(attachment)
+                        else if (attachment.mimeType.startsWith("audio/")) {
+                            AttachmentKind.Audio(
+                                AudioInfo(attachment.durationMillis?.let(java.time.Duration::ofMillis), size, attachment.mimeType)
+                            )
+                        }
                         else if (attachment.width != null && attachment.height != null) {
                             val thumb = attachment.poster
                             val thumbInfo = thumb?.let {
@@ -1290,7 +1296,10 @@ private fun shown(kind: MsgLikeKind): Shown = when (kind) {
                 MessageAttachment.Kind.Video, filename, info?.mimetype, info?.size?.long, info?.width?.int, info?.height?.int,
                 source, info?.thumbnailSource, info?.thumbnailInfo?.size?.long, info?.duration?.toMillis())) }
             is MessageType.Audio -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
-                MessageAttachment.Kind.Audio, filename, info?.mimetype, info?.size?.long, null, null, source)) }
+                MessageAttachment.Kind.Audio, filename, info?.mimetype, info?.size?.long, null, null, source,
+                durationMillis = info?.duration?.toMillis() ?: audio?.duration?.toMillis(),
+                waveform = audio?.waveform?.map { it.toInt() }.orEmpty(),
+                isVoice = voice != null)) }
             is MessageType.File -> type.content.run { attached(caption ?: filename, html(formattedCaption), MessageAttachment(
                 MessageAttachment.Kind.File, filename, info?.mimetype, info?.size?.long, null, null, source)) }
             is MessageType.Gallery -> Shown(MessageKind.Attachment, kind.content.body)
@@ -1299,7 +1308,16 @@ private fun shown(kind: MsgLikeKind): Shown = when (kind) {
     }
     is MsgLikeKind.UnableToDecrypt -> Shown(MessageKind.Encrypted, "Waiting for this message")
     is MsgLikeKind.Redacted -> Shown(MessageKind.Deleted, "This message was deleted")
-    is MsgLikeKind.Sticker -> Shown(MessageKind.Attachment, kind.body)
+    is MsgLikeKind.Sticker -> {
+        val label = kind.body.ifBlank { "Sticker" }
+        attached(label, null, MessageAttachment(
+            MessageAttachment.Kind.Image, label, kind.info.mimetype, kind.info.size?.long,
+            kind.info.width?.int, kind.info.height?.int, kind.source, kind.info.thumbnailSource,
+            kind.info.thumbnailInfo?.size?.long,
+            animated = kind.info.isAnimated == true || kind.info.mimetype?.equals("image/gif", ignoreCase = true) == true,
+            isSticker = true,
+        ))
+    }
     is MsgLikeKind.Poll -> Shown(MessageKind.Unsupported, kind.question)
     else -> Shown(MessageKind.Unsupported, "Unsupported message")
 }

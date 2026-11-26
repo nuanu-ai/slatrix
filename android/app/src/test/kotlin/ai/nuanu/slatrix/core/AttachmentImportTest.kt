@@ -108,6 +108,14 @@ class VideoImportTest {
         assertEquals(640 to 360, video.width to video.height)
         assertEquals(null, video.poster)
     }
+
+    @Test fun anAudioFileResolvesMimeAndDuration() = runTest {
+        val picked = File(context.filesDir, "memo.ogg").apply { writeBytes(ByteArray(256)) }
+        ShadowMediaMetadataRetriever.addMetadata(copy, MediaMetadataRetriever.METADATA_KEY_DURATION, "9500")
+        val audio = AttachmentImport(context).prepare(Uri.fromFile(picked))
+        assertEquals("audio/ogg", audio.mimeType)
+        assertEquals(9_500L, audio.durationMillis)
+    }
 }
 
 /** A picker that names its file with a path, as a hostile app could. */

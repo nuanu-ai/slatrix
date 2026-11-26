@@ -97,8 +97,10 @@ extension MessageAttachment {
 }
 
 extension ChatMessage {
-    /// An image, GIF or video shown inline, which the media viewer steps through.
-    var isViewerMedia: Bool { !isRedacted && attachment != nil && (kind == "m.image" || kind == "m.video") }
+    /// An image, GIF, sticker or video shown inline, which the media viewer steps through.
+    var isViewerMedia: Bool {
+        !isRedacted && attachment != nil && (kind == "m.image" || kind == "m.video" || kind == "m.sticker")
+    }
 }
 
 /// The box an inline image or video poster takes in its row, decided before anything loads.
@@ -153,11 +155,18 @@ struct MediaViewerLoadKey: Hashable {
     private(set) var message: ChatMessage?
     /// The window's video playing in its row, which holds while the viewer shows anything full size.
     let inlineVideo = InlineVideo()
+    /// The window's audio or voice clip playing in its row, mutually exclusive with `inlineVideo`.
+    let inlineAudio = InlineAudio()
     private(set) var surface = MessageActionTarget.Surface.conversation
     /// The Files list it was opened from, in the list's order; nil for a timeline.
     private(set) var files: [ChatMessage]?
     /// Where the row's video was as the viewer opened on it.
     @ObservationIgnored private var carried: (eventID: String, time: CMTime)?
+
+    init() {
+        inlineVideo.onWillPlay = { [weak inlineAudio] in inlineAudio?.pause() }
+        inlineAudio.onWillPlay = { [weak inlineVideo] in inlineVideo?.pause() }
+    }
 
     func open(_ message: ChatMessage, surface: MessageActionTarget.Surface) {
         carry(message)
@@ -173,16 +182,21 @@ struct MediaViewerLoadKey: Hashable {
         self.message = message
     }
 
-    func close() { message = nil }
+    func close() {
+        inlineAudio.stop(from: self)
+        carried = nil
+        message = nil
+    }
 
     /// Where the viewer starts `message`'s video: where its row left it, as Slack carries a video on, or the top.
     func videoStart(_ message: ChatMessage) -> CMTime {
         carried.flatMap { $0.eventID == message.eventID ? $0.time : nil } ?? .zero
     }
 
-    /// Holds the row's video while the viewer shows anything, noting where it was if the viewer shows that video.
+    /// Holds the row's video and audio while the viewer shows anything, noting where a video was if the viewer opens it.
     private func carry(_ message: ChatMessage) {
         inlineVideo.pause()
+        inlineAudio.pause()
         carried =
             inlineVideo.eventID == message.eventID
             ? inlineVideo.player.map { (message.eventID, $0.currentTime()) } : nil
@@ -197,7 +211,10 @@ struct MediaViewerLoadKey: Hashable {
 
     /// Stays put at either end.
     func step(_ offset: Int, in messages: [ChatMessage]) {
-        if let next = neighbor(offset, in: messages) { message = next }
+        if let next = neighbor(offset, in: messages) {
+            carried = nil
+            message = next
+        }
     }
 
     /// Truthful placeholder copy for unsent/failed attachments in the viewer; nil when an image can show its cached still.

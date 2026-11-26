@@ -1236,7 +1236,8 @@ struct RootView: View {
                         editing: editTarget?.surface == .conversation, onForward: startForward,
                         onEditCaption: startCaption,
                         onOpenMedia: { [viewer] in viewer.open($0, surface: .conversation) },
-                        inlineVideo: viewer.inlineVideo, scrollEdge: conversationScrollEdge, insets: insets
+                        inlineVideo: viewer.inlineVideo, inlineAudio: viewer.inlineAudio,
+                        scrollEdge: conversationScrollEdge, insets: insets
                     )
                     .id("\(room.id):\(matrix.shownTimelineID)")
                     // A pane in its place covers all but the toolbar.
@@ -1414,7 +1415,8 @@ struct RootView: View {
                 onReport: { [identity = matrix.threadReadIdentity] in matrix.record($0, thread: identity) },
                 readKey: matrix.threadReadIdentity, onForward: startForward, onEditCaption: startCaption,
                 onOpenMedia: { [viewer] in viewer.open($0, surface: .thread(rootID: root.eventID)) },
-                inlineVideo: viewer.inlineVideo, scrollEdge: threadScrollEdge, insets: insets
+                inlineVideo: viewer.inlineVideo, inlineAudio: viewer.inlineAudio,
+                scrollEdge: threadScrollEdge, insets: insets
             ).id("\(root.eventID):\(matrix.threadSelection)")
         } header: {
             PaneHeader(title: "Thread", subtitle: room.writtenName, closeLabel: "Close thread", onClose: closeThread)
@@ -2955,6 +2957,7 @@ struct RootView: View {
         matrixJoin = nil
         viewer.close()
         viewer.inlineVideo.stop()
+        viewer.inlineAudio.stop()
         clearComposerState()
         workspaceID = nil
         workspaceInitialized = false

@@ -38,6 +38,8 @@ struct TimelineView: View {
     var onOpenMedia: ((ChatMessage) -> Void)? = nil
     /// The window's one inline video player.
     var inlineVideo: InlineVideo? = nil
+    /// The window's one inline audio/voice player.
+    var inlineAudio: InlineAudio? = nil
     /// Messages scrolled up under the header, which then gets its line. Held by the pane in an isolated observable
     /// state so toggling the hairline never redraws the window or timeline shell.
     var scrollEdge: ScrollEdgeState? = nil
@@ -247,6 +249,7 @@ struct TimelineView: View {
             linkCopy = nil
             onReport?(PaneReport())
             inlineVideo?.stop(from: rowContext)
+            inlineAudio?.stop(from: rowContext)
         }
         .onChange(of: matrix.messageActionContext) { _, _ in
             if let deleting, !matrix.isCurrentMessageAction(deleting) { self.deleting = nil }
@@ -431,6 +434,7 @@ struct TimelineView: View {
         context.onEditCaption = onEditCaption
         context.onOpenMedia = { onOpenMedia?($0) }
         context.inlineVideo = inlineVideo
+        context.inlineAudio = inlineAudio
         context.onPickEmoji = { [popovers] in popovers?.show(.emoji($0)) }
         return context
     }
@@ -1367,7 +1371,8 @@ extension TimelineRowContext {
                     }
                 } : nil,
             copyLink: { if let link = self.permalinkTarget(for: message) { self.onCopyLink(link) } },
-            inlineVideo: matrix.flatMap { matrix in inlineVideo?.slot(message, matrix: matrix, in: self) })
+            inlineVideo: matrix.flatMap { matrix in inlineVideo?.slot(message, matrix: matrix, in: self) },
+            inlineAudio: matrix.flatMap { matrix in inlineAudio?.slot(message, matrix: matrix, in: self) })
     }
 
     func attachmentActions(for message: ChatMessage, target: MessageActionTarget?) -> AttachmentActions {
@@ -1376,7 +1381,8 @@ extension TimelineRowContext {
             forward: ForwardMessageContent.supports(message)
                 ? target.flatMap { target in self.onForward.map { forward in { forward(target) } } } : nil,
             copyLink: { if let link = self.permalinkTarget(for: message) { self.onCopyLink(link) } },
-            inlineVideo: matrix.flatMap { matrix in inlineVideo?.slot(message, matrix: matrix, in: self) })
+            inlineVideo: matrix.flatMap { matrix in inlineVideo?.slot(message, matrix: matrix, in: self) },
+            inlineAudio: matrix.flatMap { matrix in inlineAudio?.slot(message, matrix: matrix, in: self) })
     }
 
     private func permalinkTarget(for message: ChatMessage) -> MessagePermalinkTarget? {
