@@ -1297,8 +1297,10 @@ struct RootView: View {
                                         try await sendText(body, room: room, context: context, reply: reply)
                                     },
                                     onSendFile: {
-                                        [context = composerContext, reply = scopedReply(roomID: room.id)] file in
-                                        try await sendFile(file, room: room, context: context, reply: reply)
+                                        [context = composerContext, reply = scopedReply(roomID: room.id)]
+                                        file, attachReply in
+                                        try await sendFile(
+                                            file, room: room, context: context, reply: attachReply ? reply : nil)
                                     },
                                     onSendCaptionedFile: {
                                         [context = composerContext, reply = scopedReply(roomID: room.id)]
@@ -1317,6 +1319,7 @@ struct RootView: View {
                                         && replyAllowsSend(roomID: room.id),
                                     onDiscardAttachments: attachmentDrafts.discard,
                                     requiresTextForSend: false,
+                                    isReplying: scopedReply(roomID: room.id) != nil,
                                     onConversationKey: { conversationKey($0, room: room, threadRootID: nil) },
                                     isPrimary: true,
                                     inputDisabled: !localReady || !attachmentDrafts.ready,
@@ -1481,9 +1484,10 @@ struct RootView: View {
                                 [
                                     context = composerContext,
                                     reply = scopedReply(roomID: room.id, threadID: root.eventID)
-                                ] file in
+                                ] file, attachReply in
                                 try await sendFile(
-                                    file, room: room, threadID: root.eventID, context: context, reply: reply)
+                                    file, room: room, threadID: root.eventID, context: context,
+                                    reply: attachReply ? reply : nil)
                             },
                             onSendCaptionedFile: {
                                 [
@@ -1507,6 +1511,7 @@ struct RootView: View {
                                 && replyAllowsSend(roomID: room.id, threadID: root.eventID),
                             onDiscardAttachments: attachmentDrafts.discard,
                             requiresTextForSend: false,
+                            isReplying: scopedReply(roomID: room.id, threadID: root.eventID) != nil,
                             onConversationKey: { conversationKey($0, room: room, threadRootID: root.eventID) },
                             isThread: true,
                             inputDisabled: !localReady || !attachmentDrafts.ready || threadReadyID != root.eventID
@@ -2670,7 +2675,8 @@ struct RootView: View {
     ) async throws {
         try assertComposerContext(context)
         try assertComposerDestination(room: room, threadID: threadID)
-        if reply != nil {
+        func assertReplyStillValid() throws {
+            guard reply != nil else { return }
             guard replyAllowsSend(roomID: room.id, threadID: threadID),
                 MessageReplyTarget.authorizes(
                     reply, current: replyTarget, owner: replyOwner, roomID: room.id, threadID: threadID),
@@ -2680,11 +2686,13 @@ struct RootView: View {
                 throw MatrixServiceError.request("The reply changed. Check it and send again.")
             }
         }
+        try assertReplyStillValid()
         let address = AttachmentDraftAddress(roomID: room.id, threadRootID: threadID)
         try await attachmentDrafts.prepareSend(file, at: address)
         do {
             try assertComposerContext(context)
             try assertComposerDestination(room: room, threadID: threadID)
+            try assertReplyStillValid()
             try await matrix.uploadFile(
                 file, threadRootID: threadID, roomID: room.id, captionDraft: caption,
                 replyToID: reply?.message.eventID)

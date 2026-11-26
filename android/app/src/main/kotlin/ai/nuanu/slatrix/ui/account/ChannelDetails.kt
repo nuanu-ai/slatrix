@@ -447,16 +447,44 @@ private fun FilesPage(files: SharedFiles, onOpenMessage: (String) -> Unit, onBac
             shared.mapNotNull { (message, link) ->
                 val att = message.attachment?.takeIf { link == null && it.kind == MessageAttachment.Kind.Image }
                     ?: return@mapNotNull null
-                ViewerMediaItem(message.id, att, message.senderName, message.timestamp, message.caption, message)
+                val safeCaption = message.caption?.let { fallback ->
+                    message.runs.joinToString("") { it.text }.takeIf { it.isNotBlank() } ?: fallback
+                }
+                ViewerMediaItem(message.id, att, message.senderName, message.timestamp, safeCaption, message)
             }
         }
         val index = viewerItems.indexOfFirst { it.id == id }
         if (index >= 0) {
-            MediaViewer(viewerItems, index, tile to tile, files.loadPicture, files.loadFile) { viewing = null }
+            MediaViewer(
+                items = viewerItems,
+                initialIndex = index,
+                tile = tile to tile,
+                load = files.loadPicture,
+                loadFile = files.loadFile,
+                onPageChanged = { viewing = it },
+            ) { viewing = null }
         }
     }
     val videos = files.loadFile?.let { rememberVideoPlayback(it) }
     var playingVideo by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(playingVideo, files.state.rows, videos?.player, videos?.errorKey) {
+        val id = playingVideo ?: return@LaunchedEffect
+        val playback = videos ?: run { playingVideo = null; return@LaunchedEffect }
+        val msg = files.state.rows.find { it.id == id } as? ConversationMessage
+        val att = msg?.attachment?.takeIf { msg.kind != MessageKind.Deleted && it.kind == MessageAttachment.Kind.Video }
+        if (att == null) {
+            playback.playing?.let { playback.stop(it) }
+            playingVideo = null
+            return@LaunchedEffect
+        }
+        val key = att.source.toJson()
+        if (playback.errorKey == key) {
+            playback.errorMessage?.let { error = it }
+            playingVideo = null
+        } else if (playback.player == null && playback.fetching != key) {
+            playback.start(att)
+        }
+    }
     playingVideo?.let { id ->
         val msg = files.state.rows.find { it.id == id } as? ConversationMessage
         val att = msg?.attachment

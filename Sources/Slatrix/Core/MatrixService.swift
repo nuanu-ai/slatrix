@@ -728,24 +728,31 @@ enum MatrixMapping {
             let parsed = ComposerFormat.message(draft: draft)
             return parsed.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : parsed
         }
-        let relation: String? = try threadRootID.map { root in
-            let payload: [String: Any] = [
-                "m.relates_to": [
-                    "rel_type": "m.thread",
-                    "event_id": root,
-                    "is_falling_back": replyToID == nil,
-                    "m.in_reply_to": ["event_id": replyToID ?? root],
-                ]
-            ]
-            let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
-            return String(decoding: data, as: UTF8.self)
-        }
+        // When replying to a specific event inside a thread, pass `inReplyTo` directly so the SDK's thread timeline
+        // constructs the canonical `m.thread` + `m.in_reply_to` relation without overwriting `extraContentJson`.
+        let relation: String? =
+            if let root = threadRootID, replyToID == nil {
+                try {
+                    let payload: [String: Any] = [
+                        "m.relates_to": [
+                            "rel_type": "m.thread",
+                            "event_id": root,
+                            "is_falling_back": true,
+                            "m.in_reply_to": ["event_id": root],
+                        ]
+                    ]
+                    let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+                    return String(decoding: data, as: UTF8.self)
+                }()
+            } else {
+                nil
+            }
         return UploadParameters(
             source: .file(filename: url.path),
             caption: formatted?.body,
             formattedCaption: formatted?.html.map { FormattedBody(format: .html, body: $0) },
             mentions: formatted != nil ? mentions : nil,
-            inReplyTo: threadRootID == nil ? replyToID : nil,
+            inReplyTo: replyToID,
             extraContentJson: relation)
     }
 

@@ -67,6 +67,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -566,6 +567,7 @@ internal fun MediaViewer(
     load: PictureLoader,
     loadFile: FileLoader?,
     onForward: ((ViewerMediaItem) -> Unit)? = null,
+    onPageChanged: (String) -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     if (items.isEmpty()) return
@@ -574,15 +576,22 @@ internal fun MediaViewer(
     val scope = rememberCoroutineScope()
     val safeInitial = initialIndex.coerceIn(0, items.lastIndex)
     val pagerState = rememberPagerState(initialPage = safeInitial) { items.size }
-    val currentItem = items.getOrElse(pagerState.currentPage) { items[safeInitial] }
+    val currentPage = if (items.size == 1) 0 else pagerState.currentPage.coerceIn(0, items.lastIndex)
+    val currentItem = items[currentPage]
     var notice by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(notice) { if (notice != null) { delay(UiMetrics.NoticeMillis); notice = null } }
     // Saved with the screen rather than in the dialog, whose window keeps its saved state apart.
     var scale by rememberSaveable { mutableFloatStateOf(1f) }
     var offset by rememberSaveable(stateSaver = OffsetSaver) { mutableStateOf(Offset.Zero) }
-    LaunchedEffect(pagerState.currentPage) {
-        scale = 1f
-        offset = Offset.Zero
+    var lastPage by rememberSaveable { mutableIntStateOf(safeInitial) }
+    val currentOnPageChanged by rememberUpdatedState(onPageChanged)
+    LaunchedEffect(currentPage) {
+        if (currentPage != lastPage) {
+            lastPage = currentPage
+            scale = 1f
+            offset = Offset.Zero
+            items.getOrNull(currentPage)?.let { currentOnPageChanged(it.id) }
+        }
     }
     val currentDismiss by rememberUpdatedState(onDismiss)
     val enter = remember { Animatable(0f) }
@@ -632,14 +641,11 @@ internal fun MediaViewer(
                 val alpha = (1f - dragProgress()) * enter.value.coerceIn(0f, 1f)
                 if (alpha > 0f) drawRect(colors.mediaBackdrop, alpha = alpha)
             }.onSizeChanged { size = it }) {
-            HorizontalPager(
-                state = pagerState,
-                userScrollEnabled = scale <= 1.01f && !dismissing,
-                modifier = Modifier.fillMaxSize(),
-            ) { page ->
+            @Composable
+            fun ViewerPage(page: Int) {
                 val item = items[page]
                 val attachment = item.attachment
-                val isCurrentPage = page == pagerState.currentPage
+                val isCurrentPage = page == currentPage
                 val fullState = pictureState(attachment, UiMetrics.ViewerPixels, UiMetrics.ViewerPixels, true, !reducedMotion, load)
                 val full = fullState.bitmap
                 val animatedFull = fullState.animated
@@ -652,20 +658,22 @@ internal fun MediaViewer(
                         attachment.width.toFloat() / attachment.height.toFloat()
                     else -> null
                 }
+                val currentAspect by rememberUpdatedState(contentAspect)
                 val (w, h) = (attachment.width ?: 0) to (attachment.height ?: 0)
                 val fit = if (w > 0 && h > 0) minOf(maxWidth / w, maxHeight / h) else null
                 val pageScale = if (isCurrentPage) scale else 1f
                 val pageOffset = if (isCurrentPage) offset else Offset.Zero
                 Box(Modifier.fillMaxSize()
-                    .pointerInput(dismissReach, dismissFlick, contentAspect, page) {
+                    .pointerInput(dismissReach, dismissFlick, page) {
                         val slop = viewConfiguration.touchSlop
                         awaitEachGesture {
                             awaitFirstDown(requireUnconsumed = false)
-                            if (dismissing || page != pagerState.currentPage) return@awaitEachGesture
+                            if (dismissing || page != currentPage) return@awaitEachGesture
                             val velocityTracker = VelocityTracker()
                             var totalPan = Offset.Zero
                             var currentDrag = dismissDrag.value
                             var draggingDismiss = false
+                            var horizontalSwiping = false
                             var transforming = false
                             var cancelled = false
                             do {
@@ -701,7 +709,7 @@ internal fun MediaViewer(
                                         panChange = pan,
                                         centroid = if (centroid == Offset.Unspecified) Offset(size.width / 2f, size.height / 2f) else centroid,
                                         viewport = size,
-                                        contentAspect = contentAspect,
+                                        contentAspect = currentAspect,
                                         maxScale = UiMetrics.ViewerMaxZoom,
                                     )
                                     scale = nextScale
@@ -711,7 +719,10 @@ internal fun MediaViewer(
                                     }
                                 } else {
                                     totalPan += pan
-                                    if (!draggingDismiss && abs(totalPan.y) > slop && abs(totalPan.y) > abs(totalPan.x)) {
+                                    if (!draggingDismiss && !horizontalSwiping && abs(totalPan.x) > slop && abs(totalPan.x) > abs(totalPan.y)) {
+                                        horizontalSwiping = true
+                                    }
+                                    if (!draggingDismiss && !horizontalSwiping && abs(totalPan.y) > slop && abs(totalPan.y) > abs(totalPan.x)) {
                                         draggingDismiss = true
                                     }
                                     if (draggingDismiss) {
@@ -747,14 +758,14 @@ internal fun MediaViewer(
                             }
                         }
                     }
-                    .pointerInput(contentAspect, page) {
+                    .pointerInput(page) {
                         detectTapGestures(onDoubleTap = { tap ->
-                            if (dismissing || page != pagerState.currentPage) return@detectTapGestures
+                            if (dismissing || page != currentPage) return@detectTapGestures
                             val (nextScale, nextOffset) = ViewerZoom.doubleTap(
                                 currentScale = scale,
                                 tap = tap,
                                 viewport = size,
-                                contentAspect = contentAspect,
+                                contentAspect = currentAspect,
                                 targetScale = UiMetrics.ViewerDoubleTapZoom,
                             )
                             scale = nextScale
@@ -782,6 +793,16 @@ internal fun MediaViewer(
                             Image(placeholder, attachment.name, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                     }
                 }
+            }
+            if (items.size == 1) {
+                ViewerPage(0)
+            } else {
+                HorizontalPager(
+                    state = pagerState,
+                    key = { items[it].id },
+                    userScrollEnabled = scale <= 1.01f && !dismissing,
+                    modifier = Modifier.fillMaxSize(),
+                ) { page -> ViewerPage(page) }
             }
             Row(Modifier.fillMaxWidth()
                 .graphicsLayer { alpha = ((1f - dragProgress() * 2.5f) * enter.value).coerceIn(0f, 1f) }

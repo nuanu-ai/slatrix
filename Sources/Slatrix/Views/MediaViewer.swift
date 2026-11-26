@@ -53,7 +53,12 @@ private struct MediaViewerPage: View {
 
     var body: some View {
         let current = loaded?.eventID == message.eventID ? loaded : nil
-        let caption = message.mediaCaption?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let caption: String? = message.mediaCaption.flatMap { raw in
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            let rendered = MessageBodyRenderer.shared.render(body: trimmed, formattedBody: message.formattedBody)
+            return rendered.containsSpoilers ? "[Spoiler hidden]" : trimmed
+        }
         VStack(spacing: 0) {
             header
             // Margins wide enough for the arrows, so they never sit on the picture.
@@ -69,10 +74,14 @@ private struct MediaViewerPage: View {
                 }
             )
             .overlay { placeholder(current) }
-            .padding(.horizontal, m.sp40 + m.sp32).padding(.bottom, (caption?.isEmpty == false) ? m.sp12 : m.sp40)
+            .padding(.horizontal, m.sp40 + m.sp32).padding(.bottom, (caption != nil) ? m.sp12 : m.sp40)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if case .image = content(current) { viewer.close() }
+            }
             .overlay(alignment: .leading) { arrow(-1) }
             .overlay(alignment: .trailing) { arrow(1) }
-            if let caption, !caption.isEmpty {
+            if let caption {
                 Text(caption)
                     .font(m.font(.body)).foregroundStyle(colors.onMedia).opacity(0.92)
                     .multilineTextAlignment(.center).lineLimit(3)

@@ -82,6 +82,7 @@ class MediaViewerWave3Test {
             caption = "Second shot caption",
         )
         var forwarded: String? = null
+        val pageChanges = mutableListOf<String>()
         compose.setContent {
             SlatrixTheme {
                 MediaViewer(
@@ -91,6 +92,7 @@ class MediaViewerWave3Test {
                     load = { _, _, _, _ -> png },
                     loadFile = null,
                     onForward = { forwarded = it.id },
+                    onPageChanged = { pageChanges += it },
                     onDismiss = {},
                 )
             }
@@ -102,6 +104,9 @@ class MediaViewerWave3Test {
         compose.onNodeWithText("Sam").assertIsDisplayed()
         compose.onNodeWithText("Second shot caption").assertIsDisplayed()
         compose.onNodeWithContentDescription("Forward").assertIsDisplayed().performClick()
-        compose.runOnIdle { assertEquals("m2", forwarded) }
+        compose.runOnIdle {
+            assertEquals("m2", forwarded)
+            assertEquals(listOf("m2"), pageChanges)
+        }
     }
 }

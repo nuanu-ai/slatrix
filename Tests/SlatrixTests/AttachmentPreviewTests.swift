@@ -287,12 +287,17 @@ struct AttachmentPreviewTests {
         #expect(plain.inReplyTo == "$parent")
         #expect(plain.extraContentJson == nil)
 
-        let threaded = try MatrixMapping.uploadParameters(
+        let threadedReply = try MatrixMapping.uploadParameters(
             url: url, captionDraft: nil, replyToID: "$reply", threadRootID: "$root", mentions: nil)
-        #expect(threaded.caption == nil)
-        #expect(threaded.inReplyTo == nil)
-        let json = try #require(threaded.extraContentJson)
-        #expect(json.contains("\"m.thread\"") && json.contains("\"$root\"") && json.contains("\"$reply\""))
-        #expect(json.contains("\"is_falling_back\":false"))
+        #expect(threadedReply.caption == nil)
+        #expect(threadedReply.inReplyTo == "$reply")
+        #expect(threadedReply.extraContentJson == nil)
+
+        let threadedPlain = try MatrixMapping.uploadParameters(
+            url: url, captionDraft: nil, replyToID: nil, threadRootID: "$root", mentions: nil)
+        let json = try #require(threadedPlain.extraContentJson)
+        #expect(json.contains("\"m.thread\""))
+        #expect(json.contains("\"$root\""))
+        #expect(json.contains("\"is_falling_back\":true"))
     }
 }

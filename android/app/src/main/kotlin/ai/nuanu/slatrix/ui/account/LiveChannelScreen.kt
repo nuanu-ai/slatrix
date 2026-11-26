@@ -387,7 +387,10 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
             state.rows.filterIsInstance<ConversationMessage>().mapNotNull { row ->
                 val att = row.attachment?.takeIf { it.kind == MessageAttachment.Kind.Image && row.kind != MessageKind.Deleted }
                     ?: return@mapNotNull null
-                ViewerMediaItem(row.id, att, row.senderName, row.timestamp, row.caption, row)
+                val safeCaption = row.caption?.let { fallback ->
+                    row.runs.joinToString("") { it.text }.takeIf { it.isNotBlank() } ?: fallback
+                }
+                ViewerMediaItem(row.id, att, row.senderName, row.timestamp, safeCaption, row)
             }
         }
         val index = viewerItems.indexOfFirst { it.id == id }
@@ -404,6 +407,7 @@ fun LiveChannelScreen(room: RoomSummary, state: ConversationState, composer: Com
                         item.message?.let(forward)
                     }
                 },
+                onPageChanged = { newId -> viewing = newId to tile },
             ) { viewing = null }
         }
     }

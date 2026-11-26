@@ -323,8 +323,18 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
             case .message(let msg):
                 switch msg.msgType {
                 case .image, .file, .video, .audio: return true
-                case .text, .notice, .emote:
-                    if msg.body.contains("http://") || msg.body.contains("https://") { return true }
+                case .text(let value):
+                    let rendered = MessageBodyRenderer.shared.render(
+                        body: value.body, formattedBody: MatrixMapping.htmlBody(value.formatted))
+                    if !SharedContentMapping.links(in: rendered).isEmpty { return true }
+                case .notice(let value):
+                    let rendered = MessageBodyRenderer.shared.render(
+                        body: value.body, formattedBody: MatrixMapping.htmlBody(value.formatted))
+                    if !SharedContentMapping.links(in: rendered).isEmpty { return true }
+                case .emote(let value):
+                    let rendered = MessageBodyRenderer.shared.render(
+                        body: value.body, formattedBody: MatrixMapping.htmlBody(value.formatted))
+                    if !SharedContentMapping.links(in: rendered).isEmpty { return true }
                 default: break
                 }
             default: break
@@ -428,6 +438,7 @@ private final class SharedFilesRoomObserver: RoomInfoListener, @unchecked Sendab
                 }
                 if rendered.containsSpoilers {
                     message.body = "[Spoiler hidden]"
+                    if message.mediaCaption != nil { message.mediaCaption = "[Spoiler hidden]" }
                     message.formattedBody = nil
                 }
                 if message.attachment != nil || !links.isEmpty {

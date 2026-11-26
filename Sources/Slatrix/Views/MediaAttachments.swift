@@ -138,12 +138,15 @@ struct AttachmentView: View {
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
-    /// Copies a decoded image attachment onto the general pasteboard as PNG and TIFF.
+    /// Copies a decoded image attachment onto the general pasteboard as PNG and TIFF without clobbering newer copies.
     func copyImage(_ message: ChatMessage, matrix: MatrixService) async -> Bool {
         let session = matrix.notificationSessionID
+        let initialChangeCount = NSPasteboard.general.changeCount
         do {
             let image = try await matrix.loadFullImage(message)
-            guard matrix.notificationSessionID == session else { return false }
+            guard matrix.notificationSessionID == session,
+                NSPasteboard.general.changeCount == initialChangeCount
+            else { return false }
             return Self.writeImageToPasteboard(image)
         } catch is CancellationError {
             return false
@@ -155,15 +158,13 @@ struct AttachmentView: View {
 
     @discardableResult
     static func writeImageToPasteboard(_ image: NSImage) -> Bool {
+        guard let tiff = image.tiffRepresentation else { return false }
+        let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         var wrote = false
-        if let tiff = image.tiffRepresentation {
-            if let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) {
-                wrote = pasteboard.setData(png, forType: .png) || wrote
-            }
-            wrote = pasteboard.setData(tiff, forType: .tiff) || wrote
-        }
+        if let png { wrote = pasteboard.setData(png, forType: .png) || wrote }
+        wrote = pasteboard.setData(tiff, forType: .tiff) || wrote
         return wrote
     }
 }
