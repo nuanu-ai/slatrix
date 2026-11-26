@@ -23,15 +23,15 @@ class MatrixForwardTest {
     }
 
     // capability: message.forward
-    @Test fun forwardingWithANoteSendsTheNoteFirstAndIgnoresBlankNotes() = runTest {
+    @Test fun forwardingSendsTheCopyFirstThenANonBlankNoteAndIgnoresBlankNotes() = runTest {
         val destination = ForwardRoom("!general:example.org")
         val forward = MatrixForward(ForwardClient(ForwardRoom("!design:example.org"), destination))
 
         assertNull(forward.forward(text, "!design:example.org", "!general:example.org", note = "  FYI take a look  "))
         assertEquals(2, destination.timeline.sent.size)
-        assertEquals(MessageType.Text(TextMessageContent("FYI take a look", null)), destination.timeline.sent[0].type)
-        assertEquals(text, destination.timeline.sent[1].type)
-        assertEquals(Mentions(emptyList(), false), destination.timeline.sent[1].mentions)
+        assertEquals(text, destination.timeline.sent[0].type)
+        assertEquals(Mentions(emptyList(), false), destination.timeline.sent[0].mentions)
+        assertEquals(MessageType.Text(TextMessageContent("FYI take a look", null)), destination.timeline.sent[1].type)
 
         val secondDestination = ForwardRoom("!second:example.org")
         val second = MatrixForward(ForwardClient(ForwardRoom("!design:example.org"), secondDestination))

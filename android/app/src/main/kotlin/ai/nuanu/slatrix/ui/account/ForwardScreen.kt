@@ -31,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,6 +71,9 @@ fun ForwardScreen(
     var refusal by remember { mutableStateOf<String?>(null) }
     val selected = remember(rooms, selectedId) { rooms.firstOrNull { it.id == selectedId } }
     val shown = remember(rooms, query) { ConversationSearch.results(rooms, query) }
+    LaunchedEffect(rooms, selectedId) {
+        if (selectedId != null && rooms.none { it.id == selectedId }) selectedId = null
+    }
 
     fun send() {
         val destination = selected ?: return

@@ -45,9 +45,9 @@ import Foundation
         selectPreviewRoom(rooms[0].id)
     }
     /// The open sample conversation's messages that share a word with the query.
-    func previewSearch(_ query: String, roomID: String?) -> [ChatMessage] {
+    func previewSearch(_ query: MessageSearchQuery) -> [ChatMessage] {
         messages.filter {
-            (roomID == nil || $0.roomID == roomID) && !MessageSearchQuery(query).highlights(in: $0.body).isEmpty
+            (query.roomID == nil || $0.roomID == query.roomID) && !query.highlights(in: $0.body).isEmpty
         }
         .reversed()
     }

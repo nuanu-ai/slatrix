@@ -123,6 +123,9 @@ struct SearchIndexTests {
                 message("$ru-other", "нужны инструменты для сканера"),
                 message("$en-deploy", "Production deployment succeeded on staging"),
                 message("$punct", "Fixed C++ parser in foo:bar (test)"),
+                message("$tr-ist", "Flight from İST arrived"),
+                message("$cjk-long", "国際化対応を確認するために"),
+                message("$quoted", "Say foo \"bar\" baz once"),
             ])
         let scratch = try TemporaryDirectory()
         let client = try await ClientBuilder().homeserverUrl(url: server.url).sessionPaths(
@@ -140,48 +143,53 @@ struct SearchIndexTests {
         let handle = await service.subscribeToResults(listener: hits)
         defer { handle.cancel() }
 
-        // Wait for the event cache to index all 5 messages.
+        // Wait for the event cache to index all 8 messages.
+        let allIDs: Set<String> = [
+            "$ru-genitive", "$ru-nominative", "$ru-other", "$en-deploy", "$punct", "$tr-ist", "$cjk-long", "$quoted",
+        ]
         let deadline = ContinuousClock.now + .seconds(30)
         repeat {
-            try await service.setQuery(query: "сканер OR сканера OR deployment OR parser OR клиентам")
-        } while await !eventually(
-            timeout: .milliseconds(200),
-            { hits.eventIDs == ["$ru-genitive", "$ru-nominative", "$ru-other", "$en-deploy", "$punct"] })
+            try await service.setQuery(
+                query: "сканер OR сканера OR deployment OR parser OR клиентам OR flight OR 国際化対応を確認するために OR say")
+        } while await !eventually(timeout: .milliseconds(200), { hits.eventIDs == allIDs })
             && ContinuousClock.now < deadline
-        try #require(hits.eventIDs.count == 5)
+        try #require(hits.eventIDs == allIDs)
 
-        func run(_ text: String, mode: MessageSearchQuery.Mode = .query, expectNonEmpty: Bool = true) async throws
+        func run(_ text: String, mode: MessageSearchQuery.Mode = .query, expectEmpty: Bool = false) async throws
             -> Set<String>
         {
             let sdk = try #require(MessageSearchQuery(text, mode: mode).sdkQuery())
+            if expectEmpty {
+                // Reusing the populated service forces Tantivy to emit a real Clear diff when 0 hits match.
+                try await service.setQuery(query: "deployment")
+                _ = await eventually(timeout: .seconds(5)) { hits.eventIDs == ["$en-deploy"] }
+                try await service.setQuery(query: sdk)
+                _ = await eventually(timeout: .seconds(5)) { hits.eventIDs.isEmpty }
+                return hits.eventIDs
+            }
             let queryHits = Hits()
             let queryService = client.searchService()
             let queryHandle = await queryService.subscribeToResults(listener: queryHits)
             defer { queryHandle.cancel() }
             try await queryService.setQuery(query: sdk)
-            _ = await eventually(timeout: .seconds(5)) {
-                expectNonEmpty ? !queryHits.eventIDs.isEmpty : queryHits.revision > 0
-            }
+            _ = await eventually(timeout: .seconds(5)) { !queryHits.eventIDs.isEmpty }
             return queryHits.eventIDs
         }
 
         // Russian prefix matches both "рассылок" and "Рассылка".
-        let ruPrefix = try await run("рассыл")
-        #expect(ruPrefix == ["$ru-genitive", "$ru-nominative"])
+        #expect(try await run("рассыл") == ["$ru-genitive", "$ru-nominative"])
         // Multi-word search requires every term (AND), so "$ru-other" (which only has "инструменты") is excluded.
-        let ruAnd = try await run("инструменты рассыл")
-        #expect(ruAnd == ["$ru-genitive"])
+        #expect(try await run("инструменты рассыл") == ["$ru-genitive"])
         // English prefix matches "deployment".
-        let enPrefix = try await run("deploy")
-        #expect(enPrefix == ["$en-deploy"])
+        #expect(try await run("deploy") == ["$en-deploy"])
         // Punctuation and colons/parens never crash Tantivy's parser.
-        let punct = try await run("foo:bar (test)")
-        #expect(punct == ["$punct"])
-        // Uppercase Tantivy operators stay safe lowercase word terms and never crash the parser.
-        let operators = try await run("AND OR NOT TO", expectNonEmpty: false)
-        #expect(operators.isEmpty)
-        // Exact phrase mode still requires exact words in order.
-        let phrase = try await run("рассыл", mode: .phrase, expectNonEmpty: false)
-        #expect(phrase.isEmpty)
+        #expect(try await run("foo:bar (test)") == ["$punct"])
+        // Turkish dotted I, 39-byte CJK token, and escaped quotes match cleanly without Tantivy syntax errors.
+        #expect(try await run("İST") == ["$tr-ist"])
+        #expect(try await run("国際化対応を確認するために") == ["$cjk-long"])
+        #expect(try await run("\"foo \\\"bar\\\" baz\"") == ["$quoted"])
+        // Uppercase Tantivy operators and exact phrase mode return empty cleanly (clearing prior hits).
+        #expect(try await run("AND OR NOT TO", expectEmpty: true).isEmpty)
+        #expect(try await run("рассыл", mode: .phrase, expectEmpty: true).isEmpty)
     }
 }

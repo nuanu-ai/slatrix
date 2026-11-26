@@ -201,7 +201,7 @@ private fun MessageResults(text: String, rooms: List<RoomSummary>, messages: Mes
             messages.error != null -> item { SearchNote(messages.error) }
             messages.loading -> item { ConnectionIndicator(true, null) }
             // Asks for the next page as the end comes into view; a page with no hits here asks for the one after.
-            !messages.endReached -> item { LaunchedEffect(messages.hits.size) { onMore() } }
+            !messages.endReached -> item { LaunchedEffect(messages.hits.size, messages.loading) { if (!messages.loading) onMore() } }
             hits.isEmpty() && messages.indexing -> item { SearchNote("Indexing recent messages…") }
             hits.isEmpty() -> item { SearchNote("No results for “$text”") }
         }

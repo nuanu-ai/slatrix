@@ -111,16 +111,20 @@ class SearchScreenTest {
     @Test fun aSearchWhosePageHasNoHitsHereAsksForTheNextInsteadOfSayingNoResults() {
         var more = 0
         val elsewhere = SearchHit("!elsewhere:example.org", "\$1", "@sam:example.org", "Sam", "budget elsewhere", 1_000)
+        val state = mutableStateOf(MessageSearchState(MessageSearchQuery("budget"), listOf(elsewhere), endReached = false))
         compose.setContent {
             SlatrixTheme {
-                SearchScreen(rooms, "@alex:example.org", MessageSearchState(MessageSearchQuery("budget"), listOf(elsewhere), endReached = false),
-                    {}, { more++ }, {}, onRoom = {})
+                SearchScreen(rooms, "@alex:example.org", state.value, {}, { more++ }, {}, onRoom = {})
             }
         }
         compose.onNode(hasSetTextAction()).performTextInput("budget")
         compose.onNode(hasSetTextAction()).performImeAction()
-        compose.runOnIdle { assertTrue("The next page is asked for", more > 0) }
+        compose.runOnIdle { assertEquals(1, more) }
         compose.onNodeWithText("No results for “budget”").assertDoesNotExist()
+        // A second empty page finishing still asks for the next page.
+        compose.runOnIdle { state.value = state.value.copy(loading = true) }
+        compose.runOnIdle { state.value = state.value.copy(loading = false) }
+        compose.runOnIdle { assertEquals(2, more) }
     }
 
     @Test fun aSearchWithNoHitsSaysSo() {

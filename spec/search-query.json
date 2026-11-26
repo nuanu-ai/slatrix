@@ -78,6 +78,37 @@
       "mode": "query",
       "query": "+(body:and^2 OR body:[and TO and\uff5a]) +body:or +(body:not^2 OR body:[not TO not\uff5a]) +body:to"
     },
+    {
+      "name": "Quoted phrases with escaped quotes stay one exact phrase in query mode",
+      "text": "\"foo \\\"bar\\\" baz\"",
+      "mode": "query",
+      "query": "\"foo \\\"bar\\\" baz\""
+    },
+    {
+      "name": "Turkish dotted I stays an exact pre-lowercased term so Tantivy indexes and matches it as one token",
+      "text": "İST",
+      "mode": "query",
+      "query": "body:İST"
+    },
+    {
+      "name": "A long UTF-8 token near Tantivy's 40-byte limit stays exact instead of overflowing the range bound",
+      "text": "国際化対応を確認するために",
+      "mode": "query",
+      "query": "body:国際化対応を確認するために"
+    },
+    {
+      "name": "Supplementary Unicode letters count by code point and support negation identically",
+      "text": "𐐨𐐩 -𐐨",
+      "mode": "query",
+      "query": "+body:𐐨𐐩 -body:𐐨"
+    },
+    {
+      "name": "A negative-only search paired only with In does not invert into a positive match",
+      "text": "-draft",
+      "mode": "query",
+      "roomID": "!design:example.org",
+      "query": null
+    },
     { "name": "Punctuation-only query stays a safe literal", "text": "!!!", "mode": "query", "query": "\"!!!\"" },
     { "name": "A phrase is one quoted literal", "text": "Browser sync check", "mode": "phrase", "query": "\"Browser sync check\"" },
     { "name": "A phrase escapes quotes", "text": "a\"b", "mode": "phrase", "query": "\"a\\\"b\"" },

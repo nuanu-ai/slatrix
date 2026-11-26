@@ -60,20 +60,16 @@ class MatrixSearchTest {
         search.close()
     }
 
-    @Test fun anInFilterAutoPaginatesPastOtherRoomsHits() = runTest {
-        val client = SearchClient()
-        val search = MatrixSearch(backgroundScope, client)
-        client.services += SearchFake(
-            pages = listOf(
-                listOf(hit("!a:example.org", "\$1", "Budget in A")),
-                listOf(hit("!b:example.org", "\$2", "Budget in B")),
-            ),
-        )
+    @Test fun closingStopsBackfillFromStartingAnotherSearch() = runTest {
+        val client = SearchClient(backfillFinished = false)
+        val search = MatrixSearch(backgroundScope, client, backfillPollMillis = 10L)
+        client.services += SearchFake { emptyList() }
 
-        search.search(MessageSearchQuery("budget", roomId = "!b:example.org"))
-        val found = search.state.first { !it.loading && it.hits.isNotEmpty() }
-        assertEquals(listOf("Budget in B"), found.hits.map { it.body })
+        search.search(MessageSearchQuery("рассыл"))
+        search.state.first { !it.loading }
         search.close()
+        client.backfillFinished = true
+        assertTrue(client.services.isEmpty())
     }
 
     @Test fun aNewSearchIgnoresTheLateHitsOfTheOneBefore() = runTest {

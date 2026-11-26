@@ -571,7 +571,15 @@ internal fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: 
         }
         forwarding?.let { (message, content) ->
             ForwardScreen(message, room, roomList?.value?.rooms.orEmpty().filter { it.canPost }, { destination, note ->
-                rooms?.client?.let { MatrixForward(it).forward(content, open.room.id, destination.id, note) }
+                val fresh = conversation?.forwardable(message)
+                    ?: return@ForwardScreen "This message can’t be forwarded."
+                if (fresh != content) {
+                    val latest = timeline.rows.firstOrNull { (it as? ConversationMessage)?.eventId == message.eventId }
+                        as? ConversationMessage ?: message
+                    forwarding = latest to fresh
+                    return@ForwardScreen "The message changed. Check it, then forward."
+                }
+                rooms?.client?.let { MatrixForward(it).forward(fresh, open.room.id, destination.id, note) }
                     ?: "Couldn’t forward this message."
             }, { destination ->
                 forwarding = null

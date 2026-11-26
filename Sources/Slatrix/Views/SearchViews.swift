@@ -216,6 +216,7 @@ struct SearchResultsView: View {
     @State private var activeRun: Run?
     @State private var searching = false
     @State private var paging = false
+    @State private var autoPages = 0
     @State private var startingIndex = false
     @State private var error: String?
     @State private var peopleQuery: String?
@@ -257,8 +258,15 @@ struct SearchResultsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).background(colors.canvas)
         .task(id: run) { await search(run) }
+        .task(id: autoPageTrigger) {
+            guard query.roomID != nil, activeRun == run, !searchBusy, !paging, messages.isEmpty, matrix.searchHasMore,
+                autoPages < 5, searchError == nil
+            else { return }
+            autoPages += 1
+            loadMore()
+        }
         .onChange(of: matrix.searchIndexingState) { _, state in
-            if state == .completed || state == .stopped { retry += 1 }
+            if state == .completed, messages.isEmpty, query.sdkQuery() != nil { retry += 1 }
         }
         .onDisappear { matrix.cancelSearch() }
     }
@@ -414,14 +422,21 @@ struct SearchResultsView: View {
             }
     }
 
+    private var autoPageTrigger: String {
+        "\(run.hashValue)-\(searchBusy)-\(paging)-\(messages.isEmpty)-\(matrix.searchHasMore)-\(autoPages)"
+    }
+
     private func search(_ run: Run) async {
         matrix.cancelSearch()
         activeRun = run
         paging = false
+        autoPages = 0
         error = nil
         guard let sdkQuery = run.query.sdkQuery() else { return }
         searching = true
-        do { try await matrix.searchMessages(query: sdkQuery, roomID: run.query.roomID) } catch {
+        do {
+            try await matrix.searchMessages(query: sdkQuery, roomID: run.query.roomID, previewQuery: run.query)
+        } catch {
             if !Task.isCancelled { self.error = MatrixService.safeError(error) }
         }
         if !Task.isCancelled { searching = false }

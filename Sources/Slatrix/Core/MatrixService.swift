@@ -889,9 +889,6 @@ private final class SearchResultsObserver: SearchServiceResultsListener, @unchec
     private var revision = 0
     let callback: @Sendable ([SearchServiceResult], Int) -> Void
     init(_ callback: @escaping @Sendable ([SearchServiceResult], Int) -> Void) { self.callback = callback }
-    func hasMatch(in roomID: String) -> Bool {
-        lock.withLock { !MatrixMapping.searchMessages(results, roomID: roomID).isEmpty }
-    }
     func onUpdate(updates: [SearchServiceResultsUpdate]) {
         lock.lock()
         results.apply(updates.map(\.change))
@@ -3798,13 +3795,18 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             try validate()
             let content = try current.payload()
             let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmedNote.isEmpty {
-                let noteContent = try messageEventContentNew(
+            let noteContent =
+                trimmedNote.isEmpty
+                ? nil
+                : try messageEventContentNew(
                     msgtype: .text(content: TextMessageContent(body: trimmedNote, formatted: nil)))
-                _ = try await destinationTimeline.send(msg: noteContent)
-            }
+            // Send the validated forwarded payload immediately (no await gap where the source could be redacted),
+            // then queue the optional follow-up note once the forward is safely accepted.
             _ = try await destinationTimeline.send(msg: content)
             // Queued: a failure reported after this point would invite a duplicate resend.
+            if let noteContent {
+                _ = try? await destinationTimeline.send(msg: noteContent)
+            }
             return ForwardMessageQueuedResult(reviewID: review.id, destinationRoomID: roomID)
         } catch {
             try validateMessageAction(review.target)
@@ -4978,12 +4980,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             }
         } catch { if token == selection { errorMessage = Self.safeError(error) } }
     }
-    func searchMessages(query: String, roomID: String? = nil) async throws {
+    func searchMessages(query: String, roomID: String? = nil, previewQuery: MessageSearchQuery? = nil) async throws {
         cancelSearch()
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !term.isEmpty else { return }
         if isPreview {
-            searchResults = previewSearch(term, roomID: roomID)
+            searchResults = previewSearch(previewQuery ?? MessageSearchQuery(term, roomID: roomID))
             searchState = "ready"
             return
         }
@@ -5033,18 +5035,6 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
                     }))
             try await service.setQuery(query: term)
             guard token == searchGeneration, session == sessionGeneration else { return }
-            // When narrowed to one conversation (`in:`), pull a few more global pages if page 1 held hits only from
-            // other rooms, so the reader sees matches immediately instead of "No matches yet".
-            if let roomID {
-                var extraPages = 0
-                while extraPages < 5, !observer.hasMatch(in: roomID),
-                    case .idle(let endReached) = service.paginationState(), !endReached
-                {
-                    try await service.paginate()
-                    guard token == searchGeneration, session == sessionGeneration else { return }
-                    extraPages += 1
-                }
-            }
             searchQueryCompleted = true
             updateSearchPagination(service.paginationState())
         } catch {

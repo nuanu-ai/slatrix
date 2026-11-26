@@ -41,6 +41,7 @@ class MessageSearchQuery(text: String, val mode: Mode = Mode.Query, val roomId: 
         var negative = parsed.negative
         if (positive.isEmpty() && filters.isEmpty()) {
             if (negative.isNotEmpty()) {
+                if (roomId != null) return null
                 positive = negative
                 negative = emptyList()
             } else {
@@ -60,7 +61,7 @@ class MessageSearchQuery(text: String, val mode: Mode = Mode.Query, val roomId: 
             prefixTerms = emptyList()
         } else {
             val parsed = tokenize(text)
-            if (parsed.positive.isEmpty() && senderId == null && date == null && parsed.negative.isNotEmpty()) {
+            if (parsed.positive.isEmpty() && roomId == null && senderId == null && date == null && parsed.negative.isNotEmpty()) {
                 exactTerms = parsed.negativeExactHighlights
                 prefixTerms = parsed.negativePrefixHighlights
             } else {
@@ -72,13 +73,17 @@ class MessageSearchQuery(text: String, val mode: Mode = Mode.Query, val roomId: 
         return Word.findAll(body).filter { match ->
             val lower = match.value.lowercase()
             lower in exactTerms ||
-                prefixTerms.any { term -> if (term.length >= MinPrefixLength) lower.startsWith(term) else lower == term }
+                prefixTerms.any { term ->
+                    if (term.codePointCount(0, term.length) >= MinPrefixLength) lower.startsWith(term) else lower == term
+                }
         }.map { it.range }.toList()
     }
 
     companion object {
         private const val PrefixUpperSuffix = "\uff5a"
         private const val MinPrefixLength = 3
+        // Tantivy's default RemoveLongFilter drops tokens over 40 UTF-8 bytes; reserve 3 bytes for U+FF5A.
+        private const val MaxPrefixUtf8Bytes = 37
 
         private data class Tokenized(
             val positive: List<String>,
@@ -98,22 +103,25 @@ class MessageSearchQuery(text: String, val mode: Mode = Mode.Query, val roomId: 
             val negativePrefixHighlights = mutableListOf<String>()
             var index = 0
             while (index < input.length) {
-                while (index < input.length && input[index].isWhitespace()) index++
+                while (index < input.length && Character.isWhitespace(input.codePointAt(index))) {
+                    index += Character.charCount(input.codePointAt(index))
+                }
                 if (index >= input.length) break
                 var negated = false
                 if (input[index] == '-' && index + 1 < input.length) {
-                    val next = input[index + 1]
-                    if (next == '"' || next.isLetterOrDigit()) {
+                    val nextCp = input.codePointAt(index + 1)
+                    if (nextCp == '"'.code || Character.isLetterOrDigit(nextCp)) {
                         negated = true
                         index++
                     }
                 }
                 if (input[index] == '"') {
                     val contentStart = index + 1
-                    val closing = input.indexOf('"', contentStart)
-                    if (closing >= 0) {
-                        val inner = input.substring(contentStart, closing).trim()
-                        index = closing + 1
+                    val scanned = scanQuoted(input, contentStart)
+                    if (scanned != null) {
+                        val (rawInner, afterClosing) = scanned
+                        val inner = rawInner.trim()
+                        index = afterClosing
                         if (inner.isNotEmpty()) {
                             val clause = literal(inner)
                             if (negated) {
@@ -130,17 +138,21 @@ class MessageSearchQuery(text: String, val mode: Mode = Mode.Query, val roomId: 
                     continue
                 }
                 var chunkEnd = index
-                while (chunkEnd < input.length && !input[chunkEnd].isWhitespace() && input[chunkEnd] != '"') chunkEnd++
+                while (chunkEnd < input.length && input[chunkEnd] != '"') {
+                    val cp = input.codePointAt(chunkEnd)
+                    if (Character.isWhitespace(cp)) break
+                    chunkEnd += Character.charCount(cp)
+                }
                 val chunk = input.substring(index, chunkEnd)
                 index = chunkEnd
-                for (word in words(chunk)) {
-                    val clause = wordClause(word)
+                for (raw in rawWords(chunk)) {
+                    val (clause, lower, isPrefix) = wordClause(raw)
                     if (negated) {
                         negative += clause
-                        negativePrefixHighlights += word
+                        if (isPrefix) negativePrefixHighlights += lower else negativeExactHighlights += lower
                     } else {
                         positive += clause
-                        prefixHighlights += word
+                        if (isPrefix) prefixHighlights += lower else exactHighlights += lower
                     }
                 }
             }
@@ -148,12 +160,52 @@ class MessageSearchQuery(text: String, val mode: Mode = Mode.Query, val roomId: 
                 positive, negative, exactHighlights, prefixHighlights, negativeExactHighlights, negativePrefixHighlights)
         }
 
-        private fun words(value: String): List<String> =
-            value.split(Separators).filter { it.isNotEmpty() }.map { it.lowercase() }
+        private fun scanQuoted(input: String, start: Int): Pair<String, Int>? {
+            val sb = StringBuilder()
+            var index = start
+            while (index < input.length) {
+                val ch = input[index]
+                if (ch == '\\' && index + 1 < input.length) {
+                    val escaped = input[index + 1]
+                    if (escaped != '"' && escaped != '\\') sb.append(ch)
+                    sb.append(escaped)
+                    index += 2
+                    continue
+                }
+                if (ch == '"') return sb.toString() to (index + 1)
+                sb.append(ch)
+                index++
+            }
+            return null
+        }
 
-        private fun wordClause(word: String): String =
-            if (word.length >= MinPrefixLength) "(body:$word^2 OR body:[$word TO $word$PrefixUpperSuffix])"
-            else "body:$word"
+        private fun rawWords(value: String): List<String> =
+            value.split(Separators).filter { it.isNotEmpty() }
+
+        private fun words(value: String): List<String> =
+            rawWords(value).map { it.lowercase() }
+
+        private fun allWordCodePoints(value: String): Boolean {
+            var i = 0
+            while (i < value.length) {
+                val cp = value.codePointAt(i)
+                if (!Character.isLetterOrDigit(cp)) return false
+                i += Character.charCount(cp)
+            }
+            return true
+        }
+
+        private fun wordClause(raw: String): Triple<String, String, Boolean> {
+            val lower = raw.lowercase()
+            val lowerClean = allWordCodePoints(lower)
+            if (lowerClean && lower.codePointCount(0, lower.length) >= MinPrefixLength &&
+                lower.toByteArray(Charsets.UTF_8).size <= MaxPrefixUtf8Bytes) {
+                return Triple("(body:$lower^2 OR body:[$lower TO $lower$PrefixUpperSuffix])", lower, true)
+            }
+            // Keep the original token if lowercasing introduces combining marks (e.g. Turkish İ -> i + U+0307) so
+            // Tantivy's SimpleTokenizer keeps it as one token before its LowerCaser runs.
+            return Triple("body:${if (lowerClean) lower else raw}", lower, false)
+        }
 
         private fun literal(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 

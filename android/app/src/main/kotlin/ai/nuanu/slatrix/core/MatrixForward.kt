@@ -31,20 +31,25 @@ class MatrixForward(private val client: Client) {
                         return@withContext "You can’t post in that conversation. Choose another."
                     }
                     room.timeline().use { timeline ->
-                        // Prepare the forwarded payload before sending the optional note so a payload failure never
-                        // leaves an orphan note behind.
+                        // Prepare both payloads up front, send the forwarded copy first, then queue the optional note
+                        // once the forward is accepted so a failure never leaves an orphan note or invites duplicates.
                         val copy = checkNotNull(timeline.createMessageContent(content))
-                        copy.use { rawCopy ->
-                            // An empty m.mentions, so the copy pings no one the original named, as on the Mac.
-                            rawCopy.withMentions(Mentions(emptyList(), false)).use { outgoing ->
-                                val trimmedNote = note.trim()
-                                if (trimmedNote.isNotEmpty()) {
-                                    val noteContent = checkNotNull(timeline.createMessageContent(
-                                        MessageType.Text(TextMessageContent(trimmedNote, null))))
-                                    noteContent.use { timeline.send(it).close() }
+                        val trimmedNote = note.trim()
+                        val noteContent = if (trimmedNote.isNotEmpty()) {
+                            checkNotNull(timeline.createMessageContent(MessageType.Text(TextMessageContent(trimmedNote, null))))
+                        } else null
+                        try {
+                            copy.use { rawCopy ->
+                                // An empty m.mentions, so the copy pings no one the original named, as on the Mac.
+                                rawCopy.withMentions(Mentions(emptyList(), false)).use { outgoing ->
+                                    timeline.send(outgoing).close()
                                 }
-                                timeline.send(outgoing).close()
                             }
+                            if (noteContent != null) {
+                                runCatching { timeline.send(noteContent).close() }
+                            }
+                        } finally {
+                            noteContent?.close()
                         }
                     }
                 }
