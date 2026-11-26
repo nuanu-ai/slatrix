@@ -63,6 +63,16 @@ class SvgDecoderTest {
         val context = ApplicationProvider.getApplicationContext<Application>()
         val uri = Uri.parse("content://ai.nuanu.slatrix.dev.files/test")
         assertEquals("image/svg+xml", resolveAttachmentMimeType(context, uri, "icons.svg", "application/octet-stream"))
+        assertEquals("image/svg+xml", resolveAttachmentMimeType(context, uri, "icons.svg", "application/xml"))
         assertEquals("text/plain", resolveAttachmentMimeType(context, uri, "notes.txt", "text/plain; charset=utf-8"))
+
+        // Cyclic SVG references must never crash the app with StackOverflowError.
+        val cyclic = """
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+              <g id="loop"><use href="#loop"/></g>
+              <use href="#loop"/>
+            </svg>
+        """.trimIndent().toByteArray()
+        assertNull(SvgDecoder.decode(cyclic, 200, 200))
     }
 }

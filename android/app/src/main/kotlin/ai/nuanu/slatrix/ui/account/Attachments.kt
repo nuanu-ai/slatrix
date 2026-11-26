@@ -112,9 +112,12 @@ import kotlinx.coroutines.withContext
 
 internal fun resolveAttachmentMimeType(context: Context, uri: Uri, name: String, rawMime: String?): String {
     val clean = rawMime?.substringBefore(';')?.trim()?.lowercase()
-    if (!clean.isNullOrBlank() && clean != "application/octet-stream" && clean != "*/*") return clean
     val ext = FileKind.extension(name).lowercase()
-    if (ext == "svg") return "image/svg+xml"
+    if (ext == "svg" && (clean.isNullOrBlank() || clean == "application/octet-stream" || clean == "*/*" ||
+        clean == "application/xml" || clean == "text/xml")) {
+        return "image/svg+xml"
+    }
+    if (!clean.isNullOrBlank() && clean != "application/octet-stream" && clean != "*/*") return clean
     val fromExt = ext.takeIf { it.isNotEmpty() }?.let { MimeTypeMap.getSingleton().getMimeTypeFromExtension(it) }
     if (!fromExt.isNullOrBlank()) return fromExt
     return context.contentResolver.getType(uri)?.substringBefore(';')?.trim()?.takeIf { it.isNotBlank() } ?: "*/*"
@@ -156,10 +159,14 @@ internal fun shareFile(context: Context, file: File, attachment: MessageAttachme
 internal suspend fun saveFile(context: Context, file: File, attachment: MessageAttachment): String = withContext(Dispatchers.IO) {
     val safeName = attachment.name.substringAfterLast('/').substringAfterLast('\\').trim()
         .takeUnless { it.isEmpty() || it == "." || it == ".." } ?: "file"
-    val cleanMime = attachment.mimeType?.substringBefore(';')?.trim()?.lowercase()
-        ?.takeUnless { it.isBlank() || it == "application/octet-stream" || it == "*/*" }
-        ?: if (safeName.endsWith(".svg", ignoreCase = true)) "image/svg+xml"
-        else MimeTypeMap.getSingleton().getMimeTypeFromExtension(FileKind.extension(safeName).lowercase())
+    val rawClean = attachment.mimeType?.substringBefore(';')?.trim()?.lowercase()
+    val isSvgName = safeName.endsWith(".svg", ignoreCase = true)
+    val cleanMime = when {
+        isSvgName && (rawClean.isNullOrBlank() || rawClean == "application/octet-stream" || rawClean == "*/*" ||
+            rawClean == "application/xml" || rawClean == "text/xml") -> "image/svg+xml"
+        !rawClean.isNullOrBlank() && rawClean != "application/octet-stream" && rawClean != "*/*" -> rawClean
+        else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(FileKind.extension(safeName).lowercase())
+    }
     val video = attachment.kind == MessageAttachment.Kind.Video
     val rasterImage = attachment.kind == MessageAttachment.Kind.Image && cleanMime != "image/svg+xml" &&
         !safeName.endsWith(".svg", ignoreCase = true)
@@ -201,68 +208,68 @@ internal class SessionPictures : LruCache<PictureKey, ImageBitmap>((Runtime.getR
 internal data class PictureKey(val source: Pair<String, String?>, val width: Int, val height: Int, val full: Boolean)
 internal val LocalPictures = staticCompositionLocalOf<SessionPictures?> { null }
 
-internal data class PictureLoadState(val bitmap: ImageBitmap? = null, val settled: Boolean = false)
+internal data class PictureLoadState(
+    val bitmap: ImageBitmap? = null,
+    val animated: AnimatedImageDrawable? = null,
+    val settled: Boolean = false,
+)
 
 /** Decodes off the main thread; resizing keeps the current source visible while the new size loads. */
 @Composable
 internal fun picture(attachment: MessageAttachment, width: Int, height: Int, full: Boolean, load: PictureLoader): ImageBitmap? =
-    pictureState(attachment, width, height, full, load).bitmap
+    pictureState(attachment, width, height, full, allowAnimation = false, load).bitmap
 
+/**
+ * Loads and decodes an attachment ONCE: returns an `AnimatedImageDrawable` for animated GIF/WebP when [allowAnimation]
+ * is true, otherwise caches and returns a static `ImageBitmap` (preventing concurrent double-fetches).
+ */
 @Composable
-private fun pictureState(attachment: MessageAttachment, width: Int, height: Int, full: Boolean, load: PictureLoader): PictureLoadState {
+private fun pictureState(
+    attachment: MessageAttachment,
+    width: Int,
+    height: Int,
+    full: Boolean,
+    allowAnimation: Boolean,
+    load: PictureLoader,
+): PictureLoadState {
     val pictures = LocalPictures.current ?: remember { SessionPictures() }
     val source = attachment.source.toJson() to attachment.thumbnail?.toJson()
+    val maybeAnimated = allowAnimation && (attachment.animated ||
+        attachment.mimeType?.equals("image/gif", ignoreCase = true) == true ||
+        attachment.mimeType?.equals("image/webp", ignoreCase = true) == true)
     val cacheKey = PictureKey(source, width, height, full)
     return key(pictures) {
         val state by produceState(
-            pictures[cacheKey]?.let { source to PictureLoadState(it, settled = true) },
+            if (!maybeAnimated) pictures[cacheKey]?.let { source to PictureLoadState(bitmap = it, settled = true) } else null,
             cacheKey,
+            maybeAnimated,
         ) {
-            val cached = pictures[cacheKey]
-            if (cached != null) {
-                value = source to PictureLoadState(cached, settled = true)
-                return@produceState
+            if (!maybeAnimated) {
+                val cached = pictures[cacheKey]
+                if (cached != null) {
+                    value = source to PictureLoadState(bitmap = cached, settled = true)
+                    return@produceState
+                }
             }
             value = value?.takeIf { it.first == source }
-            val decoded = try {
+            val result = try {
                 load(attachment, width, height, full)?.let { bytes ->
-                    withContext(Dispatchers.Default) { decode(bytes, width, height, full) }
-                }
+                    withContext(Dispatchers.Default) {
+                        val anim = if (maybeAnimated) decodeAnimated(bytes, width, height) else null
+                        if (anim != null) PictureLoadState(animated = anim, settled = true)
+                        else PictureLoadState(bitmap = decode(bytes, width, height, full), settled = true)
+                    }
+                } ?: PictureLoadState(settled = true)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                null
+                PictureLoadState(settled = true)
             }
-            if (decoded != null) pictures.put(cacheKey, decoded)
-            value = source to PictureLoadState(decoded, settled = true)
+            result.bitmap?.let { pictures.put(cacheKey, it) }
+            value = source to result
         }
         state?.takeIf { it.first == source }?.second ?: PictureLoadState()
     }
-}
-
-@Composable
-private fun animatedPicture(attachment: MessageAttachment, width: Int, height: Int, full: Boolean, enabled: Boolean,
-    load: PictureLoader): AnimatedImageDrawable? {
-    val source = attachment.source.toJson()
-    val maybeAnimated = attachment.animated ||
-        attachment.mimeType?.equals("image/gif", ignoreCase = true) == true ||
-        attachment.mimeType?.equals("image/webp", ignoreCase = true) == true
-    val drawable by produceState<AnimatedImageDrawable?>(null, source, width, height, full, enabled, maybeAnimated) {
-        if (!enabled || !maybeAnimated) {
-            value = null
-            return@produceState
-        }
-        value = try {
-            load(attachment, width, height, full)?.let { bytes ->
-                withContext(Dispatchers.Default) { decodeAnimated(bytes, width, height) }
-            }
-        } catch (cancelled: CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            null
-        }
-    }
-    return drawable
 }
 
 @Composable
@@ -379,20 +386,19 @@ private fun InlineImage(attachment: MessageAttachment, load: PictureLoader, onLo
     val colors = SlatrixTheme.colors
     val context = LocalContext.current
     val shape = MaterialTheme.shapes.large
-    val reducedMotion = remember(context) { kotlin.coroutines.EmptyCoroutineContext.isMotionReduced(context) }
+    val reducedMotion = kotlin.coroutines.EmptyCoroutineContext.isMotionReduced(context)
     BoxWithConstraints {
         val (width, height) = box(attachment.width, attachment.height, maxWidth, UiMetrics.MediaMaxHeight)
         val pixels = with(LocalDensity.current) { width.roundToPx() to height.roundToPx() }
-        val loaded = pictureState(attachment, pixels.first, pixels.second, false, load)
-        val animated = animatedPicture(attachment, pixels.first, pixels.second, false, !reducedMotion, load)
+        val loaded = pictureState(attachment, pixels.first, pixels.second, false, !reducedMotion, load)
         val hasDimensions = attachment.width != null && attachment.height != null
         Box(Modifier.size(width, height).clip(shape).background(colors.sunken)
             .semantics { contentDescription = attachment.name }
             .combinedClickable(onClickLabel = "View image", onLongClickLabel = "Message actions", onLongClick = onLongPress) { onView(pixels) },
             contentAlignment = Alignment.Center) {
             when {
-                animated != null -> AnimatedPictureView(
-                    animated, attachment.name, Modifier.fillMaxSize(),
+                loaded.animated != null -> AnimatedPictureView(
+                    loaded.animated, attachment.name, Modifier.fillMaxSize(),
                     if (hasDimensions) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER,
                 )
                 loaded.bitmap != null -> {
@@ -510,9 +516,10 @@ internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, lo
             if (coroutineContext.isMotionReduced(context)) enter.snapTo(1f)
             else enter.animateTo(1f, Motion.spatial(Motion.UnitThreshold))
         }
-        val reducedMotion = remember(context) { kotlin.coroutines.EmptyCoroutineContext.isMotionReduced(context) }
-        val full = picture(attachment, UiMetrics.ViewerPixels, UiMetrics.ViewerPixels, true, load)
-        val animatedFull = animatedPicture(attachment, UiMetrics.ViewerPixels, UiMetrics.ViewerPixels, true, !reducedMotion, load)
+        val reducedMotion = kotlin.coroutines.EmptyCoroutineContext.isMotionReduced(context)
+        val fullState = pictureState(attachment, UiMetrics.ViewerPixels, UiMetrics.ViewerPixels, true, !reducedMotion, load)
+        val full = fullState.bitmap
+        val animatedFull = fullState.animated
         val placeholder = if (full == null && animatedFull == null) picture(attachment, tile.first, tile.second, false, load) else null
         var size by remember { mutableStateOf(IntSize.Zero) }
         val dismissReach = with(LocalDensity.current) { UiMetrics.ViewerDismiss.toPx() }

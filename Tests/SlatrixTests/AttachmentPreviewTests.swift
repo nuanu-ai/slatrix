@@ -115,12 +115,24 @@ struct AttachmentPreviewTests {
         let fallbackImage = try #require(await service.loadMediaImage(fallback))
         #expect(fallbackImage.width == fallbackImage.height * 2)
 
-        // Non-SVG vector data (e.g. a PDF spoofed as m.image) must never be rasterized as an inline image.
+        // Valid PDF spoofed as m.image must never be rasterized as an inline image or full image.
+        let pdfData = NSMutableData()
+        var mediaBox = CGRect(x: 0, y: 0, width: 100, height: 50)
+        if let consumer = CGDataConsumer(data: pdfData as CFMutableData),
+            let ctx = CGContext(consumer: consumer, mediaBox: &mediaBox, nil)
+        {
+            ctx.beginPDFPage(nil)
+            ctx.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+            ctx.fill(mediaBox)
+            ctx.endPDFPage()
+            ctx.closePDF()
+        }
         client.thumbnailError = nil
-        client.thumbnail = Data("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF".utf8)
+        client.thumbnail = pdfData as Data
         show(try imageEvent("$pdf-spoof", width: nil, height: nil, mime: "image/png"))
         let spoof = try #require(service.messages.first)
         #expect(await service.loadMediaImage(spoof) == nil)
+        #expect(MediaImageDecoder.decodeFullImage(pdfData as Data) == nil)
     }
 
     @Test(

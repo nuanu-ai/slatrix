@@ -87,18 +87,41 @@ struct AttachmentView: View {
             defer { withExtendedLifetime(lease) {} }
             guard matrix.notificationSessionID == session, lease.isCurrent else { return }
             let source = lease.url
-            let copy = try await Task.detached(priority: .userInitiated) {
+            let (folder, copy) = try await Task.detached(priority: .userInitiated) {
                 let root = AppPaths.temporary.appendingPathComponent("OpenedAttachments", isDirectory: true)
+                // Prune older external-open copies (older than 24h) so decrypted temp files don't accumulate forever.
+                if let entries = try? FileManager.default.contentsOfDirectory(
+                    at: root, includingPropertiesForKeys: [.contentModificationDateKey])
+                {
+                    let cutoff = Date().addingTimeInterval(-86_400)
+                    for entry in entries {
+                        let modified = (try? entry.resourceValues(forKeys: [.contentModificationDateKey]))?
+                            .contentModificationDate
+                        if modified.map({ $0 < cutoff }) ?? true {
+                            try? FileManager.default.removeItem(at: entry)
+                        }
+                    }
+                }
                 let folder = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
                 try FileManager.default.createDirectory(
                     at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
                 let destination = folder.appendingPathComponent(safeName)
-                try FileManager.default.copyItem(at: source, to: destination)
-                try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
-                return destination
+                do {
+                    try FileManager.default.copyItem(at: source, to: destination)
+                    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: destination.path)
+                } catch {
+                    try? FileManager.default.removeItem(at: folder)
+                    throw error
+                }
+                return (folder, destination)
             }.value
-            guard matrix.notificationSessionID == session else { return }
-            NSWorkspace.shared.open(copy)
+            guard matrix.notificationSessionID == session else {
+                try? FileManager.default.removeItem(at: folder)
+                return
+            }
+            if !NSWorkspace.shared.open(copy) {
+                try? FileManager.default.removeItem(at: folder)
+            }
         } catch is CancellationError {} catch {
             if matrix.notificationSessionID == session { matrix.errorMessage = MatrixService.safeError(error) }
         }

@@ -19,7 +19,7 @@ class MatrixMedia(private val client: Client, userId: String, folder: File) {
     suspend fun picture(attachment: MessageAttachment, width: Int, height: Int, full: Boolean = false): ByteArray? {
         val smallOriginal = attachment.source.takeIf { attachment.kind == MessageAttachment.Kind.Image && small(attachment.size) }
         val viewerOriginal = attachment.source.takeIf {
-            full && attachment.kind == MessageAttachment.Kind.Image && (attachment.size == null || attachment.size <= MAX_VIEWER_BYTES)
+            full && attachment.kind == MessageAttachment.Kind.Image && attachment.size != null && attachment.size <= MAX_VIEWER_BYTES
         }
         val thumbnail = attachment.thumbnail?.takeIf { small(attachment.thumbnailSize) }
         val source = when {

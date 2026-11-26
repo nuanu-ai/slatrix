@@ -72,7 +72,10 @@ class AttachmentImport(context: Context) {
         val outWidth = bounds?.let { if (turned) it.outHeight else it.outWidth } ?: svgSize?.first
         val outHeight = bounds?.let { if (turned) it.outWidth else it.outHeight } ?: svgSize?.second
         val animated = mimeType == "image/gif" || (mimeType == "image/webp" && runCatching {
-            ImageDecoder.decodeDrawable(ImageDecoder.createSource(copy)) is AnimatedImageDrawable
+            // Decode at 1x1 solely to inspect whether the WebP container is animated without allocating a full bitmap.
+            ImageDecoder.decodeDrawable(ImageDecoder.createSource(copy)) { decoder, _, _ ->
+                decoder.setTargetSize(1, 1)
+            } is AnimatedImageDrawable
         }.getOrDefault(false))
         val thumbnail = if (mimeType.startsWith("image/") && (copy.length() > 1_048_576L ||
             mimeType == "image/heic" || mimeType == "image/heif" || mimeType == "image/tiff")) {
@@ -94,7 +97,9 @@ class AttachmentImport(context: Context) {
             }
         }
         try {
-            val file = File(folder, "thumb.jpg")
+            // Separate subdirectory so a user-picked file named "thumb.jpg" can never be overwritten.
+            val thumbDir = File(folder, ".thumb").apply { mkdirs() }
+            val file = File(thumbDir, "thumb.jpg")
             file.outputStream().use { out -> bitmap.compress(Bitmap.CompressFormat.JPEG, 75, out) }
             if (file.length() in 1..(512L * 1024L)) VideoPoster(file.path, bitmap.width, bitmap.height, file.length())
             else { file.delete(); null }

@@ -48,23 +48,35 @@ class SessionAvatars(private val thumbnail: suspend (url: String, sizePx: Int) -
         ?: thumbnail(url, sizePx)?.let { bytes -> withContext(Dispatchers.Default) { decode(bytes, sizePx) } }
             ?.also { pictures.put("$url@$sizePx", it) }
 
-    /** Decodes upright via ImageDecoder (honoring EXIF orientation) and downscales to the avatar tile. */
-    private fun decode(bytes: ByteArray, sizePx: Int): ImageBitmap? = runCatching {
-        ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
-            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-            val w = info.size.width
-            val h = info.size.height
-            if (w > 0 && h > 0) {
-                val scale = min(1f, sizePx.toFloat() / min(w, h))
-                decoder.setTargetSize(max(1, (w * scale).roundToInt()), max(1, (h * scale).roundToInt()))
-            }
-        }.asImageBitmap()
-    }.getOrElse {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        var sample = 1
-        while (bounds.outWidth / (sample * 2) >= sizePx && bounds.outHeight / (sample * 2) >= sizePx) sample *= 2
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+    /** Decodes upright via ImageDecoder (honoring EXIF orientation) and downscales to the avatar tile without OOM. */
+    private fun decode(bytes: ByteArray, sizePx: Int): ImageBitmap? {
+        val maxSide = max(sizePx * 2, 512)
+        val decoded = try {
+            ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                val w = info.size.width
+                val h = info.size.height
+                if (w > 0 && h > 0) {
+                    val coverScale = min(1f, sizePx.toFloat() / min(w, h))
+                    val cappedScale = min(coverScale, maxSide.toFloat() / max(w, h))
+                    decoder.setTargetSize(max(1, (w * cappedScale).roundToInt()), max(1, (h * cappedScale).roundToInt()))
+                }
+            }.asImageBitmap()
+        } catch (_: OutOfMemoryError) {
+            return null
+        } catch (_: Exception) {
+            null
+        }
+        if (decoded != null) return decoded
+        return try {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            var sample = 1
+            while (bounds.outWidth / (sample * 2) >= maxSide || bounds.outHeight / (sample * 2) >= maxSide) sample *= 2
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
+        } catch (_: OutOfMemoryError) {
+            null
+        }
     }
 }
 

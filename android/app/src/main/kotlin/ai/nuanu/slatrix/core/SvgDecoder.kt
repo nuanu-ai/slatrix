@@ -39,7 +39,12 @@ object SvgDecoder {
         return try {
             val svg = SVG.getFromInputStream(ByteArrayInputStream(bytes)) ?: return null
             val (w, h) = intrinsicSize(svg) ?: return null
+            if (w > 16_384f || h > 16_384f) return null
             w.roundToInt() to h.roundToInt()
+        } catch (_: StackOverflowError) {
+            null
+        } catch (_: OutOfMemoryError) {
+            null
         } catch (_: Exception) {
             null
         }
@@ -62,6 +67,8 @@ object SvgDecoder {
                 svg.renderToCanvas(Canvas(bitmap))
             }
             applyContrastMatteIfTransparent(raw)
+        } catch (_: StackOverflowError) {
+            null
         } catch (_: OutOfMemoryError) {
             null
         } catch (_: Exception) {
@@ -77,7 +84,7 @@ object SvgDecoder {
         val width = bitmap.width
         val height = bitmap.height
         if (width <= 0 || height <= 0) return bitmap
-        val steps = 16
+        val steps = 32
         var borderAlphaSum = 0.0
         var borderCount = 0
         var fgLuminanceSum = 0.0
@@ -98,8 +105,9 @@ object SvgDecoder {
                 }
             }
         }
-        if (borderCount == 0 || borderAlphaSum / borderCount >= 0.75 || fgCount == 0) return bitmap
-        val matte = if (fgLuminanceSum / fgCount < 0.45) Color.rgb(0xF5, 0xF6, 0xF8) else Color.rgb(0x1C, 0x1E, 0x22)
+        if (borderCount == 0 || borderAlphaSum / borderCount >= 0.75) return bitmap
+        val averageLuminance = if (fgCount > 0) fgLuminanceSum / fgCount else 0.0
+        val matte = if (averageLuminance < 0.45) Color.rgb(0xF5, 0xF6, 0xF8) else Color.rgb(0x1C, 0x1E, 0x22)
         val composited = createBitmap(width, height)
         val canvas = Canvas(composited)
         canvas.drawColor(matte)

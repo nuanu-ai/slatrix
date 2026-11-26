@@ -267,9 +267,21 @@ enum MediaImageDecoder {
         return false
     }
 
+    nonisolated private static func isSupportedRasterType(_ type: CFString?) -> Bool {
+        guard let identifier = type as String? else { return false }
+        if identifier == UTType.pdf.identifier
+            || identifier == "com.adobe.encapsulated-postscript"
+            || identifier == "com.adobe.postscript"
+        {
+            return false
+        }
+        return UTType(identifier)?.conforms(to: .image) == true
+    }
+
     nonisolated static func decodeStill(_ data: Data, maxPixels: Int = 960) -> CGImage? {
         let clamped = max(1, maxPixels)
         if let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+            isSupportedRasterType(CGImageSourceGetType(source)),
             let image = CGImageSourceCreateThumbnailAtIndex(
                 source, 0,
                 [
@@ -290,41 +302,45 @@ enum MediaImageDecoder {
             let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
             size > 0, size <= Int(MatrixMapping.maximumAutomaticPreviewBytes),
             let data = try? Data(contentsOf: url), looksLikeSVG(data),
-            let intrinsic = svgIntrinsicSize(data, image: NSImage(data: data))
+            let intrinsic = svgIntrinsicSize(data, image: NSImage(data: data)),
+            intrinsic.width <= 16_384, intrinsic.height <= 16_384
         else { return nil }
         return (UInt64(intrinsic.width.rounded()), UInt64(intrinsic.height.rounded()))
     }
 
-    /// Decodes a full-resolution image for `MediaViewer`: upright via EXIF transform for raster formats, animated
-    /// frames preserved for multi-frame GIFs, and sharp contrast-matted rasterization for SVGs.
+    /// Decodes a full-resolution image for `MediaViewer`: upright via EXIF transform for raster formats (capped at
+    /// 4096px to bound memory), animated frames preserved for multi-frame GIFs, and sharp contrast-matted
+    /// rasterization for SVGs. Never decodes PDF/EPS.
     nonisolated static func decodeFullImage(_ data: Data) -> NSImage? {
         if looksLikeSVG(data) {
             return rasterizeSVG(data, maxPixels: 2_048).map {
                 NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height))
             }
         }
-        if let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
-            CGImageSourceGetCount(source) > 0
+        guard
+            let source = CGImageSourceCreateWithData(
+                data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+            CGImageSourceGetCount(source) > 0,
+            isSupportedRasterType(CGImageSourceGetType(source))
+        else { return nil }
+        if CGImageSourceGetCount(source) > 1 { return NSImage(data: data) }
+        let properties =
+            CGImageSourceCopyPropertiesAtIndex(source, 0, [kCGImageSourceShouldCache: false] as CFDictionary)
+            as? [CFString: Any]
+        let width = (properties?[kCGImagePropertyPixelWidth] as? Int) ?? 0
+        let height = (properties?[kCGImagePropertyPixelHeight] as? Int) ?? 0
+        let maxSide = min(max(width, height), 4_096)
+        if maxSide > 0,
+            let cg = CGImageSourceCreateThumbnailAtIndex(
+                source, 0,
+                [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: maxSide,
+                    kCGImageSourceShouldCacheImmediately: true,
+                ] as CFDictionary)
         {
-            if CGImageSourceGetCount(source) > 1 { return NSImage(data: data) }
-            let properties =
-                CGImageSourceCopyPropertiesAtIndex(source, 0, [kCGImageSourceShouldCache: false] as CFDictionary)
-                as? [CFString: Any]
-            let width = (properties?[kCGImagePropertyPixelWidth] as? Int) ?? 0
-            let height = (properties?[kCGImagePropertyPixelHeight] as? Int) ?? 0
-            let maxSide = max(width, height)
-            if maxSide > 0,
-                let cg = CGImageSourceCreateThumbnailAtIndex(
-                    source, 0,
-                    [
-                        kCGImageSourceCreateThumbnailFromImageAlways: true,
-                        kCGImageSourceCreateThumbnailWithTransform: true,
-                        kCGImageSourceThumbnailMaxPixelSize: maxSide,
-                        kCGImageSourceShouldCacheImmediately: true,
-                    ] as CFDictionary)
-            {
-                return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
-            }
+            return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
         }
         return NSImage(data: data)
     }
@@ -429,7 +445,7 @@ enum MediaImageDecoder {
         let width = bitmap.pixelsWide
         let height = bitmap.pixelsHigh
         guard width > 0, height > 0 else { return bitmap.cgImage }
-        let steps = 16
+        let steps = 32
         var borderAlphaSum: CGFloat = 0
         var borderCount = 0
         var fgLuminanceSum: CGFloat = 0
@@ -451,10 +467,10 @@ enum MediaImageDecoder {
                 }
             }
         }
-        guard borderCount > 0, borderAlphaSum / CGFloat(borderCount) < 0.75, fgCount > 0 else {
+        guard borderCount > 0, borderAlphaSum / CGFloat(borderCount) < 0.75 else {
             return bitmap.cgImage
         }
-        let averageLuminance = fgLuminanceSum / CGFloat(fgCount)
+        let averageLuminance = fgCount > 0 ? fgLuminanceSum / CGFloat(fgCount) : 0
         let matte =
             averageLuminance < 0.45
             ? NSColor(srgbRed: 0.96, green: 0.965, blue: 0.973, alpha: 1)
