@@ -661,8 +661,6 @@ internal fun MediaViewer(
                 val currentAspect by rememberUpdatedState(contentAspect)
                 val (w, h) = (attachment.width ?: 0) to (attachment.height ?: 0)
                 val fit = if (w > 0 && h > 0) minOf(maxWidth / w, maxHeight / h) else null
-                val pageScale = if (isCurrentPage) scale else 1f
-                val pageOffset = if (isCurrentPage) offset else Offset.Zero
                 Box(Modifier.fillMaxSize()
                     .pointerInput(dismissReach, dismissFlick, page) {
                         val slop = viewConfiguration.touchSlop
@@ -776,10 +774,10 @@ internal fun MediaViewer(
                     .graphicsLayer {
                         val dragScale = 1f - 0.18f * dragProgress()
                         val enterScale = 0.92f + 0.08f * enter.value
-                        scaleX = pageScale * dragScale * enterScale
-                        scaleY = pageScale * dragScale * enterScale
-                        translationX = pageOffset.x
-                        translationY = pageOffset.y + dismissDrag.value
+                        scaleX = (if (isCurrentPage) scale else 1f) * dragScale * enterScale
+                        scaleY = (if (isCurrentPage) scale else 1f) * dragScale * enterScale
+                        translationX = if (isCurrentPage) offset.x else 0f
+                        translationY = (if (isCurrentPage) offset.y else 0f) + dismissDrag.value
                         alpha = enter.value.coerceIn(0f, 1f)
                     },
                     contentAlignment = Alignment.Center) {
