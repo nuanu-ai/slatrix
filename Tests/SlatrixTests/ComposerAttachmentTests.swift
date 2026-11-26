@@ -1,5 +1,7 @@
 import AppKit
+import ImageIO
 import Testing
+import UniformTypeIdentifiers
 
 @testable import Slatrix
 
@@ -176,6 +178,23 @@ struct ComposerAttachmentTests {
         defer { Importer.discard(staged) }
         #expect(staged.count == 1 && staged[0].pathExtension == "png")
         #expect(try Data(contentsOf: staged[0]) == onePixelPNG)
+
+        // A pasted TIFF (e.g. macOS clipboard snapshot) is transcoded to lossless PNG instead of a huge raw TIFF.
+        let rep = try #require(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: 4, pixelsHigh: 4, bitsPerSample: 8, samplesPerPixel: 4,
+                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        let cg = try #require(rep.cgImage)
+        let tiff = NSMutableData()
+        let dest = try #require(
+            CGImageDestinationCreateWithData(tiff as CFMutableData, UTType.tiff.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(dest, cg, nil)
+        #expect(CGImageDestinationFinalize(dest))
+        let transcoded = try await Importer.stage(.image(tiff as Data, png: false), existing: [])
+        defer { Importer.discard(transcoded) }
+        #expect(transcoded.count == 1 && transcoded[0].pathExtension == "png")
+        let transcodedData = try Data(contentsOf: transcoded[0])
+        #expect(transcodedData.starts(with: [0x89, 0x50, 0x4E, 0x47]))
     }
 
     @Test(

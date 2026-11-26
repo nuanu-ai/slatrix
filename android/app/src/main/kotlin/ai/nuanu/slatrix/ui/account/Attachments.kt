@@ -3,6 +3,7 @@ package ai.nuanu.slatrix.ui.account
 import ai.nuanu.slatrix.core.FileKind
 import ai.nuanu.slatrix.core.MatrixMedia
 import ai.nuanu.slatrix.core.MessageAttachment
+import ai.nuanu.slatrix.core.SvgDecoder
 import ai.nuanu.slatrix.ui.designsystem.DesignTokens
 import ai.nuanu.slatrix.ui.designsystem.Motion
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
@@ -12,12 +13,17 @@ import android.content.ActivityNotFoundException
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
-import androidx.core.graphics.scale
 import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
+import android.graphics.drawable.AnimatedImageDrawable
+import android.net.Uri
 import android.os.Environment
 import android.provider.MediaStore
 import android.text.format.Formatter
 import android.util.LruCache
+import android.webkit.MimeTypeMap
+import android.widget.ImageView
+import androidx.core.graphics.scale
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -79,8 +85,11 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.material.icons.outlined.FileDownload
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.ui.viewinterop.AndroidView
 import java.io.File
+import java.nio.ByteBuffer
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -101,6 +110,19 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
+internal fun resolveAttachmentMimeType(context: Context, uri: Uri, name: String, rawMime: String?): String {
+    val clean = rawMime?.substringBefore(';')?.trim()?.lowercase()
+    val ext = FileKind.extension(name).lowercase()
+    if (ext == "svg" && (clean.isNullOrBlank() || clean == "application/octet-stream" || clean == "*/*" ||
+        clean == "application/xml" || clean == "text/xml")) {
+        return "image/svg+xml"
+    }
+    if (!clean.isNullOrBlank() && clean != "application/octet-stream" && clean != "*/*") return clean
+    val fromExt = ext.takeIf { it.isNotEmpty() }?.let { MimeTypeMap.getSingleton().getMimeTypeFromExtension(it) }
+    if (!fromExt.isNullOrBlank()) return fromExt
+    return context.contentResolver.getType(uri)?.substringBefore(';')?.trim()?.takeIf { it.isNotBlank() } ?: "*/*"
+}
+
 /**
  * Downloads the file and hands it to the app the phone opens its kind with, as Slack does. Says why when it can't, for
  * the conversation to show.
@@ -114,7 +136,7 @@ internal suspend fun openAttachment(context: Context, media: MatrixMedia, attach
         return "Couldn’t download ${attachment.name}."
     }
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-    val type = attachment.mimeType ?: context.contentResolver.getType(uri) ?: "*/*"
+    val type = resolveAttachmentMimeType(context, uri, attachment.name, attachment.mimeType)
     return try {
         context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, type)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -127,32 +149,51 @@ internal suspend fun openAttachment(context: Context, media: MatrixMedia, attach
 /** Hands the downloaded file to an app the reader picks from the phone's share sheet. */
 internal fun shareFile(context: Context, file: File, attachment: MessageAttachment) {
     val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
-    val send = Intent(Intent.ACTION_SEND).setType(attachment.mimeType ?: context.contentResolver.getType(uri) ?: "*/*")
+    val type = resolveAttachmentMimeType(context, uri, attachment.name, attachment.mimeType)
+    val send = Intent(Intent.ACTION_SEND).setType(type)
         .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     context.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
 
-/** Copies the downloaded file into the phone's Pictures, or Movies for a video, where its gallery finds it. */
+/** Copies the downloaded file into Pictures, Movies, or Downloads (for SVGs and documents). */
 internal suspend fun saveFile(context: Context, file: File, attachment: MessageAttachment): String = withContext(Dispatchers.IO) {
+    val safeName = attachment.name.substringAfterLast('/').substringAfterLast('\\').trim()
+        .takeUnless { it.isEmpty() || it == "." || it == ".." } ?: "file"
+    val rawClean = attachment.mimeType?.substringBefore(';')?.trim()?.lowercase()
+    val isSvgName = safeName.endsWith(".svg", ignoreCase = true)
+    val cleanMime = when {
+        isSvgName && (rawClean.isNullOrBlank() || rawClean == "application/octet-stream" || rawClean == "*/*" ||
+            rawClean == "application/xml" || rawClean == "text/xml") -> "image/svg+xml"
+        !rawClean.isNullOrBlank() && rawClean != "application/octet-stream" && rawClean != "*/*" -> rawClean
+        else -> MimeTypeMap.getSingleton().getMimeTypeFromExtension(FileKind.extension(safeName).lowercase())
+    }
     val video = attachment.kind == MessageAttachment.Kind.Video
-    val folder = if (video) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES
-    val collection = if (video) MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        else MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+    val rasterImage = attachment.kind == MessageAttachment.Kind.Image && cleanMime != "image/svg+xml" &&
+        !safeName.endsWith(".svg", ignoreCase = true)
+    val (folder, collection, destinationLabel) = when {
+        video -> Triple(Environment.DIRECTORY_MOVIES,
+            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), "Movies")
+        rasterImage -> Triple(Environment.DIRECTORY_PICTURES,
+            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), "Pictures")
+        else -> Triple(Environment.DIRECTORY_DOWNLOADS,
+            MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), "Downloads")
+    }
     val resolver = context.contentResolver
     val values = ContentValues().apply {
-        put(MediaStore.MediaColumns.DISPLAY_NAME, attachment.name)
-        attachment.mimeType?.let { put(MediaStore.MediaColumns.MIME_TYPE, it) }
+        put(MediaStore.MediaColumns.DISPLAY_NAME, safeName)
+        cleanMime?.let { put(MediaStore.MediaColumns.MIME_TYPE, it) }
         put(MediaStore.MediaColumns.RELATIVE_PATH, "$folder/Slatrix")
         put(MediaStore.MediaColumns.IS_PENDING, 1)
     }
-    val uri = resolver.insert(collection, values) ?: return@withContext "Couldn’t save ${attachment.name}."
+    var uri: Uri? = null
     try {
+        uri = resolver.insert(collection, values) ?: return@withContext "Couldn’t save ${attachment.name}."
         resolver.openOutputStream(uri)!!.use { out -> file.inputStream().use { it.copyTo(out) } }
         resolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
-        "Saved to ${if (video) "Movies" else "Pictures"}"
+        "Saved to $destinationLabel"
     } catch (_: Exception) {
         // A half-written copy would show in the gallery broken.
-        resolver.delete(uri, null, null)
+        uri?.let { runCatching { resolver.delete(it, null, null) } }
         "Couldn’t save ${attachment.name}."
     }
 }
@@ -167,50 +208,154 @@ internal class SessionPictures : LruCache<PictureKey, ImageBitmap>((Runtime.getR
 internal data class PictureKey(val source: Pair<String, String?>, val width: Int, val height: Int, val full: Boolean)
 internal val LocalPictures = staticCompositionLocalOf<SessionPictures?> { null }
 
+internal data class PictureLoadState(
+    val bitmap: ImageBitmap? = null,
+    val animated: AnimatedImageDrawable? = null,
+    val settled: Boolean = false,
+)
+
 /** Decodes off the main thread; resizing keeps the current source visible while the new size loads. */
 @Composable
-internal fun picture(attachment: MessageAttachment, width: Int, height: Int, full: Boolean, load: PictureLoader): ImageBitmap? {
+internal fun picture(attachment: MessageAttachment, width: Int, height: Int, full: Boolean, load: PictureLoader): ImageBitmap? =
+    pictureState(attachment, width, height, full, allowAnimation = false, load).bitmap
+
+/**
+ * Loads and decodes an attachment ONCE: returns an `AnimatedImageDrawable` for animated GIF/WebP when [allowAnimation]
+ * is true, otherwise caches and returns a static `ImageBitmap` (preventing concurrent double-fetches).
+ */
+@Composable
+private fun pictureState(
+    attachment: MessageAttachment,
+    width: Int,
+    height: Int,
+    full: Boolean,
+    allowAnimation: Boolean,
+    load: PictureLoader,
+): PictureLoadState {
     val pictures = LocalPictures.current ?: remember { SessionPictures() }
     val source = attachment.source.toJson() to attachment.thumbnail?.toJson()
+    val maybeAnimated = allowAnimation && (attachment.animated ||
+        attachment.mimeType?.equals("image/gif", ignoreCase = true) == true ||
+        attachment.mimeType?.equals("image/webp", ignoreCase = true) == true)
     val cacheKey = PictureKey(source, width, height, full)
     return key(pictures) {
-        val picture by produceState(pictures[cacheKey]?.let { source to it }, cacheKey) {
-            value = pictures[cacheKey]?.let { source to it } ?: value?.takeIf { it.first == source }
-            if (pictures[cacheKey] != null) return@produceState
-            try {
-                load(attachment, width, height, full)?.let { bytes -> withContext(Dispatchers.Default) { decode(bytes, width, height, full) } }
-                    ?.also { pictures.put(cacheKey, it) }?.let { value = source to it }
+        val state by produceState(
+            if (!maybeAnimated) pictures[cacheKey]?.let { source to PictureLoadState(bitmap = it, settled = true) } else null,
+            cacheKey,
+            maybeAnimated,
+        ) {
+            if (!maybeAnimated) {
+                val cached = pictures[cacheKey]
+                if (cached != null) {
+                    value = source to PictureLoadState(bitmap = cached, settled = true)
+                    return@produceState
+                }
+            }
+            value = value?.takeIf { it.first == source }
+            val result = try {
+                load(attachment, width, height, full)?.let { bytes ->
+                    withContext(Dispatchers.Default) {
+                        val anim = if (maybeAnimated) decodeAnimated(bytes, width, height) else null
+                        if (anim != null) PictureLoadState(animated = anim, settled = true)
+                        else PictureLoadState(bitmap = decode(bytes, width, height, full), settled = true)
+                    }
+                } ?: PictureLoadState(settled = true)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                // A broken picture leaves the box as it is and never moves the row.
+                PictureLoadState(settled = true)
             }
+            result.bitmap?.let { pictures.put(cacheKey, it) }
+            value = source to result
         }
-        // produceState keeps its previous value until its new producer starts.
-        picture?.takeIf { it.first == source }?.second
+        state?.takeIf { it.first == source }?.second ?: PictureLoadState()
     }
 }
 
+@Composable
+private fun AnimatedPictureView(drawable: AnimatedImageDrawable, description: String, modifier: Modifier,
+    scaleType: ImageView.ScaleType) {
+    AndroidView(
+        factory = { context ->
+            ImageView(context).apply {
+                contentDescription = description
+                this.scaleType = scaleType
+                setImageDrawable(drawable)
+                drawable.start()
+            }
+        },
+        update = { view ->
+            view.scaleType = scaleType
+            if (view.drawable !== drawable) view.setImageDrawable(drawable)
+            if (!drawable.isRunning) drawable.start()
+        },
+        onRelease = { view ->
+            (view.drawable as? AnimatedImageDrawable)?.stop()
+            view.setImageDrawable(null)
+        },
+        modifier = modifier,
+    )
+}
+
 /**
- * Decodes at the largest power-of-two step down that is still bigger than needed, then scales to size, so an encrypted
- * original, which arrives whole, never sits in memory at full size.
+ * Decodes upright via `ImageDecoder` (honoring EXIF orientation for JPEG/HEIC/WebP), falling back to `SvgDecoder` for
+ * SVG payloads and `BitmapFactory` for anything else.
  */
 internal fun decode(bytes: ByteArray, width: Int, height: Int, fit: Boolean): ImageBitmap? = try {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-    val (w, h) = bounds.outWidth to bounds.outHeight
-    // Filling a box needs the scale of its tighter side, fitting in one the scale of its looser side.
-    val scale = if (fit) minOf(width.toFloat() / w, height.toFloat() / h, 1f) else minOf(max(width.toFloat() / w, height.toFloat() / h), 1f)
-    var sample = 1
-    while (w / (sample * 2) >= w * scale && h / (sample * 2) >= h * scale) sample *= 2
-    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })?.let {
-        val target = max(1, (w * scale).roundToInt()) to max(1, (h * scale).roundToInt())
-        if (it.width == target.first && it.height == target.second) it
-        else it.scale(target.first, target.second).also { scaled -> if (scaled !== it) it.recycle() }
-    }?.asImageBitmap()
+    if (SvgDecoder.looksLikeSvg(bytes)) {
+        SvgDecoder.decode(bytes, width, height)?.asImageBitmap()
+    } else {
+        decodeRaster(bytes, width, height, fit)?.asImageBitmap()
+    }
 } catch (_: OutOfMemoryError) {
     null
 }
+
+private fun decodeRaster(bytes: ByteArray, width: Int, height: Int, fit: Boolean): android.graphics.Bitmap? {
+    val targetW = max(1, width)
+    val targetH = max(1, height)
+    val decoded = runCatching {
+        ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
+            decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            val w = info.size.width
+            val h = info.size.height
+            if (w > 0 && h > 0) {
+                val scale = if (fit) minOf(targetW.toFloat() / w, targetH.toFloat() / h, 1f)
+                else minOf(max(targetW.toFloat() / w, targetH.toFloat() / h), 1f)
+                decoder.setTargetSize(max(1, (w * scale).roundToInt()), max(1, (h * scale).roundToInt()))
+            }
+        }
+    }.getOrNull()
+    if (decoded != null) return decoded
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    val (w, h) = bounds.outWidth to bounds.outHeight
+    if (w <= 0 || h <= 0) return null
+    val scale = if (fit) minOf(targetW.toFloat() / w, targetH.toFloat() / h, 1f)
+    else minOf(max(targetW.toFloat() / w, targetH.toFloat() / h), 1f)
+    var sample = 1
+    while (w / (sample * 2) >= w * scale && h / (sample * 2) >= h * scale) sample *= 2
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })?.let {
+        val scaledTarget = max(1, (w * scale).roundToInt()) to max(1, (h * scale).roundToInt())
+        if (it.width == scaledTarget.first && it.height == scaledTarget.second) it
+        else it.scale(scaledTarget.first, scaledTarget.second).also { scaled -> if (scaled !== it) it.recycle() }
+    }
+}
+
+internal fun decodeAnimated(bytes: ByteArray, width: Int, height: Int): AnimatedImageDrawable? = runCatching {
+    if (SvgDecoder.looksLikeSvg(bytes)) return null
+    val targetW = max(1, width)
+    val targetH = max(1, height)
+    val drawable = ImageDecoder.decodeDrawable(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
+        val w = info.size.width
+        val h = info.size.height
+        if (w > 0 && h > 0) {
+            val scale = minOf(targetW.toFloat() / w, targetH.toFloat() / h, 1f)
+            decoder.setTargetSize(max(1, (w * scale).roundToInt()), max(1, (h * scale).roundToInt()))
+        }
+    }
+    drawable as? AnimatedImageDrawable
+}.getOrNull()
 
 /** The box an inline image takes, decided before it loads: its shape within the bounds, never enlarged, as on the Mac. */
 internal fun box(width: Int?, height: Int?, maxWidth: Dp, maxHeight: Dp): Pair<Dp, Dp> {
@@ -239,15 +384,43 @@ internal fun Attachment(attachment: MessageAttachment, load: PictureLoader, vide
 @Composable
 private fun InlineImage(attachment: MessageAttachment, load: PictureLoader, onLongPress: () -> Unit, onView: (tile: Pair<Int, Int>) -> Unit) {
     val colors = SlatrixTheme.colors
+    val context = LocalContext.current
     val shape = MaterialTheme.shapes.large
+    val reducedMotion = kotlin.coroutines.EmptyCoroutineContext.isMotionReduced(context)
     BoxWithConstraints {
         val (width, height) = box(attachment.width, attachment.height, maxWidth, UiMetrics.MediaMaxHeight)
         val pixels = with(LocalDensity.current) { width.roundToPx() to height.roundToPx() }
-        val shown = picture(attachment, pixels.first, pixels.second, false, load)
+        val loaded = pictureState(attachment, pixels.first, pixels.second, false, !reducedMotion, load)
+        val hasDimensions = attachment.width != null && attachment.height != null
         Box(Modifier.size(width, height).clip(shape).background(colors.sunken)
             .semantics { contentDescription = attachment.name }
-            .combinedClickable(onClickLabel = "View image", onLongClickLabel = "Message actions", onLongClick = onLongPress) { onView(pixels) }) {
-            shown?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+            .combinedClickable(onClickLabel = "View image", onLongClickLabel = "Message actions", onLongClick = onLongPress) { onView(pixels) },
+            contentAlignment = Alignment.Center) {
+            when {
+                loaded.animated != null -> AnimatedPictureView(
+                    loaded.animated, attachment.name, Modifier.fillMaxSize(),
+                    if (hasDimensions) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER,
+                )
+                loaded.bitmap != null -> {
+                    val scale = if (hasDimensions) ContentScale.Crop else ContentScale.Fit
+                    Image(loaded.bitmap, null, Modifier.fillMaxSize(), contentScale = scale)
+                }
+                loaded.settled -> {
+                    Column(
+                        Modifier.padding(UiMetrics.GapLarge),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(UiMetrics.GapTiny),
+                    ) {
+                        Icon(Icons.Outlined.Image, null, Modifier.size(UiMetrics.LargeIcon), tint = colors.textSecondary)
+                        Text(attachment.name, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        attachment.size?.let {
+                            Text(Formatter.formatShortFileSize(context, it), style = MaterialTheme.typography.labelSmall,
+                                color = colors.textSecondary)
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -321,7 +494,13 @@ internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, lo
         scope.launch {
             val file = try { files(attachment) } catch (cancelled: CancellationException) { throw cancelled } catch (_: Exception) { null }
             if (dismissing) return@launch
-            notice = if (file == null) "Couldn’t download ${attachment.name}." else action(file)
+            notice = if (file == null) "Couldn’t download ${attachment.name}." else try {
+                action(file)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                "Couldn’t save ${attachment.name}."
+            }
         }
     }
     fun closeSmoothly() {
@@ -337,8 +516,11 @@ internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, lo
             if (coroutineContext.isMotionReduced(context)) enter.snapTo(1f)
             else enter.animateTo(1f, Motion.spatial(Motion.UnitThreshold))
         }
-        val full = picture(attachment, UiMetrics.ViewerPixels, UiMetrics.ViewerPixels, true, load)
-        val placeholder = if (full == null) picture(attachment, tile.first, tile.second, false, load) else null
+        val reducedMotion = kotlin.coroutines.EmptyCoroutineContext.isMotionReduced(context)
+        val fullState = pictureState(attachment, UiMetrics.ViewerPixels, UiMetrics.ViewerPixels, true, !reducedMotion, load)
+        val full = fullState.bitmap
+        val animatedFull = fullState.animated
+        val placeholder = if (full == null && animatedFull == null) picture(attachment, tile.first, tile.second, false, load) else null
         var size by remember { mutableStateOf(IntSize.Zero) }
         val dismissReach = with(LocalDensity.current) { UiMetrics.ViewerDismiss.toPx() }
         val dismissFlick = with(LocalDensity.current) { UiMetrics.SheetDismissVelocity.toPx() }
@@ -464,9 +646,13 @@ internal fun MediaViewer(attachment: MessageAttachment, tile: Pair<Int, Int>, lo
                 },
                 contentAlignment = Alignment.Center) {
                 when {
+                    animatedFull != null -> AnimatedPictureView(
+                        animatedFull, attachment.name, Modifier.fillMaxSize(), ImageView.ScaleType.FIT_CENTER)
                     full != null -> Image(full, attachment.name, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                     placeholder != null && fit != null ->
                         Image(placeholder, attachment.name, Modifier.size(fit * w, fit * h), contentScale = ContentScale.Crop)
+                    placeholder != null ->
+                        Image(placeholder, attachment.name, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                 }
             }
             Row(Modifier.fillMaxWidth()

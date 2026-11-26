@@ -1468,8 +1468,15 @@ private final class ComposerTextView: NSTextView, NSTextStorageDelegate {
     }
 
     private func hasAttachment(_ pasteboard: NSPasteboard) -> Bool {
-        pasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true])
-            || pasteboard.availableType(from: [.png, .tiff]) != nil
+        if pasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) {
+            return true
+        }
+        let nonTiffImages: [NSPasteboard.PasteboardType] = ComposerAttachmentInput.imagePasteboardTypes
+            .filter { $0.1 != .tiff }.map(\.0)
+        if pasteboard.availableType(from: nonTiffImages) != nil { return true }
+        // Spreadsheets and slide decks put a TIFF snapshot alongside text; keep text paste for those.
+        if pasteboard.availableType(from: [.string, .rtf]) != nil { return false }
+        return pasteboard.availableType(from: [.tiff]) != nil
     }
 
     private func acceptAttachments(_ pasteboard: NSPasteboard) -> Bool {

@@ -17,20 +17,29 @@ class MatrixMedia(private val client: Client, userId: String, folder: File) {
      * thumbnail; [full] prefers that original, for the viewer. Nothing over the size limit is fetched to preview it.
      */
     suspend fun picture(attachment: MessageAttachment, width: Int, height: Int, full: Boolean = false): ByteArray? {
-        val original = attachment.source.takeIf { attachment.kind == MessageAttachment.Kind.Image && small(attachment.size) }
+        val smallOriginal = attachment.source.takeIf { attachment.kind == MessageAttachment.Kind.Image && small(attachment.size) }
+        val viewerOriginal = attachment.source.takeIf {
+            full && attachment.kind == MessageAttachment.Kind.Image && attachment.size != null && attachment.size <= MAX_VIEWER_BYTES
+        }
         val thumbnail = attachment.thumbnail?.takeIf { small(attachment.thumbnailSize) }
-        val source = (if (full) original ?: thumbnail else thumbnail ?: original) ?: return null
+        val source = when {
+            full -> smallOriginal ?: thumbnail ?: viewerOriginal
+            attachment.animated && smallOriginal != null -> smallOriginal
+            else -> thumbnail ?: smallOriginal
+        } ?: return null
+        val preferOriginalContent = source == attachment.source && (attachment.own || attachment.animated || source == viewerOriginal && smallOriginal == null)
+        val limit = if (full && source == viewerOriginal && smallOriginal == null) MAX_VIEWER_BYTES else MAX_PREVIEW_BYTES
         val bytes = try {
-            // Your own photo sits in the store from its upload, so it shows at once instead of waiting on the server.
-            if (attachment.own && source == original) client.getMediaContent(source)
+            if (preferOriginalContent) client.getMediaContent(source)
             else client.getMediaThumbnail(source, width.toULong(), height.toULong())
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            // A photo still sending sits whole in the send queue's store, and the server has no thumbnail of it yet.
-            client.getMediaContent(source)
+            // Fall back to the other endpoint: sending photos & SVGs have no server thumbnail; test fakes may stub only one.
+            if (preferOriginalContent) client.getMediaThumbnail(source, width.toULong(), height.toULong())
+            else client.getMediaContent(source)
         }
-        return bytes.takeIf { small(it.size.toLong()) }
+        return bytes.takeIf { it.size.toLong() <= limit }
     }
 
     /** The whole file, downloaded once into a folder of its own and named as sent, for another app to open. */
@@ -69,6 +78,7 @@ class MatrixMedia(private val client: Client, userId: String, folder: File) {
 
     private companion object {
         const val MAX_PREVIEW_BYTES = 10L * 1024 * 1024
+        const val MAX_VIEWER_BYTES = 50L * 1024 * 1024
         // File systems take 255 bytes; this leaves room for any letter's UTF-8.
         const val MAX_NAME = 60
         const val MAX_EXTENSION = 10

@@ -1,6 +1,10 @@
+import AppKit
 import CoreGraphics
 import CoreMedia
 import Foundation
+import ImageIO
+import MatrixRustSDK
+import UniformTypeIdentifiers
 
 /// What a file is, for the colored tile and the type on its card.
 enum FileKind: CaseIterable {
@@ -225,5 +229,265 @@ struct MediaViewerLoadKey: Hashable {
         } else {
             close()
         }
+    }
+}
+
+/// Decodes image attachments to a displayable `CGImage`, using ImageIO for raster formats and AppKit's native SVG
+/// renderer strictly for SVG payloads (never PDF/EPS).
+enum MediaImageDecoder {
+    nonisolated static func isSVGAttachment(name: String, mimeType: String?) -> Bool {
+        if let mime = mimeType?.split(separator: ";").first?.trimmingCharacters(in: .whitespaces).lowercased(),
+            mime == "image/svg+xml"
+        {
+            return true
+        }
+        return (name as NSString).pathExtension.lowercased() == "svg"
+    }
+
+    nonisolated static func looksLikeSVG(_ data: Data) -> Bool {
+        var bytes = data.prefix(2_048)
+        // Strip optional UTF-8 BOM.
+        if bytes.count >= 3, bytes[bytes.startIndex] == 0xEF,
+            bytes[bytes.index(after: bytes.startIndex)] == 0xBB,
+            bytes[bytes.index(bytes.startIndex, offsetBy: 2)] == 0xBF
+        {
+            bytes = bytes.dropFirst(3)
+        }
+        guard let head = String(bytes: bytes, encoding: .utf8) ?? String(bytes: bytes, encoding: .ascii) else {
+            return false
+        }
+        let trimmed = head.drop { $0.isWhitespace }.lowercased()
+        if trimmed.hasPrefix("<svg") {
+            let after = trimmed.dropFirst(4).first
+            return after == nil || after == ">" || after == "/" || after?.isWhitespace == true
+        }
+        if trimmed.hasPrefix("<?xml") || trimmed.hasPrefix("<!--") || trimmed.hasPrefix("<!doctype") {
+            return trimmed.range(of: #"<svg(?=[\s>/]|$)"#, options: .regularExpression) != nil
+        }
+        return false
+    }
+
+    nonisolated private static func isSupportedRasterType(_ type: CFString?) -> Bool {
+        guard let identifier = type as String? else { return false }
+        if identifier == UTType.pdf.identifier
+            || identifier == "com.adobe.encapsulated-postscript"
+            || identifier == "com.adobe.postscript"
+        {
+            return false
+        }
+        return UTType(identifier)?.conforms(to: .image) == true
+    }
+
+    nonisolated static func decodeStill(_ data: Data, maxPixels: Int = 960) -> CGImage? {
+        let clamped = max(1, maxPixels)
+        if let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+            isSupportedRasterType(CGImageSourceGetType(source)),
+            let image = CGImageSourceCreateThumbnailAtIndex(
+                source, 0,
+                [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: clamped,
+                    kCGImageSourceShouldCacheImmediately: true,
+                ] as CFDictionary)
+        {
+            return image
+        }
+        guard looksLikeSVG(data) else { return nil }
+        return rasterizeSVG(data, maxPixels: clamped)
+    }
+
+    nonisolated static func svgDimensions(_ url: URL) -> (width: UInt64, height: UInt64)? {
+        guard url.pathExtension.lowercased() == "svg",
+            let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+            size > 0, size <= Int(MatrixMapping.maximumAutomaticPreviewBytes),
+            let data = try? Data(contentsOf: url), looksLikeSVG(data),
+            let intrinsic = svgIntrinsicSize(data, image: NSImage(data: data)),
+            intrinsic.width <= 16_384, intrinsic.height <= 16_384
+        else { return nil }
+        return (UInt64(intrinsic.width.rounded()), UInt64(intrinsic.height.rounded()))
+    }
+
+    /// Decodes a full-resolution image for `MediaViewer`: upright via EXIF transform for raster formats (capped at
+    /// 4096px to bound memory), animated frames preserved for multi-frame GIFs, and sharp contrast-matted
+    /// rasterization for SVGs. Never decodes PDF/EPS.
+    nonisolated static func decodeFullImage(_ data: Data) -> NSImage? {
+        if looksLikeSVG(data) {
+            return rasterizeSVG(data, maxPixels: 2_048).map {
+                NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height))
+            }
+        }
+        guard
+            let source = CGImageSourceCreateWithData(
+                data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+            CGImageSourceGetCount(source) > 0,
+            isSupportedRasterType(CGImageSourceGetType(source))
+        else { return nil }
+        if CGImageSourceGetCount(source) > 1 { return NSImage(data: data) }
+        let properties =
+            CGImageSourceCopyPropertiesAtIndex(source, 0, [kCGImageSourceShouldCache: false] as CFDictionary)
+            as? [CFString: Any]
+        let width = (properties?[kCGImagePropertyPixelWidth] as? Int) ?? 0
+        let height = (properties?[kCGImagePropertyPixelHeight] as? Int) ?? 0
+        let maxSide = min(max(width, height), 4_096)
+        if maxSide > 0,
+            let cg = CGImageSourceCreateThumbnailAtIndex(
+                source, 0,
+                [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: maxSide,
+                    kCGImageSourceShouldCacheImmediately: true,
+                ] as CFDictionary)
+        {
+            return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+        }
+        return NSImage(data: data)
+    }
+
+    nonisolated static func isAnimatedImage(_ url: URL) -> Bool {
+        guard
+            let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary)
+        else { return false }
+        return CGImageSourceGetCount(source) > 1
+    }
+
+    /// Generates a small upright JPEG thumbnail in a temporary file so large (>10 MiB) or HEIC/TIFF uploads still
+    /// display an instant preview everywhere.
+    nonisolated static func imageThumbnail(of url: URL, maxPixels: Int = 960) -> (url: URL, info: ThumbnailInfo)? {
+        let cgImage: CGImage?
+        if let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary) {
+            cgImage = CGImageSourceCreateThumbnailAtIndex(
+                source, 0,
+                [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceCreateThumbnailWithTransform: true,
+                    kCGImageSourceThumbnailMaxPixelSize: max(1, maxPixels),
+                    kCGImageSourceShouldCacheImmediately: true,
+                ] as CFDictionary)
+        } else if url.pathExtension.lowercased() == "svg",
+            let data = try? Data(contentsOf: url), looksLikeSVG(data)
+        {
+            cgImage = rasterizeSVG(data, maxPixels: maxPixels)
+        } else {
+            cgImage = nil
+        }
+        guard let cgImage else { return nil }
+        let encoded = NSMutableData()
+        guard
+            let destination = CGImageDestinationCreateWithData(
+                encoded as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil)
+        else { return nil }
+        CGImageDestinationAddImage(
+            destination, cgImage, [kCGImageDestinationLossyCompressionQuality: 0.75] as CFDictionary)
+        guard CGImageDestinationFinalize(destination), encoded.length > 0, encoded.length <= 512 * 1_024 else {
+            return nil
+        }
+        let temp = AppPaths.temporary.appendingPathComponent("slatrix-thumb-\(UUID().uuidString).jpg")
+        guard
+            FileManager.default.createFile(
+                atPath: temp.path, contents: encoded as Data, attributes: [.posixPermissions: 0o600])
+        else { return nil }
+        let info = ThumbnailInfo(
+            height: UInt64(cgImage.height), width: UInt64(cgImage.width), mimetype: "image/jpeg",
+            size: UInt64(encoded.length))
+        return (temp, info)
+    }
+
+    nonisolated private static func svgIntrinsicSize(_ data: Data, image: NSImage?) -> CGSize? {
+        if let image, !image.representations.isEmpty,
+            image.size.width.isFinite, image.size.height.isFinite, image.size.width > 0, image.size.height > 0
+        {
+            return image.size
+        }
+        return svgViewBoxSize(data)
+    }
+
+    nonisolated private static func svgViewBoxSize(_ data: Data) -> CGSize? {
+        let head = String(decoding: data.prefix(4_096), as: UTF8.self)
+        let num = #"[+-]?[\d.eE+-]+"#
+        let pattern = "(?i)viewBox\\s*=\\s*[\"']\\s*\(num)[\\s,]+\(num)[\\s,]+(\(num))[\\s,]+(\(num))\\s*[\"']"
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+            let match = regex.firstMatch(in: head, range: NSRange(head.startIndex..., in: head)),
+            let wRange = Range(match.range(at: 1), in: head),
+            let hRange = Range(match.range(at: 2), in: head),
+            let width = Double(head[wRange]), let height = Double(head[hRange]),
+            width.isFinite, height.isFinite, width > 0, height > 0
+        else { return nil }
+        return CGSize(width: width, height: height)
+    }
+
+    nonisolated private static func rasterizeSVG(_ data: Data, maxPixels: Int) -> CGImage? {
+        guard let image = NSImage(data: data), !image.representations.isEmpty,
+            let intrinsic = svgIntrinsicSize(data, image: image)
+        else { return nil }
+        if image.size.width <= 0 || image.size.height <= 0 { image.size = intrinsic }
+        let longest = max(intrinsic.width, intrinsic.height)
+        let scale = CGFloat(maxPixels) / longest
+        let width = max(1, min(maxPixels, Int((intrinsic.width * scale).rounded())))
+        let height = max(1, min(maxPixels, Int((intrinsic.height * scale).rounded())))
+        guard
+            let bitmap = NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4,
+                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+            let context = NSGraphicsContext(bitmapImageRep: bitmap)
+        else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        image.draw(in: NSRect(x: 0, y: 0, width: width, height: height), from: .zero, operation: .copy, fraction: 1)
+        NSGraphicsContext.restoreGraphicsState()
+        return applyContrastMatteIfTransparent(bitmap)
+    }
+
+    /// Adds a subtle light or dark surface behind transparent SVGs so dark-ink diagrams stay legible in Dark Mode and
+    /// `MediaViewer` (and light-ink icons stay legible in Light Mode), while leaving opaque SVGs untouched.
+    nonisolated private static func applyContrastMatteIfTransparent(_ bitmap: NSBitmapImageRep) -> CGImage? {
+        let width = bitmap.pixelsWide
+        let height = bitmap.pixelsHigh
+        guard width > 0, height > 0 else { return bitmap.cgImage }
+        let steps = 32
+        var borderAlphaSum: CGFloat = 0
+        var borderCount = 0
+        var fgLuminanceSum: CGFloat = 0
+        var fgCount = 0
+        for row in 0..<steps {
+            let y = min(height - 1, (row * (height - 1)) / max(1, steps - 1))
+            for col in 0..<steps {
+                let x = min(width - 1, (col * (width - 1)) / max(1, steps - 1))
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                let alpha = color.alphaComponent
+                if row == 0 || row == steps - 1 || col == 0 || col == steps - 1 {
+                    borderAlphaSum += alpha
+                    borderCount += 1
+                }
+                if alpha > 0.15 {
+                    fgLuminanceSum +=
+                        0.2126 * color.redComponent + 0.7152 * color.greenComponent + 0.0722 * color.blueComponent
+                    fgCount += 1
+                }
+            }
+        }
+        guard borderCount > 0, borderAlphaSum / CGFloat(borderCount) < 0.75 else {
+            return bitmap.cgImage
+        }
+        let averageLuminance = fgCount > 0 ? fgLuminanceSum / CGFloat(fgCount) : 0
+        let matte =
+            averageLuminance < 0.45
+            ? NSColor(srgbRed: 0.96, green: 0.965, blue: 0.973, alpha: 1)
+            : NSColor(srgbRed: 0.11, green: 0.118, blue: 0.133, alpha: 1)
+        guard
+            let composited = NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4,
+                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+            let context = NSGraphicsContext(bitmapImageRep: composited)
+        else { return bitmap.cgImage }
+        let rect = NSRect(x: 0, y: 0, width: width, height: height)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        matte.setFill()
+        rect.fill()
+        bitmap.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: false, hints: nil)
+        NSGraphicsContext.restoreGraphicsState()
+        return composited.cgImage
     }
 }

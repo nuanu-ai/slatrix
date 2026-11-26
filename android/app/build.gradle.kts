@@ -120,6 +120,8 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.11.0")
     // Backdrop blur for the glass tab capsule and chat headers; Apache 2.0.
     implementation("dev.chrisbanes.haze:haze:1.6.10")
+    // SVG rasterization for inline image attachments and the full-screen viewer; Apache 2.0.
+    implementation("com.caverock:androidsvg-aar:1.4")
     lintChecks(project(":lint-rules"))
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:core:1.7.0")

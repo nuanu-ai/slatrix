@@ -69,7 +69,8 @@ final class UploadDropView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         registerForDraggedTypes(
-            [.fileURL, .png, .tiff] + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) }
+            [.fileURL] + ComposerAttachmentInput.imagePasteboardTypes.map(\.0)
+                + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) }
         )
     }
 

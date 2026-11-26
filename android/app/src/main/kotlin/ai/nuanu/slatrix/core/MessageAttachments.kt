@@ -20,6 +20,8 @@ data class MessageAttachment(
     val durationMillis: Long? = null,
     /** Sent by you, so the SDK's store may hold it from the upload. */
     val own: Boolean = false,
+    /** Animated GIF or WebP, so inline and viewer play its frames unless Reduce Motion is on. */
+    val animated: Boolean = false,
 ) {
     enum class Kind { Image, Video, Audio, File }
 }

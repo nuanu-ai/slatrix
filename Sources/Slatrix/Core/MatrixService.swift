@@ -3950,10 +3950,22 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             kind = .video(videoInfo: info, thumbnailSource: poster.map { .file(filename: $0.path) })
         } else if mime.hasPrefix("image/") {
             let shape = Self.displayedSize(url)
+            let fileBytes = values.fileSize.map(UInt64.init)
+            let animated = mime == "image/gif" || MediaImageDecoder.isAnimatedImage(url)
+            let needsThumb =
+                (fileBytes ?? 0) > 1_048_576 || mime == "image/heic" || mime == "image/heif" || mime == "image/tiff"
+            let thumb =
+                needsThumb
+                ? await Task.detached(priority: .userInitiated) { MediaImageDecoder.imageThumbnail(of: url) }.value
+                : nil
+            posterFile = thumb?.url
+            try assertActiveSession()
+            try assertDestination(roomID)
             kind = .image(
                 imageInfo: ImageInfo(
-                    height: shape?.height, width: shape?.width, mimetype: mime, size: values.fileSize.map(UInt64.init),
-                    thumbnailInfo: nil, thumbnailSource: nil, blurhash: nil, isAnimated: nil), thumbnailSource: nil)
+                    height: shape?.height, width: shape?.width, mimetype: mime, size: fileBytes,
+                    thumbnailInfo: thumb?.info, thumbnailSource: nil, blurhash: nil, isAnimated: animated ? true : nil),
+                thumbnailSource: thumb.map { .file(filename: $0.url.path) })
         } else {
             kind = .file(
                 fileInfo: FileInfo(
@@ -4009,13 +4021,15 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
 
     /// An image's size upright, from its header alone: EXIF orientations 5 to 8 turn it a quarter, swapping the sides.
     private static func displayedSize(_ url: URL) -> (width: UInt64, height: UInt64)? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
+        if let source = CGImageSourceCreateWithURL(url as CFURL, [kCGImageSourceShouldCache: false] as CFDictionary),
             let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
             let width = properties[kCGImagePropertyPixelWidth] as? UInt64,
             let height = properties[kCGImagePropertyPixelHeight] as? UInt64
-        else { return nil }
-        let orientation = properties[kCGImagePropertyOrientation] as? UInt32 ?? 1
-        return orientation >= 5 ? (height, width) : (width, height)
+        {
+            let orientation = properties[kCGImagePropertyOrientation] as? UInt32 ?? 1
+            return orientation >= 5 ? (height, width) : (width, height)
+        }
+        return MediaImageDecoder.svgDimensions(url)
     }
 
     /// The attachment as an open timeline shows it now, or nil once it was deleted, replaced or left the view.
@@ -4265,8 +4279,17 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             }
             source = original
         }
-        let data = try await client.getMediaThumbnail(
-            mediaSource: source, width: min(max(width, 1), 2048), height: min(max(height, 1), 2048))
+        let data: Data
+        do {
+            data = try await client.getMediaThumbnail(
+                mediaSource: source, width: min(max(width, 1), 2048), height: min(max(height, 1), 2048))
+        } catch {
+            // Unencrypted homeservers often refuse to thumbnail SVG; fall back to the size-checked original.
+            guard let attachment = message.attachment, source.url() == original.url(),
+                MediaImageDecoder.isSVGAttachment(name: attachment.name, mimeType: attachment.mimeType)
+            else { throw error }
+            data = try await client.getMediaContent(mediaSource: source)
+        }
         guard data.count <= Int(limit) else {
             throw MatrixServiceError.request(
                 "This thumbnail is too large to preview. Download the attachment to view it.")
