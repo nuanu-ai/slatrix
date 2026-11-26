@@ -183,4 +183,12 @@ struct MediaPresentationTests {
 
         #expect(beforeKey != afterKey)
     }
+
+    @Test("Double-click zoom toggles to 2x even when the image fits at 1:1, and back to fit when zoomed")
+    func doubleClickZoomForOneToOneImage() {
+        #expect(MediaViewerZoom.targetScale(fitted: true, fitScale: 1.0) == 2.0)
+        #expect(MediaViewerZoom.targetScale(fitted: true, fitScale: 0.4) == 1.0)
+        #expect(MediaViewerZoom.targetScale(fitted: false, fitScale: 1.0) == nil)
+        #expect(MediaViewerZoom.targetScale(fitted: false, fitScale: 0.4) == nil)
+    }
 }

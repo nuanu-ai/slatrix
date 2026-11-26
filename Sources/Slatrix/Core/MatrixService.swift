@@ -720,6 +720,42 @@ enum MatrixMapping {
         }
     }
 
+    /// Builds SDK upload parameters with optional formatted caption, mentions, and reply/thread relation.
+    static func uploadParameters(
+        url: URL, captionDraft: String?, replyToID: String?, threadRootID: String?, mentions: Mentions?
+    ) throws -> UploadParameters {
+        let formatted = captionDraft.flatMap { draft in
+            let parsed = ComposerFormat.message(draft: draft)
+            return parsed.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : parsed
+        }
+        // When replying to a specific event inside a thread, pass `inReplyTo` directly so the SDK's thread timeline
+        // constructs the canonical `m.thread` + `m.in_reply_to` relation without overwriting `extraContentJson`.
+        let relation: String? =
+            if let root = threadRootID, replyToID == nil {
+                try {
+                    let payload: [String: Any] = [
+                        "m.relates_to": [
+                            "rel_type": "m.thread",
+                            "event_id": root,
+                            "is_falling_back": true,
+                            "m.in_reply_to": ["event_id": root],
+                        ]
+                    ]
+                    let data = try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+                    return String(decoding: data, as: UTF8.self)
+                }()
+            } else {
+                nil
+            }
+        return UploadParameters(
+            source: .file(filename: url.path),
+            caption: formatted?.body,
+            formattedCaption: formatted?.html.map { FormattedBody(format: .html, body: $0) },
+            mentions: formatted != nil ? mentions : nil,
+            inReplyTo: replyToID,
+            extraContentJson: relation)
+    }
+
     /// `uniqueID` is the timeline item's own ID, which outlives the switch from a local echo to its remote event.
     static func message(_ item: EventTimelineItem, roomID: String, ownUserID: String?, uniqueID: String? = nil)
         -> ChatMessage?
@@ -3963,7 +3999,10 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         Task { try? await client.addRecentEmoji(emoji: emoji) }
     }
 
-    func uploadFile(_ url: URL, threadRootID: String? = nil, roomID: String? = nil) async throws {
+    func uploadFile(
+        _ url: URL, threadRootID: String? = nil, roomID: String? = nil, captionDraft: String? = nil,
+        replyToID: String? = nil
+    ) async throws {
         try assertActiveSession()
         try assertDestination(roomID)
         let destination = roomID ?? selectedRoomID
@@ -3972,16 +4011,13 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         let values = try url.resourceValues(forKeys: [.fileSizeKey, .contentTypeKey])
         let mime = MatrixMapping.resolvedUploadMIMEType(for: url, contentType: values.contentType)
-        let relation: String? = try threadRootID.map {
-            try Self.json([
-                "m.relates_to": [
-                    "rel_type": "m.thread", "event_id": $0, "is_falling_back": true, "m.in_reply_to": ["event_id": $0],
-                ]
-            ])
+        let captionMentions: Mentions? = captionDraft.flatMap { draft in
+            let parsed = ComposerFormat.message(draft: draft)
+            return parsed.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : mentions(parsed)
         }
-        let parameters = UploadParameters(
-            source: .file(filename: url.path), caption: nil, formattedCaption: nil, mentions: nil, inReplyTo: nil,
-            extraContentJson: relation)
+        let parameters = try MatrixMapping.uploadParameters(
+            url: url, captionDraft: captionDraft, replyToID: replyToID, threadRootID: threadRootID,
+            mentions: captionMentions)
         let kind: AttachmentKind
         // A video's poster, which the SDK reads as the video is queued, removed after.
         var posterFile: URL?

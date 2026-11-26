@@ -430,6 +430,42 @@ class ChannelDetailsScreenTest {
         compose.onNodeWithText("Workspaces").assertDoesNotExist()
     }
 
+    @Test fun pinsPageShowsAttachmentDetailsForPinnedFilesAndImages() {
+        val png = ByteArrayOutputStream().apply {
+            Bitmap.createBitmap(16, 16, Bitmap.Config.ARGB_8888).compress(Bitmap.CompressFormat.PNG, 100, this)
+        }.toByteArray()
+        var loadedImage = false
+        val photo = pinned("banner.png").copy(
+            kind = MessageKind.Attachment,
+            attachment = MessageAttachment(
+                MessageAttachment.Kind.Image, "banner.png", "image/png", 4096, 800, 600,
+                TestMediaSource("mxc://example.org/banner"),
+            ),
+        )
+        val pdf = pinned("report.pdf").copy(
+            kind = MessageKind.Attachment,
+            attachment = MessageAttachment(
+                MessageAttachment.Kind.File, "report.pdf", "application/pdf", 2048, null, null,
+                TestMediaSource("mxc://example.org/report"),
+            ),
+        )
+        details(
+            room.copy(pinned = listOf("\$report.pdf", "\$banner.png")),
+            ChannelDetailsActions(pins = {
+                PinnedMessages(
+                    ConversationState(listOf(pdf, photo), loading = false),
+                    loadPicture = { _, _, _, _ -> loadedImage = true; png },
+                )
+            }),
+        )
+        compose.onNodeWithText("Pinned messages").performClick()
+        compose.onNodeWithText("banner.png").assertIsDisplayed()
+        compose.onNodeWithText("PNG", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("report.pdf").assertIsDisplayed()
+        compose.onNodeWithText("PDF", substring = true).assertIsDisplayed()
+        compose.runOnIdle { assertTrue("Pinned image loads its thumbnail", loadedImage) }
+    }
+
     private fun pinned(body: String) = ConversationMessage(body, "\$$body", "@mira:example.org", "Mira", body, null,
         1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "M", 0)
 

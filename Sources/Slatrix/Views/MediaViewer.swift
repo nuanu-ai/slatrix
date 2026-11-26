@@ -26,6 +26,7 @@ private struct MediaViewerPage: View {
     private static let titleWidth: CGFloat = 360
     @Environment(\.metrics) private var m
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(Toasts.self) private var toasts: Toasts?
     @EnvironmentObject private var appearance: AppearanceStore
     let matrix: MatrixService
     let viewer: MediaViewerState
@@ -52,6 +53,12 @@ private struct MediaViewerPage: View {
 
     var body: some View {
         let current = loaded?.eventID == message.eventID ? loaded : nil
+        let caption: String? = message.mediaCaption.flatMap { raw in
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            let rendered = MessageBodyRenderer.shared.render(body: trimmed, formattedBody: message.formattedBody)
+            return rendered.containsSpoilers ? "[Spoiler hidden]" : trimmed
+        }
         VStack(spacing: 0) {
             header
             // Margins wide enough for the arrows, so they never sit on the picture.
@@ -59,12 +66,27 @@ private struct MediaViewerPage: View {
                 content: content(current), onStep: step, onClose: viewer.close,
                 onVideoError: { messageError in
                     loaded = Loaded(eventID: message.eventID, error: messageError)
+                },
+                onCopyImage: { image in
+                    if AttachmentFiles.writeImageToPasteboard(image) {
+                        toasts?.show("Image copied")
+                    }
                 }
             )
             .overlay { placeholder(current) }
-            .padding(.horizontal, m.sp40 + m.sp32).padding(.bottom, m.sp40)
+            .padding(.horizontal, m.sp40 + m.sp32).padding(.bottom, (caption != nil) ? m.sp12 : m.sp40)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                if case .image = content(current) { viewer.close() }
+            }
             .overlay(alignment: .leading) { arrow(-1) }
             .overlay(alignment: .trailing) { arrow(1) }
+            if let caption {
+                Text(caption)
+                    .font(m.font(.body)).foregroundStyle(colors.onMedia).opacity(0.92)
+                    .multilineTextAlignment(.center).lineLimit(3)
+                    .padding(.horizontal, m.sp40).padding(.bottom, m.sp20)
+            }
         }
         .background(colors.mediaBackdrop)
         .accessibilityAddTraits(.isModal)
@@ -163,7 +185,7 @@ private struct MediaViewerPage: View {
                         await AttachmentFiles.shared.download(message, matrix: matrix)
                         downloading = false
                     }
-                }
+                }.disabled(message.sendState != "sent").opacity(message.sendState == "sent" ? 1 : 0.4)
             }
             if ForwardMessageContent.supports(message),
                 let target = matrix.captureMessageAction(message: message, surface: viewer.surface)
@@ -175,7 +197,7 @@ private struct MediaViewerPage: View {
             }
             ViewerButton(symbol: "arrow.up.forward.app", label: "Open in default app") {
                 Task { await AttachmentFiles.shared.open(message, matrix: matrix) }
-            }
+            }.disabled(message.sendState != "sent").opacity(message.sendState == "sent" ? 1 : 0.4)
             Menu {
                 AttachmentMenuItems(matrix: matrix, message: message, copyLink: copyLink)
             } label: {
@@ -275,6 +297,7 @@ struct MediaStage: NSViewRepresentable {
     let onStep: (Int) -> Void
     let onClose: () -> Void
     var onVideoError: (String) -> Void = { _ in }
+    var onCopyImage: (NSImage) -> Void = { _ in }
 
     func makeNSView(context: Context) -> MediaStageView { MediaStageView() }
 
@@ -282,6 +305,7 @@ struct MediaStage: NSViewRepresentable {
         view.onStep = onStep
         view.onClose = onClose
         view.onVideoError = onVideoError
+        view.onCopyImage = onCopyImage
         view.show(content)
     }
 
@@ -311,6 +335,7 @@ final class MediaStageView: NSView {
     var onStep: (Int) -> Void = { _ in }
     var onClose: () -> Void = {}
     var onVideoError: (String) -> Void = { _ in }
+    var onCopyImage: (NSImage) -> Void = { _ in }
     private var content = Content.empty
     private let scroll = NSScrollView()
     private let picture = MediaImageView()
@@ -337,6 +362,9 @@ final class MediaStageView: NSView {
         let doubleClick = NSClickGestureRecognizer(target: self, action: #selector(toggleZoom(_:)))
         doubleClick.numberOfClicksRequired = 2
         scroll.addGestureRecognizer(doubleClick)
+        let backdropClick = NSClickGestureRecognizer(target: self, action: #selector(handleBackdropClick(_:)))
+        backdropClick.numberOfClicksRequired = 1
+        scroll.addGestureRecognizer(backdropClick)
         NotificationCenter.default.addObserver(
             self, selector: #selector(pinched), name: NSScrollView.willStartLiveMagnifyNotification, object: scroll)
     }
@@ -363,6 +391,13 @@ final class MediaStageView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
+        if case .image(_, let image, _, _) = content,
+            event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+            event.charactersIgnoringModifiers?.lowercased() == "c"
+        {
+            onCopyImage(image)
+            return
+        }
         switch event.keyCode {
         case 123: onStep(-1)
         case 124: onStep(1)
@@ -470,16 +505,23 @@ final class MediaStageView: NSView {
         scroll.setMagnification(scroll.magnification * factor, centeredAt: CGPoint(x: visible.midX, y: visible.midY))
     }
 
-    /// Double-click switches between fitting the window and 100%, at the point clicked.
+    /// Double-click switches between fitting the window and zoomed-in (100%, or 200% if already 1:1), at the click point.
     @objc private func toggleZoom(_ recognizer: NSClickGestureRecognizer) {
         guard case .image = content else { return }
-        if fitted && fitScale < 1 {
+        if let target = MediaViewerZoom.targetScale(fitted: fitted, fitScale: fitScale) {
             fitted = false
-            scroll.setMagnification(1, centeredAt: recognizer.location(in: picture))
+            scroll.setMagnification(target, centeredAt: recognizer.location(in: picture))
         } else {
             fitted = true
             fit()
         }
+    }
+
+    /// Clicking the dark backdrop outside the displayed image closes the viewer, as in Slack desktop.
+    @objc private func handleBackdropClick(_ recognizer: NSClickGestureRecognizer) {
+        guard case .image = content else { return }
+        let point = recognizer.location(in: picture)
+        if !picture.bounds.contains(point) { onClose() }
     }
 
     @objc private func pinched() { fitted = false }

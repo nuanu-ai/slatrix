@@ -137,6 +137,36 @@ struct AttachmentView: View {
         guard let url = saved[message.eventID], FileManager.default.fileExists(atPath: url.path) else { return }
         NSWorkspace.shared.activateFileViewerSelecting([url])
     }
+
+    /// Copies a decoded image attachment onto the general pasteboard as PNG and TIFF without clobbering newer copies.
+    func copyImage(_ message: ChatMessage, matrix: MatrixService) async -> Bool {
+        let session = matrix.notificationSessionID
+        let initialChangeCount = NSPasteboard.general.changeCount
+        do {
+            let image = try await matrix.loadFullImage(message)
+            guard matrix.notificationSessionID == session,
+                NSPasteboard.general.changeCount == initialChangeCount
+            else { return false }
+            return Self.writeImageToPasteboard(image)
+        } catch is CancellationError {
+            return false
+        } catch {
+            if matrix.notificationSessionID == session { matrix.errorMessage = MatrixService.safeError(error) }
+            return false
+        }
+    }
+
+    @discardableResult
+    static func writeImageToPasteboard(_ image: NSImage) -> Bool {
+        guard let tiff = image.tiffRepresentation else { return false }
+        let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:])
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        var wrote = false
+        if let png { wrote = pasteboard.setData(png, forType: .png) || wrote }
+        wrote = pasteboard.setData(tiff, forType: .tiff) || wrote
+        return wrote
+    }
 }
 
 extension MatrixService {
@@ -419,15 +449,28 @@ private struct MediaActionsToolbar: View {
 
 /// The attachment's ⋮ menu, in a row and in the viewer.
 struct AttachmentMenuItems: View {
+    @Environment(Toasts.self) private var toasts: Toasts?
     let matrix: MatrixService
     let message: ChatMessage
     let copyLink: (() -> Void)?
     var forward: (() -> Void)? = nil
 
+    private var isImageLike: Bool { message.kind == "m.image" || message.kind == "m.sticker" }
+
     var body: some View {
+        if isImageLike, message.sendState == "sent" {
+            Button("Copy image") {
+                Task {
+                    if await AttachmentFiles.shared.copyImage(message, matrix: matrix) {
+                        toasts?.show("Image copied")
+                    }
+                }
+            }
+        }
         if let forward { Button("Forward…", action: forward) }
         if let copyLink { Button("Copy link", action: copyLink) }
         Button("Open in default app") { Task { await AttachmentFiles.shared.open(message, matrix: matrix) } }
+            .disabled(message.sendState != "sent")
         if AttachmentFiles.shared.saved[message.eventID] != nil {
             Button("Show in Finder") { AttachmentFiles.shared.showInFinder(message) }
         }

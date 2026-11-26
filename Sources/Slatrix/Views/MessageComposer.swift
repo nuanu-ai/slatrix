@@ -23,13 +23,18 @@ struct MessageComposer: View {
     var onTyping: (Bool) -> Void
     var onCancelEdit: (() -> Void)? = nil
     var onSendText: ((String) async throws -> Void)? = nil
-    var onSendFile: ((URL) async throws -> Void)? = nil
+    /// Sends a file; the second argument indicates whether this upload should carry an active reply quote.
+    var onSendFile: ((URL, Bool) async throws -> Void)? = nil
+    /// Sends text paired with a single attachment as one captioned media message.
+    var onSendCaptionedFile: ((URL, String) async throws -> Void)? = nil
     var queuedFiles: Binding<[URL]>? = nil
     var sendingState: Binding<Bool>? = nil
     var onError: ((String) -> Void)? = nil
     var allowsSend = true
     var onDiscardAttachments: (([URL]) -> Void)? = nil
     var requiresTextForSend = false
+    /// Whether the composer is actively replying to a message (so it takes keyboard focus when Reply opens).
+    var isReplying = false
     /// Slack's Esc, ⇧Esc and ↑ when the composer has no use for them; returns whether the key was used.
     var onConversationKey: ((ConversationKeys.Action) -> Bool)? = nil
     /// The composer ⌘U attaches to when no composer has focus: the conversation's, not a thread's.
@@ -211,9 +216,9 @@ struct MessageComposer: View {
         }
         .preference(key: ComposerAccessoryHeightKey.self, value: floatingHeight > 0 ? floatingHeight + m.sp8 : 0)
         .onAppear { isActive = true }
-        // Once as an edit opens; opened under a cover, the editor takes the keyboard as it would after any cover.
-        .task(id: isEditing || requiresTextForSend) {
-            guard isEditing || requiresTextForSend else { return }
+        // Once as an edit or reply opens; opened under a cover, the editor takes the keyboard as it would after any cover.
+        .task(id: isEditing || isReplying || requiresTextForSend) {
+            guard isEditing || isReplying || requiresTextForSend else { return }
             for _ in 0..<20 {
                 guard !Task.isCancelled, isActive, !sending else { return }
                 if let view = editor.textView, let window = view.window,
@@ -614,16 +619,27 @@ struct MessageComposer: View {
         Task { @MainActor in
             do {
                 if let onSendText, let onSendFile {
-                    if !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        try await onSendText(body)
+                    let hasBody = !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    if !isEditing, hasBody, files.count == 1, let onSendCaptionedFile {
+                        let file = files[0]
+                        try await onSendCaptionedFile(file, body)
                         text = ""
-                        if isEditing { onCancelEdit?() }
-                    }
-                    if !isEditing {
-                        for file in files {
-                            try await onSendFile(file)
-                            attachments.removeAll { $0 == file }
-                            discardAttachments([file])
+                        attachments.removeAll { $0 == file }
+                        discardAttachments([file])
+                    } else {
+                        var carryReply = !hasBody
+                        if hasBody {
+                            try await onSendText(body)
+                            text = ""
+                            if isEditing { onCancelEdit?() }
+                        }
+                        if !isEditing {
+                            for file in files {
+                                try await onSendFile(file, carryReply)
+                                carryReply = false
+                                attachments.removeAll { $0 == file }
+                                discardAttachments([file])
+                            }
                         }
                     }
                 } else {

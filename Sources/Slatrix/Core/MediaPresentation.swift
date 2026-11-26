@@ -251,6 +251,15 @@ struct MediaViewerLoadKey: Hashable {
     }
 }
 
+/// Double-click zoom target policy for the macOS media viewer.
+enum MediaViewerZoom {
+    /// When fitted, zooms to 100% for downscaled images or 200% for 1:1 images; when already zoomed, returns nil to re-fit.
+    static func targetScale(fitted: Bool, fitScale: CGFloat) -> CGFloat? {
+        guard fitted else { return nil }
+        return fitScale < 1 ? 1 : 2
+    }
+}
+
 /// Decodes image attachments to a displayable `CGImage`, using ImageIO for raster formats and AppKit's native SVG
 /// renderer strictly for SVG payloads (never PDF/EPS).
 enum MediaImageDecoder {

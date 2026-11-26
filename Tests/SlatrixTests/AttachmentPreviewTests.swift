@@ -275,4 +275,29 @@ struct AttachmentPreviewTests {
         #expect(resolve("voice.opus") == "audio/ogg")
         #expect(resolve("track.flac") == "audio/flac")
     }
+
+    @Test("Upload parameters carry formatted caption, mentions, and reply relation inside or outside threads")
+    func uploadParametersCaptionAndReply() throws {
+        let url = URL(fileURLWithPath: "/tmp/shot.png")
+        let plain = try MatrixMapping.uploadParameters(
+            url: url, captionDraft: "Check <strong>this</strong>", replyToID: "$parent", threadRootID: nil,
+            mentions: Mentions(userIds: [], room: false))
+        #expect(plain.caption == "Check this")
+        #expect(plain.formattedCaption?.body.contains("<strong>this</strong>") == true)
+        #expect(plain.inReplyTo == "$parent")
+        #expect(plain.extraContentJson == nil)
+
+        let threadedReply = try MatrixMapping.uploadParameters(
+            url: url, captionDraft: nil, replyToID: "$reply", threadRootID: "$root", mentions: nil)
+        #expect(threadedReply.caption == nil)
+        #expect(threadedReply.inReplyTo == "$reply")
+        #expect(threadedReply.extraContentJson == nil)
+
+        let threadedPlain = try MatrixMapping.uploadParameters(
+            url: url, captionDraft: nil, replyToID: nil, threadRootID: "$root", mentions: nil)
+        let json = try #require(threadedPlain.extraContentJson)
+        #expect(json.contains("\"m.thread\""))
+        #expect(json.contains("\"$root\""))
+        #expect(json.contains("\"is_falling_back\":true"))
+    }
 }

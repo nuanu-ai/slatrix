@@ -280,6 +280,14 @@ final class SharedFilesTests {
         #expect(client.downloads.all.isEmpty)
     }
 
+    @Test("Opening Files auto-paginates past text-only pages up to the cap until shared content lands")
+    func autoPaginatesPastTextOnlyPages() async {
+        room.history.reset([FakeTimelineItem(textEvent("$chat", body: "Just chatting"))])
+        await service.open(roomID: "!room:example.org")
+        // Without any shared candidates and hasMore == true, open() auto-paginates up to 5 pages instead of stopping at 1.
+        #expect(room.history.pages.all.count == 5)
+    }
+
     @Test("Images, videos and audio are listed alongside files")
     func mediaKinds() async {
         await open()
@@ -559,5 +567,16 @@ struct SharedContentMappingTests {
             SharedContentMapping.caption(
                 sender: "Alice", room: room, date: try parse.parse(day), now: try parse.parse("2026-10-26"),
                 calendar: calendar) == expected)
+    }
+
+    @Test("Mixed attachment and link rows display the link in the Links tab and the attachment elsewhere")
+    func mixedRowPrefersLinkInLinksTab() {
+        let link = URL(string: "https://example.org/spec")!
+        let msg = ChatMessage(
+            id: "$m", roomID: "!r:example.org", senderID: "@a:example.org", senderName: "A",
+            body: "See https://example.org/spec", timestamp: Date(timeIntervalSince1970: 0), kind: "m.image",
+            attachment: MessageAttachment(name: "chart.png", url: "mxc://example.org/chart", mimeType: "image/png"))
+        #expect(SharedContentMapping.displayedLink(for: msg, links: [link], preferLink: true) == link)
+        #expect(SharedContentMapping.displayedLink(for: msg, links: [link], preferLink: false) == nil)
     }
 }

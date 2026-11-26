@@ -491,7 +491,10 @@ internal fun LiveConversation(open: OpenChannel, owner: MatrixWorkspace?, main: 
                 channel::setNotifications, pins = {
                 val pins = rememberConversation(client, open.room.id, ConversationView.Pins)
                 // Unpins through the conversation, which outlives the page, so going back doesn't cancel it.
-                PinnedMessages(pins?.state?.collectAsState()?.value ?: ConversationState(loading = false, error = "Couldn’t load pins")) {
+                PinnedMessages(
+                    pins?.state?.collectAsState()?.value ?: ConversationState(loading = false, error = "Couldn’t load pins"),
+                    loadPicture = { attachment, width, height, full -> media.picture(attachment, width, height, full) },
+                ) {
                     conversation?.pin(it, false)
                 }
             }, files = {
