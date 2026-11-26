@@ -51,15 +51,27 @@ struct InlineAudioTests {
         #expect(!audio.isPlaying)
     }
 
-    @Test("Closing MediaViewer clears carried video timestamp and pauses sibling inline audio")
-    func viewerCloseClearsCarriedAndStopsViewerAudio() throws {
-        let viewer = MediaViewerState()
+    @Test("Stepping or closing MediaViewer stops active viewer audio and cancels superseded audio")
+    func viewerStepAndCloseStopAudio() async throws {
+        let service = try audioConversation()
+        let audioMsg = try #require(service.messages.first)
         let videoMsg = ChatMessage(
-            id: "$v", roomID: "!r:example.org", senderID: "@a:example.org", senderName: "A", body: "v.mp4",
+            id: "$v", roomID: "!audio:example.org", senderID: "@a:example.org", senderName: "A", body: "v.mp4",
             timestamp: Date(timeIntervalSince1970: 0), kind: "m.video",
             attachment: MessageAttachment(name: "v.mp4", url: "mxc://example.org/v", mimeType: "video/mp4"))
-        viewer.open(videoMsg, surface: .conversation)
+        let viewer = MediaViewerState()
+        viewer.open(audioMsg, files: [audioMsg, videoMsg])
+        viewer.inlineAudio.play(audioMsg, matrix: service, from: viewer)
+        #expect(viewer.inlineAudio.eventID == "$voice")
+        viewer.step(1, in: [audioMsg, videoMsg])
+        #expect(viewer.message?.eventID == "$v")
+        #expect(viewer.inlineAudio.eventID == nil)
+
+        viewer.open(audioMsg, files: [audioMsg, videoMsg])
+        viewer.inlineAudio.play(audioMsg, matrix: service, from: viewer)
+        #expect(viewer.inlineAudio.eventID == "$voice")
         viewer.close()
+        #expect(viewer.inlineAudio.eventID == nil)
         #expect(viewer.videoStart(videoMsg) == .zero)
     }
 }

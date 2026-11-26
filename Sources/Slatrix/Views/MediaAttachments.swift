@@ -655,15 +655,21 @@ struct AudioCard: View {
             .gesture(
                 DragGesture(minimumDistance: 0).onEnded { value in
                     let fraction = Double(value.location.x / width)
-                    if slot?.isCurrent == true {
-                        slot?.seek(to: fraction)
-                    } else {
-                        slot?.toggle()
-                    }
+                    slot?.seek(to: fraction)
                 }
             )
         }
         .frame(height: attachment.waveform != nil ? m(20) : m(12))
+        .accessibilityElement()
+        .accessibilityLabel("Playback position")
+        .accessibilityValue(subtitle)
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: slot?.step(by: 5)
+            case .decrement: slot?.step(by: -5)
+            @unknown default: break
+            }
+        }
     }
 
     private var normalizedWaveform: [Double]? {

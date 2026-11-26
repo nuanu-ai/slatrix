@@ -13,6 +13,8 @@ import Foundation
     private(set) var errorMessage: String?
 
     private var owner: ObjectIdentifier?
+    /// Monotonic token so a cancelled or superseded download/duration load can never take over playback.
+    @ObservationIgnored private var requestID = UUID()
     @ObservationIgnored var onWillPlay: (() -> Void)?
     @ObservationIgnored private var player: AVPlayer?
     @ObservationIgnored private var lease: AttachmentPreviewLease?
@@ -38,9 +40,17 @@ import Foundation
         var error: String? { audio.errorEventID == message.eventID ? audio.errorMessage : nil }
 
         func toggle() { audio.toggle(message, matrix: matrix, from: owner) }
+        func play(from fraction: Double) { audio.play(message, matrix: matrix, from: owner, startFraction: fraction) }
         func seek(to fraction: Double) {
-            guard isCurrent else { return }
-            audio.seek(to: fraction)
+            if isCurrent {
+                audio.seek(to: fraction)
+            } else {
+                audio.play(message, matrix: matrix, from: owner, startFraction: fraction)
+            }
+        }
+        func step(by seconds: TimeInterval) {
+            guard isCurrent, duration > 0 else { return }
+            audio.seek(to: (currentTime + seconds) / duration)
         }
     }
 
@@ -68,9 +78,13 @@ import Foundation
         play(message, matrix: matrix, from: owner)
     }
 
-    func play(_ message: ChatMessage, matrix: MatrixService, from owner: AnyObject) {
+    func play(
+        _ message: ChatMessage, matrix: MatrixService, from owner: AnyObject, startFraction: Double? = nil
+    ) {
         onWillPlay?()
         stop()
+        let token = UUID()
+        requestID = token
         let eventID = message.eventID
         let session = matrix.notificationSessionID
         self.eventID = eventID
@@ -83,23 +97,34 @@ import Foundation
         loading = Task { [weak self] in
             do {
                 let lease = try await matrix.prepareAttachmentPreview(message)
-                guard let self, !Task.isCancelled, self.eventID == eventID else { return }
-                self.lease = lease
+                guard let self, !Task.isCancelled, self.requestID == token, self.eventID == eventID else { return }
                 let player = AVPlayer(url: lease.url)
-                self.player = player
-                self.isLoading = false
+                var resolvedDuration = self.duration
                 if let asset = player.currentItem?.asset,
                     let loaded = try? await asset.load(.duration),
                     loaded.isNumeric, loaded.seconds > 0
                 {
-                    guard !Task.isCancelled, self.eventID == eventID else { return }
-                    self.duration = loaded.seconds
+                    resolvedDuration = loaded.seconds
                 }
-                self.installObservers(for: player, eventID: eventID, session: session, matrix: matrix)
+                // Unconditionally re-verify ownership after every suspension point so a cancelled task never starts.
+                guard !Task.isCancelled, self.requestID == token, self.eventID == eventID else { return }
+                self.lease = lease
+                self.player = player
+                self.duration = resolvedDuration
+                self.isLoading = false
+                if let startFraction, resolvedDuration > 0 {
+                    let clamped = min(max(startFraction, 0), 1)
+                    let seconds = clamped * resolvedDuration
+                    self.currentTime = seconds
+                    let target = CMTime(seconds: seconds, preferredTimescale: 600)
+                    await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
+                    guard !Task.isCancelled, self.requestID == token, self.eventID == eventID else { return }
+                }
+                self.installObservers(for: player, token: token, eventID: eventID, session: session, matrix: matrix)
                 player.play()
                 self.isPlaying = true
             } catch {
-                guard let self, !Task.isCancelled, self.eventID == eventID else { return }
+                guard let self, !Task.isCancelled, self.requestID == token, self.eventID == eventID else { return }
                 self.stop()
                 if !(error is CancellationError), matrix.notificationSessionID == session {
                     self.errorEventID = eventID
@@ -124,6 +149,7 @@ import Foundation
     }
 
     func stop() {
+        requestID = UUID()
         loading?.cancel()
         loading = nil
         removeObservers()
@@ -143,22 +169,27 @@ import Foundation
     }
 
     private func installObservers(
-        for player: AVPlayer, eventID: String, session: UUID, matrix: MatrixService
+        for player: AVPlayer, token: UUID, eventID: String, session: UUID, matrix: MatrixService
     ) {
+        removeObservers()
         let interval = CMTime(seconds: 0.15, preferredTimescale: 600)
-        timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+        timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) {
+            [weak self, weak player] time in
             MainActor.assumeIsolated {
-                guard let self, self.player === player, time.isNumeric else { return }
+                guard let self, let player, self.requestID == token, self.player === player, time.isNumeric else {
+                    return
+                }
                 self.currentTime = max(0, time.seconds)
                 if let itemDuration = player.currentItem?.duration, itemDuration.isNumeric, itemDuration.seconds > 0 {
                     self.duration = itemDuration.seconds
                 }
             }
         }
-        failureObserver = player.currentItem?.observe(\.status) { [weak self] item, _ in
+        failureObserver = player.currentItem?.observe(\.status, options: [.initial, .new]) {
+            [weak self, weak player] item, _ in
             guard item.status == .failed else { return }
             Task { @MainActor in
-                guard let self, self.player === player else { return }
+                guard let self, let player, self.requestID == token, self.player === player else { return }
                 self.stop()
                 if matrix.notificationSessionID == session {
                     self.errorEventID = eventID
@@ -169,9 +200,9 @@ import Foundation
         if let item = player.currentItem {
             endObserver = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
-            ) { [weak self] _ in
+            ) { [weak self, weak player] _ in
                 MainActor.assumeIsolated {
-                    guard let self, self.player === player else { return }
+                    guard let self, let player, self.requestID == token, self.player === player else { return }
                     self.isPlaying = false
                     self.currentTime = 0
                     player.seek(to: .zero)

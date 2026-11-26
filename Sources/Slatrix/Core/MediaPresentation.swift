@@ -164,8 +164,9 @@ struct MediaViewerLoadKey: Hashable {
     @ObservationIgnored private var carried: (eventID: String, time: CMTime)?
 
     init() {
-        inlineVideo.onWillPlay = { [weak inlineAudio] in inlineAudio?.pause() }
-        inlineAudio.onWillPlay = { [weak inlineVideo] in inlineVideo?.pause() }
+        // Stop (not just pause) the sibling player so any in-flight download is cancelled and cannot start concurrently.
+        inlineVideo.onWillPlay = { [weak inlineAudio] in inlineAudio?.stop() }
+        inlineAudio.onWillPlay = { [weak inlineVideo] in inlineVideo?.stop() }
     }
 
     func open(_ message: ChatMessage, surface: MessageActionTarget.Surface) {
@@ -193,10 +194,10 @@ struct MediaViewerLoadKey: Hashable {
         carried.flatMap { $0.eventID == message.eventID ? $0.time : nil } ?? .zero
     }
 
-    /// Holds the row's video and audio while the viewer shows anything, noting where a video was if the viewer opens it.
+    /// Holds the row's video and stops any audio while the viewer opens, noting where a video was if opening it.
     private func carry(_ message: ChatMessage) {
         inlineVideo.pause()
-        inlineAudio.pause()
+        inlineAudio.stop()
         carried =
             inlineVideo.eventID == message.eventID
             ? inlineVideo.player.map { (message.eventID, $0.currentTime()) } : nil
@@ -212,6 +213,7 @@ struct MediaViewerLoadKey: Hashable {
     /// Stays put at either end.
     func step(_ offset: Int, in messages: [ChatMessage]) {
         if let next = neighbor(offset, in: messages) {
+            inlineAudio.stop(from: self)
             carried = nil
             message = next
         }

@@ -151,6 +151,52 @@ class VideoAttachmentTest {
         compose.onNode(hasContentDescription("other.mp4") and hasOnClickLabel("Full screen")).assertExists()
         compose.onNode(hasContentDescription("clip.mp4") and hasOnClickLabel("Play video")).assertExists()
     }
+
+    @Test fun slowEarlierDownloadDoesNotTakeOverNewerClip() {
+        val other = clip.copy(name = "other.mp4", source = TestMediaSource("mxc://example.org/other"))
+        val slowFirst = CompletableDeferred<File?>()
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(clip to "v", other to "w").map { (attachment, id) ->
+                    ConversationMessage(id, "\$$id", "@mira:example.org", "Mira", attachment.name, null, 1_700_000_000_000L,
+                        MessageKind.Attachment, MessageSendState.Sent, false, "M", 0, attachment = attachment, grouped = id == "w")
+                }, loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                    loadFile = { if (it.name == "clip.mp4") slowFirst.await() else playableTestMedia("other") })
+            }
+        }
+        compose.onNodeWithContentDescription("clip.mp4").performClick()
+        compose.onNodeWithContentDescription("other.mp4").performClick()
+        compose.onNode(hasContentDescription("other.mp4") and hasOnClickLabel("Full screen")).assertExists()
+        // Now the earlier clip's slow download finishes: it must NOT steal playback from other.mp4.
+        slowFirst.complete(playableTestMedia("clip"))
+        compose.waitForIdle()
+        compose.onNode(hasContentDescription("other.mp4") and hasOnClickLabel("Full screen")).assertExists()
+        compose.onNode(hasContentDescription("clip.mp4") and hasOnClickLabel("Play video")).assertExists()
+    }
+
+    @Test fun audioErrorExposesExplicitOpenInAnotherAppActionWithoutHijackingPlay() {
+        val voice = MessageAttachment(
+            MessageAttachment.Kind.Audio, "voice.ogg", "audio/ogg", 24_000, null, null,
+            TestMediaSource("mxc://example.org/broken-voice"), durationMillis = 15_000, isVoice = true,
+        )
+        var openedExternally = 0
+        compose.setContent {
+            SlatrixTheme {
+                LiveChannelScreen(room, ConversationState(listOf(ConversationMessage("a", "\$a", "@mira:example.org", "Mira", "voice.ogg",
+                    null, 1_700_000_000_000L, MessageKind.Attachment, MessageSendState.Sent, false, "M", 0, attachment = voice)),
+                    loading = false, hasMore = false), ComposerState(loading = false), {}, {}, {}, {}, {}, {}, {}, {},
+                    onOpenFile = { openedExternally += 1; null },
+                    loadFile = { null })
+            }
+        }
+        compose.onNodeWithText("Voice message", useUnmergedTree = true).performClick()
+        compose.onNodeWithText("Open in another app", useUnmergedTree = true).assertIsDisplayed()
+        // Tapping Play/Voice message again must retry in-place, never silently hand off to an external app.
+        compose.onNodeWithText("Voice message", useUnmergedTree = true).performClick()
+        compose.runOnIdle { assertEquals(0, openedExternally) }
+        compose.onNodeWithText("Open in another app", useUnmergedTree = true).performClick()
+        compose.runOnIdle { assertEquals(1, openedExternally) }
+    }
 }
 
 /** Minimal valid PCM WAV that ExoPlayer's pure-Java WavExtractor parses cleanly under Robolectric without MediaCodec. */

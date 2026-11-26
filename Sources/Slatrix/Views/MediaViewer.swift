@@ -68,6 +68,7 @@ private struct MediaViewerPage: View {
         }
         .background(colors.mediaBackdrop)
         .accessibilityAddTraits(.isModal)
+        .onDisappear { viewer.inlineAudio.stop(from: viewer) }
         .task(id: MediaViewerLoadKey(message: message, sourceRevision: matrix.attachmentSourceRevision(message))) {
             await load()
         }

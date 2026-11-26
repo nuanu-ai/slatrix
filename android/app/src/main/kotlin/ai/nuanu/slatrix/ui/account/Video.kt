@@ -12,6 +12,7 @@ import android.view.LayoutInflater
 import android.widget.FrameLayout
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -58,8 +59,13 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.setProgress
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.viewinterop.AndroidView
@@ -114,17 +120,33 @@ internal class VideoPlayback(private val context: Context, private val loadFile:
         private set
 
     private var exo: ExoPlayer? = null
+    /** Monotonic request counter so a slow download or stale error can never take over a newer clip or paused host. */
+    private var requestToken = 0L
+    private var hostResumed = true
+    private var pendingSeekFraction: Float? = null
     private val files = LinkedHashMap<String, File>()
     val player: Player? get() = exo
 
     private val listener = object : Player.Listener {
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            isActive = playWhenReady && exo?.playbackState != Player.STATE_ENDED
+        }
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            isActive = isPlaying
+            val current = exo ?: return
+            isActive = isPlaying || (current.playWhenReady && current.playbackState == Player.STATE_BUFFERING)
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
             val current = exo ?: return
             if (current.duration > 0L) durationMillis = current.duration
+            val seekFrac = pendingSeekFraction
+            if (seekFrac != null && playbackState == Player.STATE_READY && current.duration > 0L) {
+                pendingSeekFraction = null
+                val target = (current.duration * seekFrac.coerceIn(0f, 1f)).toLong()
+                current.seekTo(target)
+                positionMillis = target
+            }
             if (playbackState == Player.STATE_ENDED && playingKind == MessageAttachment.Kind.Audio) {
                 current.seekTo(0L)
                 current.pause()
@@ -135,6 +157,7 @@ internal class VideoPlayback(private val context: Context, private val loadFile:
 
         override fun onPlayerError(error: PlaybackException) {
             val failedKey = playing
+            pendingSeekFraction = null
             exo?.stop()
             playing = null
             playingKind = null
@@ -159,12 +182,14 @@ internal class VideoPlayback(private val context: Context, private val loadFile:
         }
     }
 
-    suspend fun start(attachment: MessageAttachment) {
+    suspend fun start(attachment: MessageAttachment, startFraction: Float? = null) {
         val key = attachment.source.toJson()
         // Deduplicate taps while the same clip is already downloading.
         if (fetching == key) return
+        val token = ++requestToken
         errorKey = null
         errorMessage = null
+        pendingSeekFraction = startFraction
         fetching = key
         val file = try {
             fileFor(key) ?: loadFile(attachment)?.also { files[key] = it }
@@ -173,10 +198,12 @@ internal class VideoPlayback(private val context: Context, private val loadFile:
         } catch (_: Exception) {
             null
         } finally {
-            if (fetching == key) fetching = null
+            if (requestToken == token && fetching == key) fetching = null
         }
-        // Another clip asked for meanwhile wins; one that can't be fetched surfaces a clean retryable state.
+        // Only the latest request may update playback or surface an error, and never after the host paused.
+        if (requestToken != token || !hostResumed) return
         if (file == null) {
+            pendingSeekFraction = null
             errorKey = key
             errorMessage = "Couldn’t download ${attachment.name}."
             return
@@ -195,11 +222,18 @@ internal class VideoPlayback(private val context: Context, private val loadFile:
                 it.addListener(listener)
                 exo = it
             }
-        positionMillis = 0L
-        durationMillis = attachment.durationMillis ?: 0L
+        val knownDuration = attachment.durationMillis ?: 0L
+        durationMillis = knownDuration
+        positionMillis = if (startFraction != null && knownDuration > 0L) {
+            (knownDuration * startFraction.coerceIn(0f, 1f)).toLong()
+        } else 0L
         instance.run {
             setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
             prepare()
+            if (startFraction != null && knownDuration > 0L) {
+                seekTo(positionMillis)
+                pendingSeekFraction = null
+            }
             playWhenReady = true
         }
         playing = key
@@ -211,7 +245,8 @@ internal class VideoPlayback(private val context: Context, private val loadFile:
         val key = attachment.source.toJson()
         val instance = exo
         if (playing == key && playingKind == MessageAttachment.Kind.Audio && instance != null) {
-            if (instance.isPlaying) {
+            // Branch on playWhenReady (not isPlaying) so Pause during buffering actually pauses.
+            if (instance.playWhenReady && instance.playbackState != Player.STATE_ENDED) {
                 instance.pause()
                 isActive = false
             } else {
@@ -243,7 +278,13 @@ internal class VideoPlayback(private val context: Context, private val loadFile:
     }
 
     fun stop(key: String) {
+        if (fetching == key) {
+            requestToken++
+            fetching = null
+        }
         if (playing != key) return
+        requestToken++
+        pendingSeekFraction = null
         exo?.stop()
         playing = null
         playingKind = null
@@ -251,12 +292,23 @@ internal class VideoPlayback(private val context: Context, private val loadFile:
         positionMillis = 0L
     }
 
-    fun pause() {
+    fun onHostPause() {
+        hostResumed = false
+        // Invalidate any in-flight downloads so audio/video cannot start behind a covered conversation or backgrounded app.
+        requestToken++
+        fetching = null
+        pendingSeekFraction = null
         exo?.pause()
         isActive = false
     }
 
+    fun onHostResume() {
+        hostResumed = true
+    }
+
     fun release() {
+        requestToken++
+        pendingSeekFraction = null
         exo?.removeListener(listener)
         exo?.release()
         exo = null
@@ -277,7 +329,13 @@ internal fun rememberVideoPlayback(loadFile: FileLoader): VideoPlayback {
     val playback = remember { VideoPlayback(context.applicationContext) { files(it) } }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(playback, lifecycle) {
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_PAUSE) playback.pause() }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> playback.onHostPause()
+                Lifecycle.Event.ON_RESUME -> playback.onHostResume()
+                else -> Unit
+            }
+        }
         lifecycle.addObserver(observer)
         onDispose {
             lifecycle.removeObserver(observer)
@@ -304,10 +362,13 @@ internal fun InlineVideo(attachment: MessageAttachment, load: PictureLoader, vid
     val scope = rememberCoroutineScope()
     val key = attachment.source.toJson()
     val player = videos.player.takeIf { videos.playing == key }
-    // Remember full-screen mode across rotation; reload the clip if the activity recreated.
+    // Remember full-screen mode across rotation; reload once if activity recreated, never looping on decoder error.
     var full by rememberSaveable(key) { mutableStateOf(false) }
-    LaunchedEffect(full, player) {
-        if (full && player == null) videos.start(attachment)
+    LaunchedEffect(videos.errorKey) {
+        if (full && videos.errorKey == key) full = false
+    }
+    LaunchedEffect(full) {
+        if (full && player == null && videos.errorKey != key && videos.fetching != key) videos.start(attachment)
     }
     // A video scrolled away stops, as its row is gone, unless currently open full screen.
     DisposableEffect(videos, key) { onDispose { if (!full) videos.stop(key) } }
@@ -358,7 +419,7 @@ internal fun InlineVideo(attachment: MessageAttachment, load: PictureLoader, vid
     player?.takeIf { full }?.let { VideoViewer(attachment, it, videos) { full = false } }
 }
 
-/** An inline audio or voice message player with play/pause, interactive waveform or scrubber, and fallback to external app. */
+/** An inline audio or voice message player with play/pause, accessible waveform or scrubber, and explicit external fallback. */
 @Composable
 internal fun InlineAudio(
     attachment: MessageAttachment,
@@ -402,7 +463,7 @@ internal fun InlineAudio(
                 onLongClickLabel = "Message actions",
                 onLongClick = onLongPress,
             ) {
-                if (error != null) onOpenFile() else scope.launch { videos.toggleAudio(attachment) }
+                scope.launch { videos.toggleAudio(attachment) }
             }
             .padding(vertical = UiMetrics.GapTiny),
         horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapMedium),
@@ -437,18 +498,44 @@ internal fun InlineAudio(
                 waveform = attachment.waveform,
                 progress = progress,
                 active = isCurrent,
+                label = subtitle,
                 onSeek = { fraction ->
                     if (isCurrent) videos.seekAudio(key, fraction)
-                    else scope.launch { videos.toggleAudio(attachment) }
+                    else scope.launch { videos.start(attachment, startFraction = fraction) }
                 },
             )
-            Text(
-                error ?: subtitle,
-                style = MaterialTheme.typography.labelMedium,
-                color = if (error != null) colors.destructive else colors.textSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            if (error != null) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(UiMetrics.GapSmall),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        error,
+                        Modifier.weight(1f, fill = false),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.destructive,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    // External handoff is an explicit separate action, never silently invoked by Play.
+                    Text(
+                        "Open in another app",
+                        Modifier.clickable(role = Role.Button, onClick = onOpenFile),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = colors.accent,
+                        maxLines = 1,
+                    )
+                }
+            } else {
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }
@@ -458,6 +545,7 @@ private fun AudioScrubber(
     waveform: List<Int>,
     progress: Float,
     active: Boolean,
+    label: String,
     onSeek: (Float) -> Unit,
 ) {
     val colors = SlatrixTheme.colors
@@ -477,6 +565,15 @@ private fun AudioScrubber(
     Box(
         Modifier.fillMaxWidth()
             .height(if (bars.isNotEmpty()) UiMetrics.AudioWaveformHeight else UiMetrics.GapMedium)
+            .semantics {
+                contentDescription = "Playback position"
+                stateDescription = label
+                progressBarRangeInfo = ProgressBarRangeInfo(progress, 0f..1f)
+                setProgress { target ->
+                    onSeek(target.coerceIn(0f, 1f))
+                    true
+                }
+            }
             .pointerInput(onSeek) {
                 detectTapGestures { offset ->
                     val fraction = if (size.width > 0) (offset.x / size.width).coerceIn(0f, 1f) else 0f
