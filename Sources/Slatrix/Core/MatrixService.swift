@@ -3751,7 +3751,9 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             throw error
         }
     }
-    func forwardMessage(_ review: ForwardMessageReview, to roomID: String) async throws -> ForwardMessageQueuedResult {
+    func forwardMessage(
+        _ review: ForwardMessageReview, to roomID: String, note: String = ""
+    ) async throws -> ForwardMessageQueuedResult {
         try assertActiveSession()
         try validateMessageAction(review.target)
         guard forwardingReviews.insert(review.id).inserted else { throw ForwardMessageError.busy }
@@ -3792,8 +3794,19 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             guard current.value == review.value else { throw ForwardMessageReviewChanged(review: current) }
             try validate()
             let content = try current.payload()
+            let trimmedNote = note.trimmingCharacters(in: .whitespacesAndNewlines)
+            let noteContent =
+                trimmedNote.isEmpty
+                ? nil
+                : try messageEventContentNew(
+                    msgtype: .text(content: TextMessageContent(body: trimmedNote, formatted: nil)))
+            // Send the validated forwarded payload immediately (no await gap where the source could be redacted),
+            // then queue the optional follow-up note once the forward is safely accepted.
             _ = try await destinationTimeline.send(msg: content)
             // Queued: a failure reported after this point would invite a duplicate resend.
+            if let noteContent {
+                _ = try? await destinationTimeline.send(msg: noteContent)
+            }
             return ForwardMessageQueuedResult(reviewID: review.id, destinationRoomID: roomID)
         } catch {
             try validateMessageAction(review.target)
@@ -4967,12 +4980,12 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
             }
         } catch { if token == selection { errorMessage = Self.safeError(error) } }
     }
-    func searchMessages(query: String, roomID: String? = nil) async throws {
+    func searchMessages(query: String, roomID: String? = nil, previewQuery: MessageSearchQuery? = nil) async throws {
         cancelSearch()
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !term.isEmpty else { return }
         if isPreview {
-            searchResults = previewSearch(term, roomID: roomID)
+            searchResults = previewSearch(previewQuery ?? MessageSearchQuery(term, roomID: roomID))
             searchState = "ready"
             return
         }
@@ -4983,21 +4996,27 @@ private final class SearchPaginationObserver: SearchServicePaginationStateListen
         }
         let token = searchGeneration
         let session = sessionGeneration
+        // Automatically index recent history on the first search of a session so search finds messages across rooms
+        // that haven't been opened yet, without requiring a manual button click.
+        if searchIndexingState == .idle, connectionStopTask == nil {
+            try? await startSearchBackfill()
+        }
+        guard token == searchGeneration, session == sessionGeneration else { return }
         let service = client.searchService()
         activeSearch = service
         searchState = "loading"
         do {
-            let resultHandle = await service.subscribeToResults(
-                listener: SearchResultsObserver { [weak self] results, revision in
-                    Task { @MainActor [weak self] in
-                        guard let self, token == self.searchGeneration, session == self.sessionGeneration,
-                            revision > self.searchResultRevision
-                        else { return }
-                        self.searchResultRevision = revision
-                        let mapped = MatrixMapping.searchMessages(results, roomID: roomID)
-                        self.searchResults = mapped
-                    }
-                })
+            let observer = SearchResultsObserver { [weak self] results, revision in
+                Task { @MainActor [weak self] in
+                    guard let self, token == self.searchGeneration, session == self.sessionGeneration,
+                        revision > self.searchResultRevision
+                    else { return }
+                    self.searchResultRevision = revision
+                    let mapped = MatrixMapping.searchMessages(results, roomID: roomID)
+                    self.searchResults = mapped
+                }
+            }
+            let resultHandle = await service.subscribeToResults(listener: observer)
             guard token == searchGeneration, session == sessionGeneration else {
                 resultHandle.cancel()
                 return

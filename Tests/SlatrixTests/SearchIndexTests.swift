@@ -7,10 +7,17 @@ import Testing
 private final class Hits: SearchServiceResultsListener, @unchecked Sendable {
     private let lock = NSLock()
     private var results: [SearchServiceResult] = []
+    private var updatesCount = 0
     var eventIDs: Set<String> {
         lock.withLock { Set(MatrixMapping.searchMessages(results, roomID: nil).map(\.id)) }
     }
-    func onUpdate(updates: [SearchServiceResultsUpdate]) { lock.withLock { results.apply(updates.map(\.change)) } }
+    var revision: Int { lock.withLock { updatesCount } }
+    func onUpdate(updates: [SearchServiceResultsUpdate]) {
+        lock.withLock {
+            results.apply(updates.map(\.change))
+            updatesCount += 1
+        }
+    }
 }
 
 /// The From and Date filters as the SDK's own search index reads them: a real client pages through synthetic history
@@ -93,5 +100,96 @@ struct SearchIndexTests {
         // A page of hits lands at once, after the query returns; every case finds fewer than all.
         _ = await eventually { !hits.eventIDs.isEmpty && hits.eventIDs != everything }
         return hits.eventIDs
+    }
+
+    // capability: search.messages
+    @Test(
+        "Prefix and multi-word queries match Russian and English word forms in a real index without crashing on punctuation"
+    )
+    func prefixAndMorphology() async throws {
+        let now = Date()
+        func message(_ id: String, _ body: String) -> [String: Any] {
+            [
+                "type": "m.room.message", "event_id": id, "sender": Self.alice,
+                "origin_server_ts": Int(now.timeIntervalSince1970 * 1_000),
+                "content": ["msgtype": "m.text", "body": body],
+            ]
+        }
+        let server = try await FakeHomeserver(
+            room: "!room:localhost",
+            messages: [
+                message("$ru-genitive", "жду инструменты для рассылок, под коммерцию и сканер"),
+                message("$ru-nominative", "Рассылка ушла всем клиентам"),
+                message("$ru-other", "нужны инструменты для сканера"),
+                message("$en-deploy", "Production deployment succeeded on staging"),
+                message("$punct", "Fixed C++ parser in foo:bar (test)"),
+                message("$tr-ist", "Flight from İST arrived"),
+                message("$cjk-long", "国際化対応を確認するために"),
+                message("$quoted", "Say foo \"bar\" baz once"),
+            ])
+        let scratch = try TemporaryDirectory()
+        let client = try await ClientBuilder().homeserverUrl(url: server.url).sessionPaths(
+            dataPath: scratch.path("data").path, cachePath: scratch.path("cache").path
+        ).withSearchIndexStore(path: scratch.path("index").path, password: nil).build()
+        try await client.restoreSession(
+            session: Session(
+                accessToken: "token", refreshToken: nil, userId: "@me:localhost", deviceId: "DEVICE",
+                homeserverUrl: server.url, oauthData: nil, slidingSyncVersion: .native))
+        let room = try await client.joinRoomById(roomId: server.room)
+        _ = try await room.timeline().paginateBackwards(numEvents: 20)
+
+        let hits = Hits()
+        let service = client.searchService()
+        let handle = await service.subscribeToResults(listener: hits)
+        defer { handle.cancel() }
+
+        // Wait for the event cache to index all 8 messages.
+        let allIDs: Set<String> = [
+            "$ru-genitive", "$ru-nominative", "$ru-other", "$en-deploy", "$punct", "$tr-ist", "$cjk-long", "$quoted",
+        ]
+        let deadline = ContinuousClock.now + .seconds(30)
+        repeat {
+            try await service.setQuery(
+                query: "сканер OR сканера OR deployment OR parser OR клиентам OR flight OR 国際化対応を確認するために OR say")
+        } while await !eventually(timeout: .milliseconds(200), { hits.eventIDs == allIDs })
+            && ContinuousClock.now < deadline
+        try #require(hits.eventIDs == allIDs)
+
+        func run(_ text: String, mode: MessageSearchQuery.Mode = .query, expectEmpty: Bool = false) async throws
+            -> Set<String>
+        {
+            let sdk = try #require(MessageSearchQuery(text, mode: mode).sdkQuery())
+            if expectEmpty {
+                // Reusing the populated service forces Tantivy to emit a real Clear diff when 0 hits match.
+                try await service.setQuery(query: "deployment")
+                _ = await eventually(timeout: .seconds(5)) { hits.eventIDs == ["$en-deploy"] }
+                try await service.setQuery(query: sdk)
+                _ = await eventually(timeout: .seconds(5)) { hits.eventIDs.isEmpty }
+                return hits.eventIDs
+            }
+            let queryHits = Hits()
+            let queryService = client.searchService()
+            let queryHandle = await queryService.subscribeToResults(listener: queryHits)
+            defer { queryHandle.cancel() }
+            try await queryService.setQuery(query: sdk)
+            _ = await eventually(timeout: .seconds(5)) { !queryHits.eventIDs.isEmpty }
+            return queryHits.eventIDs
+        }
+
+        // Russian prefix matches both "рассылок" and "Рассылка".
+        #expect(try await run("рассыл") == ["$ru-genitive", "$ru-nominative"])
+        // Multi-word search requires every term (AND), so "$ru-other" (which only has "инструменты") is excluded.
+        #expect(try await run("инструменты рассыл") == ["$ru-genitive"])
+        // English prefix matches "deployment".
+        #expect(try await run("deploy") == ["$en-deploy"])
+        // Punctuation and colons/parens never crash Tantivy's parser.
+        #expect(try await run("foo:bar (test)") == ["$punct"])
+        // Turkish dotted I, 39-byte CJK token, and escaped quotes match cleanly without Tantivy syntax errors.
+        #expect(try await run("İST") == ["$tr-ist"])
+        #expect(try await run("国際化対応を確認するために") == ["$cjk-long"])
+        #expect(try await run("\"foo \\\"bar\\\" baz\"") == ["$quoted"])
+        // Uppercase Tantivy operators and exact phrase mode return empty cleanly (clearing prior hits).
+        #expect(try await run("AND OR NOT TO", expectEmpty: true).isEmpty)
+        #expect(try await run("рассыл", mode: .phrase, expectEmpty: true).isEmpty)
     }
 }

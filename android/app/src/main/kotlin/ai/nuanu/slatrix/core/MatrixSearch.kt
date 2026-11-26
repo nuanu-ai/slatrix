@@ -8,6 +8,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,6 +33,7 @@ data class MessageSearchState(
     val hits: List<SearchHit> = emptyList(),
     val loading: Boolean = false,
     val endReached: Boolean = true,
+    val indexing: Boolean = false,
     val error: String? = null,
 )
 
@@ -39,45 +41,113 @@ data class MessageSearchState(
  * Searches messages through the SDK's local index, encrypted ones included. Each search gets its own service, so a
  * late page from the one before never lands in the new results.
  */
-class MatrixSearch(private val scope: CoroutineScope, private val client: Client) {
+class MatrixSearch(private val scope: CoroutineScope, private val client: Client,
+    private val backfillPollMillis: Long = 750L) {
+    private val lock = Any()
     private val mutableState = MutableStateFlow(MessageSearchState())
     val state: StateFlow<MessageSearchState> = mutableState.asStateFlow()
     private val generation = AtomicLong()
     private var job: Job? = null
     private var more: Channel<Unit>? = null
     private var backfill: TaskHandle? = null
+    private var backfillWatcher: Job? = null
+    private var activeQuery: MessageSearchQuery? = null
+    private var closed = false
 
     fun search(query: MessageSearchQuery) {
+        var newBackfill: TaskHandle? = null
+        synchronized(lock) {
+            if (closed) return
+            activeQuery = query
+            if (backfill == null) {
+                val handle = runCatching { client.runSearchBackfill(SearchBackfillStrategy.FOREGROUND) }.getOrNull()
+                if (handle != null) {
+                    backfill = handle
+                    if (!handle.isFinished()) newBackfill = handle
+                }
+            }
+        }
+        // The index holds only what this device has seen, so the first search also indexes recent history and refreshes
+        // the active query once indexing completes.
+        if (newBackfill != null) {
+            val watcher = scope.launch(Dispatchers.Default) {
+                while (!newBackfill.isFinished()) delay(backfillPollMillis)
+                mutableState.update { it.copy(indexing = false) }
+                refreshActiveAfterBackfill()
+            }
+            synchronized(lock) {
+                if (closed) watcher.cancel() else backfillWatcher = watcher
+            }
+        }
+        runQuery(query, keepExistingHits = false)
+    }
+
+    private fun refreshActiveAfterBackfill() {
+        val previousJob: Job?
+        synchronized(lock) {
+            if (closed) return
+            val query = activeQuery ?: return
+            previousJob = startQueryLocked(query, keepExistingHits = true)
+        }
+        previousJob?.cancel()
+    }
+
+    private fun runQuery(query: MessageSearchQuery, keepExistingHits: Boolean) {
+        val previousJob = synchronized(lock) {
+            if (closed) return
+            startQueryLocked(query, keepExistingHits)
+        }
+        previousJob?.cancel()
+    }
+
+    /** Installs a new search job under [lock] and returns any previous job to cancel outside the lock. */
+    private fun startQueryLocked(query: MessageSearchQuery, keepExistingHits: Boolean): Job? {
         val token = generation.incrementAndGet()
-        job?.cancel()
+        val previousJob = job
+        val isIndexing = backfill?.let { !it.isFinished() } == true
         val sdkQuery = query.sdkQuery()
         if (sdkQuery == null) {
-            mutableState.value = MessageSearchState(query)
-            return
+            job = null
+            more = null
+            mutableState.value = MessageSearchState(query, indexing = isIndexing)
+            return previousJob
         }
-        mutableState.value = MessageSearchState(query, loading = true, endReached = false)
-        // The index holds only what this device has seen, so the first search also indexes recent history.
-        if (backfill == null) backfill = runCatching { client.runSearchBackfill(SearchBackfillStrategy.FOREGROUND) }.getOrNull()
-        val requests = Channel<Unit>(Channel.CONFLATED).also { more = it }
+        val requests = Channel<Unit>(Channel.CONFLATED)
+        more = requests
+        mutableState.update { current ->
+            MessageSearchState(
+                query = query,
+                hits = if (keepExistingHits && current.query == query) current.hits else emptyList(),
+                loading = true,
+                endReached = false,
+                indexing = isIndexing,
+            )
+        }
         job = scope.launch(Dispatchers.Default) {
             // Checked inside the update, so a listener on an SDK thread can't land on a newer search's state.
             fun publish(change: (MessageSearchState) -> MessageSearchState) {
                 mutableState.update { if (generation.get() == token) change(it) else it }
             }
             val results = mutableListOf<SearchServiceResult>()
+            var queryReady = !keepExistingHits
             var handle: TaskHandle? = null
             try {
                 client.searchService().use { service ->
                     handle = service.subscribeToResults(object : SearchServiceResultsListener {
                         override fun onUpdate(updates: List<SearchServiceResultsUpdate>) {
-                            val hits = synchronized(results) {
+                            synchronized(results) {
                                 updates.forEach { results.apply(it) }
-                                results.mapNotNull { it.hit(query.roomId) }.distinctBy { it.roomId to it.eventId }
+                                val hits = results.mapNotNull { it.hit(query.roomId) }.distinctBy { it.roomId to it.eventId }
+                                if (queryReady || hits.isNotEmpty()) publish { it.copy(hits = hits) }
                             }
-                            publish { it.copy(hits = hits) }
                         }
                     })
                     service.setQuery(sdkQuery)
+                    synchronized(results) {
+                        queryReady = true
+                        val finalHits = results.mapNotNull { it.hit(query.roomId) }.distinctBy { it.roomId to it.eventId }
+                        publish { it.copy(hits = finalHits) }
+                    }
                     while (true) {
                         val pagination = service.paginationState()
                         val end = pagination is SearchServicePaginationState.Idle && pagination.endReached
@@ -96,22 +166,46 @@ class MatrixSearch(private val scope: CoroutineScope, private val client: Client
                 handle?.let { runCatching { it.cancel() }; it.close() }
             }
         }
+        return previousJob
     }
 
     /** Asks for the next page of the current search, once the one before has arrived. */
-    fun loadMore() { more?.trySend(Unit) }
+    fun loadMore() { synchronized(lock) { more }?.trySend(Unit) }
 
     fun clear() {
-        generation.incrementAndGet()
-        job?.cancel()
-        mutableState.value = MessageSearchState()
+        val previousJob: Job?
+        val isIndexing: Boolean
+        synchronized(lock) {
+            generation.incrementAndGet()
+            activeQuery = null
+            previousJob = job
+            job = null
+            more = null
+            isIndexing = backfill?.let { !it.isFinished() } == true
+        }
+        previousJob?.cancel()
+        mutableState.value = MessageSearchState(indexing = isIndexing)
     }
 
     suspend fun close() = withContext(NonCancellable) {
-        generation.incrementAndGet()
-        job?.cancelAndJoin()
-        backfill?.let { runCatching { it.cancel() }; it.close() }
-        backfill = null
+        val watcher: Job?
+        val activeJob: Job?
+        val handle: TaskHandle?
+        synchronized(lock) {
+            closed = true
+            generation.incrementAndGet()
+            activeQuery = null
+            watcher = backfillWatcher
+            backfillWatcher = null
+            activeJob = job
+            job = null
+            more = null
+            handle = backfill
+            backfill = null
+        }
+        watcher?.cancelAndJoin()
+        activeJob?.cancelAndJoin()
+        handle?.let { runCatching { it.cancel() }; it.close() }
     }
 
     private fun MutableList<SearchServiceResult>.apply(update: SearchServiceResultsUpdate) {

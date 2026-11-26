@@ -96,6 +96,31 @@ struct ForwardMessageTests {
         #expect(forwarding.sent == ["send"])
     }
 
+    // capability: message.forward
+    @Test(
+        "Forwarding sends the copy first, follows with a non-blank note, and never invites resend if only the note fails"
+    )
+    func forwardsOptionalNote() async throws {
+        let forwarding = Forwarding()
+        let review = try await forwarding.review()
+        _ = try await forwarding.service.forwardMessage(review, to: destinationID, note: "  Look at this  ")
+        #expect(forwarding.sent == ["send", "send"])
+
+        let blankForwarding = Forwarding()
+        let blankReview = try await blankForwarding.review()
+        _ = try await blankForwarding.service.forwardMessage(blankReview, to: destinationID, note: "   \n ")
+        #expect(blankForwarding.sent == ["send"])
+
+        // If the primary forward fails, the optional note is never sent.
+        let failedPrimary = Forwarding()
+        let failedReview = try await failedPrimary.review()
+        failedPrimary.destination.timeline.failsNextWrites = 1
+        await #expect(throws: Error.self) {
+            _ = try await failedPrimary.service.forwardMessage(failedReview, to: destinationID, note: "Follow-up")
+        }
+        #expect(failedPrimary.sent == ["send"])
+    }
+
     enum Unforwardable: String, CaseIterable, CustomTestStringConvertible {
         case deleted, customType, localEcho, otherEvent, otherSender, pendingEdit, pendingDeletion
         var testDescription: String { rawValue }

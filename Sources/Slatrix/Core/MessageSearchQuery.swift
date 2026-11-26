@@ -1,13 +1,19 @@
 import Foundation
 
 /// A message search: the text, and Slack's filters. Serializes for the SDK's existing Tantivy query parser, whose
-/// index has `body`, `sender` (an exact user ID) and `date` fields. Phrase mode uses one literal: the pinned grammar
-/// consumes backslash + any character inside double quotes (tantivy-query-grammar 0.26, simple_term).
+/// index has `body`, `sender` (an exact user ID) and `date` fields. Query mode requires every word (AND), expands
+/// 3+ character words into exact-boosted prefix ranges so inflected forms (such as Russian stems) match, supports
+/// quoted phrases and `-term` exclusions, and strips raw punctuation so normal queries never fail parsing.
 struct MessageSearchQuery: Hashable {
     enum Mode: String, CaseIterable, Hashable {
         case query = "Query"
         case phrase = "Phrase"
     }
+    private static let prefixUpperSuffix = "\u{FF5A}"
+    private static let minPrefixLength = 3
+    // Tantivy's default RemoveLongFilter drops tokens over 40 UTF-8 bytes; reserve 3 bytes for U+FF5A.
+    private static let maxPrefixUTF8Bytes = 37
+
     let text: String
     var mode: Mode
     /// One conversation's hits; each room has its own index, so this filters hits rather than the query.
@@ -26,15 +32,163 @@ struct MessageSearchQuery: Hashable {
     }
 
     func sdkQuery(now: Date = Date(), calendar: Calendar = .current) -> String? {
-        let body = text.isEmpty ? nil : mode == .query ? text : Self.literal(text)
         var filters: [String] = []
         if let senderID { filters.append("+sender:" + Self.literal(senderID)) }
         if let date {
             let since = ISO8601DateFormatter().string(from: date.since(now, calendar: calendar))
             filters.append("+date:[\(since) TO *]")
         }
-        guard !filters.isEmpty else { return body }
-        return ((body.map { mode == .query ? ["+(\($0))"] : ["+" + $0] } ?? []) + filters).joined(separator: " ")
+        guard !text.isEmpty else { return filters.isEmpty ? nil : filters.joined(separator: " ") }
+        if mode == .phrase {
+            let phrase = Self.literal(text)
+            guard !filters.isEmpty else { return phrase }
+            return (["+" + phrase] + filters).joined(separator: " ")
+        }
+        let parsed = Self.tokenize(text)
+        var positive = parsed.positive
+        var negative = parsed.negative
+        if positive.isEmpty && filters.isEmpty {
+            if !negative.isEmpty {
+                guard roomID == nil else { return nil }
+                positive = negative
+                negative = []
+            } else {
+                positive = [Self.literal(text)]
+            }
+        }
+        if positive.count == 1 && negative.isEmpty && filters.isEmpty { return positive[0] }
+        return (positive.map { "+" + $0 } + negative.map { "-" + $0 } + filters).joined(separator: " ")
+    }
+
+    private struct Tokenized {
+        var positive: [String] = []
+        var negative: [String] = []
+        var exactHighlights: [String] = []
+        var prefixHighlights: [String] = []
+        var negativeExactHighlights: [String] = []
+        var negativePrefixHighlights: [String] = []
+    }
+
+    private static func tokenize(_ input: String) -> Tokenized {
+        var result = Tokenized()
+        let scalars = input.unicodeScalars
+        var index = scalars.startIndex
+        while index < scalars.endIndex {
+            while index < scalars.endIndex, scalars[index].properties.isWhitespace {
+                index = scalars.index(after: index)
+            }
+            guard index < scalars.endIndex else { break }
+            var negated = false
+            if scalars[index] == "-" {
+                let next = scalars.index(after: index)
+                if next < scalars.endIndex, scalars[next] == "\"" || isWordScalar(scalars[next]) {
+                    negated = true
+                    index = next
+                }
+            }
+            if scalars[index] == "\"" {
+                let contentStart = scalars.index(after: index)
+                if let (inner, afterClosing) = scanQuoted(scalars, from: contentStart) {
+                    index = afterClosing
+                    let trimmed = inner.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty {
+                        let clause = literal(trimmed)
+                        if negated {
+                            result.negative.append(clause)
+                            result.negativeExactHighlights.append(contentsOf: words(in: trimmed))
+                        } else {
+                            result.positive.append(clause)
+                            result.exactHighlights.append(contentsOf: words(in: trimmed))
+                        }
+                    }
+                    continue
+                }
+                index = contentStart
+                continue
+            }
+            var chunkEnd = index
+            while chunkEnd < scalars.endIndex, !scalars[chunkEnd].properties.isWhitespace, scalars[chunkEnd] != "\"" {
+                chunkEnd = scalars.index(after: chunkEnd)
+            }
+            let chunk = String(scalars[index..<chunkEnd])
+            index = chunkEnd
+            for raw in rawWords(in: chunk) {
+                let (clause, lower, isPrefix) = wordClause(raw)
+                if negated {
+                    result.negative.append(clause)
+                    if isPrefix {
+                        result.negativePrefixHighlights.append(lower)
+                    } else {
+                        result.negativeExactHighlights.append(lower)
+                    }
+                } else {
+                    result.positive.append(clause)
+                    if isPrefix {
+                        result.prefixHighlights.append(lower)
+                    } else {
+                        result.exactHighlights.append(lower)
+                    }
+                }
+            }
+        }
+        return result
+    }
+
+    private static func scanQuoted(
+        _ scalars: String.UnicodeScalarView, from start: String.UnicodeScalarView.Index
+    ) -> (String, String.UnicodeScalarView.Index)? {
+        var content = String.UnicodeScalarView()
+        var index = start
+        while index < scalars.endIndex {
+            let scalar = scalars[index]
+            if scalar == "\\" {
+                let next = scalars.index(after: index)
+                if next < scalars.endIndex {
+                    let escaped = scalars[next]
+                    if escaped != "\"" && escaped != "\\" { content.append(scalar) }
+                    content.append(escaped)
+                    index = scalars.index(after: next)
+                    continue
+                }
+            }
+            if scalar == "\"" {
+                return (String(content), scalars.index(after: index))
+            }
+            content.append(scalar)
+            index = scalars.index(after: index)
+        }
+        return nil
+    }
+
+    /// Matches Rust's `char::is_alphanumeric()` (Unicode Letter and Number general categories, excluding combining
+    /// marks), so generated range bounds never split into multiple Tantivy tokens.
+    private static func isWordScalar(_ scalar: UnicodeScalar) -> Bool {
+        switch scalar.properties.generalCategory {
+        case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter,
+            .decimalNumber, .letterNumber, .otherNumber:
+            true
+        default:
+            false
+        }
+    }
+
+    private static func rawWords(in value: String) -> [String] {
+        value.unicodeScalars.split { !isWordScalar($0) }.map(String.init).filter { !$0.isEmpty }
+    }
+
+    private static func words(in value: String) -> [String] {
+        rawWords(in: value).map { $0.lowercased() }
+    }
+
+    private static func wordClause(_ raw: String) -> (clause: String, lower: String, isPrefix: Bool) {
+        let lower = raw.lowercased()
+        let lowerClean = lower.unicodeScalars.allSatisfy(isWordScalar)
+        if lowerClean && lower.unicodeScalars.count >= minPrefixLength && lower.utf8.count <= maxPrefixUTF8Bytes {
+            return ("(body:\(lower)^2 OR body:[\(lower) TO \(lower)\(prefixUpperSuffix)])", lower, true)
+        }
+        // Keep the original token if lowercasing introduces combining marks (e.g. Turkish İ -> i + U+0307) so Tantivy's
+        // SimpleTokenizer keeps it as one token before its LowerCaser runs.
+        return ("body:\(lowerClean ? lower : raw)", lower, false)
     }
 
     private static func literal(_ value: String) -> String {
@@ -79,20 +233,38 @@ struct MessageSearchQuery: Hashable {
         return MessageSearchQuery(text.joined(separator: " "), roomID: roomID, senderID: senderID)
     }
 
-    /// Where the words the index matched appear in `body`. The index lowercases whole words split at anything that
-    /// isn't a letter or digit, so a match is a whole word in any case.
+    /// Where the words the index matched appear in `body`. Phrase mode and quoted phrases mark exact whole words;
+    /// unquoted query terms mark words starting with any 3+ character positive term or matching a shorter term exactly.
     func highlights(in body: String) -> [Range<String.Index>] {
-        let operators: Set<String> = mode == .query ? ["AND", "OR", "NOT"] : []
-        let terms = Set(
-            text.split { !$0.isLetter && !$0.isNumber }.map(String.init).filter { !operators.contains($0) }.map {
-                $0.lowercased()
-            })
+        let exactTerms: [String]
+        let prefixTerms: [String]
+        if mode == .phrase {
+            exactTerms = Self.words(in: text)
+            prefixTerms = []
+        } else {
+            let parsed = Self.tokenize(text)
+            if parsed.positive.isEmpty && roomID == nil && senderID == nil && date == nil && !parsed.negative.isEmpty {
+                exactTerms = parsed.negativeExactHighlights
+                prefixTerms = parsed.negativePrefixHighlights
+            } else {
+                exactTerms = parsed.exactHighlights
+                prefixTerms = parsed.prefixHighlights
+            }
+        }
+        guard !exactTerms.isEmpty || !prefixTerms.isEmpty else { return [] }
         var ranges: [Range<String.Index>] = []
-        var start = body.startIndex
-        while start < body.endIndex {
-            guard let wordStart = body[start...].firstIndex(where: { $0.isLetter || $0.isNumber }) else { break }
-            let wordEnd = body[wordStart...].firstIndex { !$0.isLetter && !$0.isNumber } ?? body.endIndex
-            if terms.contains(body[wordStart..<wordEnd].lowercased()) { ranges.append(wordStart..<wordEnd) }
+        let scalars = body.unicodeScalars
+        var start = scalars.startIndex
+        while start < scalars.endIndex {
+            guard let wordStart = scalars[start...].firstIndex(where: Self.isWordScalar) else { break }
+            let wordEnd = scalars[wordStart...].firstIndex { !Self.isWordScalar($0) } ?? scalars.endIndex
+            let lower = String(scalars[wordStart..<wordEnd]).lowercased()
+            let matched =
+                exactTerms.contains(lower)
+                || prefixTerms.contains { term in
+                    term.unicodeScalars.count >= Self.minPrefixLength ? lower.hasPrefix(term) : lower == term
+                }
+            if matched { ranges.append(wordStart..<wordEnd) }
             start = wordEnd
         }
         return ranges

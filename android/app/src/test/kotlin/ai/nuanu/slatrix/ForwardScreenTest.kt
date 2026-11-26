@@ -9,8 +9,8 @@ import ai.nuanu.slatrix.ui.account.ForwardScreen
 import ai.nuanu.slatrix.ui.designsystem.SlatrixTheme
 import android.app.Application
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -30,21 +30,30 @@ class ForwardScreenTest {
     @get:Rule val compose = createComposeRule()
 
     // capability: message.forward
-    @Test fun theMessageShowsAndAConversationFoundByNameReceivesIt() {
+    @Test fun theMessageShowsAndAConversationFoundByNameReceivesItWithAnOptionalNote() {
         val design = RoomSummary("!design:example.org", "design", false, "", UnreadBadge.None, "D", 0)
         val rooms = listOf(design, RoomSummary("!general:example.org", "general", false, "", UnreadBadge.None, "G", 1),
             RoomSummary("!sam:example.org", "Sam Okafor", true, "", UnreadBadge.None, "SO", 2))
         val message = ConversationMessage("m", "\$m", "@mira:example.org", "Mira Chen", "Launch moves to Thursday", null,
             1_700_000_000_000L, MessageKind.Text, MessageSendState.Sent, false, "MC", 0)
-        val forwarded = mutableListOf<String>()
-        compose.setContent { SlatrixTheme { ForwardScreen(message, design, rooms, { null }, { forwarded += it.id }) {} } }
+        val forwarded = mutableListOf<Pair<String, String>>()
+        compose.setContent {
+            SlatrixTheme {
+                ForwardScreen(message, design, rooms, { room, note ->
+                    forwarded += room.id to note
+                    null
+                }, {}) {}
+            }
+        }
 
         compose.onNodeWithText("Launch moves to Thursday").assertExists()
         compose.onNodeWithText("Mira Chen").assertExists()
-        compose.onNode(hasSetTextAction()).performTextInput("gen")
+        compose.onNodeWithText("Add by name or channel").performTextInput("gen")
         compose.onNodeWithText("Sam Okafor").assertDoesNotExist()
         compose.onNodeWithText("general").performClick()
-        compose.runOnIdle { assertEquals(listOf("!general:example.org"), forwarded) }
+        compose.onNodeWithContentDescription("Optional message").performTextInput("Take a look")
+        compose.onNodeWithText("Forward").performClick()
+        compose.runOnIdle { assertEquals(listOf("!general:example.org" to "Take a look"), forwarded) }
     }
 
     @Test fun aRefusalStaysOnThePageAndATapWhileSendingSendsNothingMore() {
@@ -56,10 +65,13 @@ class ForwardScreenTest {
         var asked = 0
         var forwarded = 0
         compose.setContent {
-            SlatrixTheme { ForwardScreen(message, design, listOf(design, news), { asked++; answer.await() }, { forwarded++ }) {} }
+            SlatrixTheme {
+                ForwardScreen(message, design, listOf(design, news), { _, _ -> asked++; answer.await() }, { forwarded++ }) {}
+            }
         }
         compose.onNodeWithText("news").performClick()
-        compose.onNodeWithText("news").performClick()
+        compose.onNodeWithText("Forward").performClick()
+        compose.onNodeWithText("Forward").performClick()
         answer.complete("You can’t post in that conversation. Choose another.")
         compose.onNodeWithText("You can’t post in that conversation. Choose another.").assertIsDisplayed()
         compose.runOnIdle {
